@@ -1,0 +1,52 @@
+# Eclipse Roguelike — Plan Index
+
+A single-player, browser-only roguelike inspired by Eclipse (the board game):
+the player counter-builds a small fleet against telegraphed enemies across a
+branching run map. React + TypeScript + Vite, no backend, Vitest.
+
+## How the plan is organized
+
+Specs live in `plans/`, **one file per iteration**. This file is just the
+index — full specs, tests, milestones, and implementation notes live in the
+iteration files.
+
+Rules for working with these files:
+
+- **Implementers:** read only the iteration file you are implementing (plus
+  the codebase — the code and its tests, not the older plan files, are the
+  source of truth for current behavior). Record your status notes,
+  deviations, and verification results **in that same iteration file**, in
+  the established style (status blockquote at the top, notes at the end).
+- **Authority:** later iterations override earlier ones wherever they
+  conflict. The older files are kept as history and rationale, not as
+  current rules.
+- **Planning** happens in chat and lands as a new `plans/iteration-N.md`;
+  ideas that were discussed but deferred or rejected are in
+  `plans/parking-lot.md` (including explicit "decided against" entries — do
+  not relitigate those without new evidence).
+
+## Status
+
+| Iteration | Theme | Status |
+|---|---|---|
+| [1](plans/iteration-1.md) | MVP: core rules, resolver, forecast, 9-fight gauntlet | implemented |
+| [2](plans/iteration-2.md) | Fleet building, credits + trade station | implemented |
+| [3](plans/iteration-3.md) | Branching map, events, reaction cards, persistent damage | implemented |
+| [4](plans/iteration-4.md) | Reward screen, ship upgrades, enemy escalation + intel | implemented |
+| [5](plans/iteration-5.md) | Combat & fleet depth: retreat, exotic weapons, taunt/Bastion, boss variety | implemented |
+| [6](plans/iteration-6.md) | Strategic layer: fog of war, info broker, quests, commanders | implemented |
+| [7](plans/iteration-7.md) | Arsenal & tactics: new weapons/defenses, active parts, card + intel-currency reworks, shop rework | implemented |
+| [8](plans/iteration-8.md) | The long war: two-act map, safe opener, veterancy scaling, act-2 roster, final bosses, Dreadnought (+ addendum: Jink, job stakes, chaff, upgrade cap) | implemented |
+| [9](plans/iteration-9.md) | Persistence (localStorage saves + full-run determinism), mixed formations + targeting doctrine, Cruiser frame | implemented |
+| [10](plans/iteration-10.md) | Space-game visual overhaul: design system, starchart map, ship silhouettes, animated combat theater (presentation only) | implemented (partial — see iteration-10.md deviations) |
+| [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
+
+## Standing notes
+
+- **Balance gate suspended as of iteration 5:** `npm run balance` and its
+  sanity targets are not a milestone gate until further notice — numbers are
+  eyeballed and tuned by live play testing. The in-game forecast bar and the
+  deterministic unit tests are NOT suspended. Details in
+  [iteration-5](plans/iteration-5.md).
+- Verification bar for every milestone: `npm test` green, `tsc -b` clean,
+  `vite build` clean.

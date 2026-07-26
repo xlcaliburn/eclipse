@@ -1,0 +1,78 @@
+import { getPart } from '../game/parts';
+import { deriveStats, effectiveSlots, playerShipLabel } from '../game/ship';
+import type { PartId, PlayerShipState } from '../game/types';
+import { getUpgrade } from '../game/upgrades';
+import { PartCard } from './PartCard';
+
+interface FleetOverlayProps {
+  fleet: PlayerShipState[];
+  inventory: PartId[];
+  credits: number;
+  intel: number;
+  onClose: () => void;
+}
+
+// A read-only snapshot of the fleet + inventory + credit/intel balance,
+// viewable as a popup from the map, a shop, or an event — so the player can
+// check "what do I have" without leaving whatever they're doing.
+export function FleetOverlay({ fleet, inventory, credits, intel, onClose }: FleetOverlayProps) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-panel__header">
+          <h2>Your fleet</h2>
+          <div className="credits-badge">{credits} credits</div>
+          <div className="credits-badge credits-badge--intel">{intel} intel</div>
+        </div>
+
+        {fleet.map((ship, shipIndex) => {
+          const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades);
+          const emptySlots = effectiveSlots(ship.frameId, ship.upgrades) - ship.equipped.length;
+          return (
+            <div key={shipIndex} className="ship-card">
+              <div className="ship-card__header">
+                <span className="ship-card__name">{playerShipLabel(fleet, shipIndex)}</span>
+                <span className="ship-card__stats">
+                  HP {Math.max(0, stats.hp - ship.damage)}/{stats.hp} · Init {stats.initiative} · Comp{' '}
+                  {stats.computer} · Shield {stats.shield}
+                </span>
+              </div>
+              {ship.upgrades.length > 0 && (
+                <div className="ship-card__upgrades">
+                  {ship.upgrades.map((upgradeId, i) => (
+                    <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
+                      {getUpgrade(upgradeId).name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="slot-grid">
+                {ship.equipped.map((partId, i) => (
+                  <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
+                ))}
+                {Array.from({ length: emptySlots }).map((_, i) => (
+                  <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty hardpoint" />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+
+        <h3>Inventory</h3>
+        {inventory.length === 0 ? (
+          <p className="hint">No spare parts.</p>
+        ) : (
+          <div className="inventory-grid">
+            {inventory.map((partId, i) => (
+              <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
+            ))}
+          </div>
+        )}
+
+        <button type="button" className="continue-button" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
