@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { canPlayCard, canUseActive } from '../game/combatEngine';
 import type { CombatState } from '../game/combatEngine';
 import { getCard } from '../game/cards';
@@ -10,6 +10,8 @@ import type { UpgradeId } from '../game/upgrades';
 import { classifyArchetype } from './ShipSilhouette';
 import { ActiveSparkIcon } from './PartIcon';
 import { CombatFleetView } from './CombatFleetView';
+import { TheaterFxLayer } from './TheaterFx';
+import type { FxItem, FxSpawn } from './TheaterFx';
 import { usePrefersReducedMotion } from './useReducedMotion';
 
 // ~1.5s replay budget per round (10.5) — spread evenly across however many
@@ -38,14 +40,18 @@ interface CombatScreenProps {
 // Resolves a flattened enemy-side index (see combatEngine.ts's initCombat,
 // which lays sub-groups out in order) back to the group it came from, plus
 // that ship's position within its own group.
-function resolveGroup(enemy: EnemyDef, index: number): { group: EnemyGroup; withinGroupIndex: number } {
+function resolveGroup(
+  enemy: EnemyDef,
+  index: number,
+): { group: EnemyGroup; groupIndex: number; withinGroupIndex: number } {
   let remaining = index;
-  for (const group of enemy.groups) {
-    if (remaining < group.count) return { group, withinGroupIndex: remaining };
+  for (let g = 0; g < enemy.groups.length; g++) {
+    const group = enemy.groups[g];
+    if (remaining < group.count) return { group, groupIndex: g, withinGroupIndex: remaining };
     remaining -= group.count;
   }
-  const last = enemy.groups[enemy.groups.length - 1];
-  return { group: last, withinGroupIndex: 0 };
+  const groupIndex = enemy.groups.length - 1;
+  return { group: enemy.groups[groupIndex], groupIndex, withinGroupIndex: 0 };
 }
 
 function shipLabel(
@@ -179,8 +185,83 @@ export function CombatScreen({
     tickTimerRef.current = window.setTimeout(tick, perTickMs);
   }, [combat.log.length, reducedMotion]);
 
+  // Iteration 12.2: transient fx spawned per revealed event, drawn between
+  // the *measured* centers of the ship cards involved. Cards register their
+  // elements; centers are computed relative to the theater container at
+  // spawn time.
+  const theaterRef = useRef<HTMLDivElement>(null);
+  const shipElsRef = useRef(new Map<string, HTMLElement>());
+  const [fx, setFx] = useState<FxItem[]>([]);
+  const fxKeyRef = useRef(0);
+  const prevRevealedRef = useRef(revealedCount);
+
+  const registerShipEl = useCallback((side: Side, index: number, el: HTMLElement | null) => {
+    const key = `${side}:${index}`;
+    if (el) shipElsRef.current.set(key, el);
+    else shipElsRef.current.delete(key);
+  }, []);
+
+  const centerOf = useCallback((side: Side, index: number): { x: number; y: number } | null => {
+    const container = theaterRef.current;
+    const el = shipElsRef.current.get(`${side}:${index}`);
+    if (!container || !el) return null;
+    const cRect = container.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - cRect.left, y: r.top + r.height / 2 - cRect.top };
+  }, []);
+
+  useEffect(() => {
+    const prev = prevRevealedRef.current;
+    prevRevealedRef.current = revealedCount;
+    // Only single-step reveals (the replay ticking) spawn fx — fresh mounts,
+    // fast-forwards, and auto-resolve jumps stay visually silent.
+    if (reducedMotion || revealedCount - prev !== 1) return;
+    const event = combat.log[revealedCount - 1];
+    if (!event) return;
+
+    const spawned: FxItem[] = [];
+    const push = (item: FxSpawn, ttlMs: number) => {
+      const key = ++fxKeyRef.current;
+      spawned.push({ ...item, key } as FxItem);
+      window.setTimeout(() => setFx((all) => all.filter((i) => i.key !== key)), ttlMs);
+    };
+
+    if (event.kind === 'roll') {
+      const from = centerOf(event.side, event.shooterIndex);
+      const to = centerOf(event.side === 'player' ? 'enemy' : 'player', event.targetIndex);
+      if (from && to) {
+        const lastPhase = [...combat.log.slice(0, revealedCount)].reverse().find((e) => e.kind === 'phase-start');
+        const missile = lastPhase?.kind === 'phase-start' && lastPhase.phase === 'missile';
+        if (event.hit) {
+          push({ kind: 'tracer', x1: from.x, y1: from.y, x2: to.x, y2: to.y, side: event.side, missile, veer: false }, 650);
+          push({ kind: 'damage', x: to.x, y: to.y - 34, text: `−${event.damage}` }, 1000);
+        } else if (event.raw === 1) {
+          // Natural 1 (or a jink) — the shot veers wide past the card.
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          push(
+            { kind: 'tracer', x1: from.x, y1: from.y, x2: to.x + dx * 0.3, y2: to.y + dy * 0.3 - 44, side: event.side, missile, veer: true },
+            650,
+          );
+        } else {
+          // Blocked by shields/evasion — tracer lands, shield ripple blooms.
+          push({ kind: 'tracer', x1: from.x, y1: from.y, x2: to.x, y2: to.y, side: event.side, missile, veer: false }, 650);
+          push({ kind: 'ripple', x: to.x, y: to.y }, 700);
+        }
+      }
+    } else if (event.kind === 'destroyed') {
+      const at = centerOf(event.side, event.shipIndex);
+      if (at) push({ kind: 'shards', x: at.x, y: at.y }, 1100);
+    } else if (event.kind === 'card' || event.kind === 'part-effect') {
+      push({ kind: 'banner', text: event.text }, 1500);
+    }
+
+    if (spawned.length > 0) setFx((all) => [...all, ...spawned]);
+  }, [revealedCount, reducedMotion, combat.log, centerOf]);
+
   function handleAutoResolve() {
     skipNextReplayRef.current = true;
+    setFx([]);
     onAutoResolve();
   }
 
@@ -189,6 +270,7 @@ export function CombatScreen({
       window.clearTimeout(tickTimerRef.current);
       tickTimerRef.current = null;
     }
+    setFx([]);
     setRevealedCount(combat.log.length);
   }
 
@@ -226,10 +308,12 @@ export function CombatScreen({
 
       {/* Click anywhere in the theater to fast-forward the round replaying. */}
       <div
+        ref={theaterRef}
         className={`combat-theater${isReplaying ? ' combat-theater--replaying' : ''}`}
         onClick={isReplaying ? fastForwardReplay : undefined}
         title={isReplaying ? 'Click to skip ahead' : undefined}
       >
+        <TheaterFxLayer fx={fx} />
         <CombatFleetView
           playerShips={combat.playerShips}
           enemyShips={combat.enemyShips}
@@ -239,14 +323,18 @@ export function CombatScreen({
           enemyName={enemy.name}
           enemyLabels={combat.enemyShips.map((_, i) => shipLabel('enemy', i, enemy, playerLabels))}
           enemyArchetypes={combat.enemyShips.map((_, i) => {
-            const { group } = resolveGroup(enemy, i);
-            return classifyArchetype(enemy.id, group);
+            const { group, groupIndex } = resolveGroup(enemy, i);
+            return classifyArchetype(enemy.id, group, groupIndex);
           })}
           activeAttacker={activeAttacker}
           activeTarget={activeTarget}
+          onShipEl={registerShipEl}
         />
       </div>
 
+      {/* Open by default — the log is the fight, not an appendix. React only
+          patches `open` when the prop itself changes, so collapsing it by
+          hand survives the re-render on every revealed event. */}
       <details className="combat-log" open>
         <summary>Play-by-play</summary>
         <ol className="combat-log__list" ref={logRef}>
@@ -263,6 +351,39 @@ export function CombatScreen({
       </details>
 
       <div className="combat-command-bar">
+      {/* Actions first — most critical tap target on mobile */}
+      <div className="combat-screen__actions">
+        {!finished && (
+          <>
+            <button
+              type="button"
+              className="continue-button"
+              disabled={isReplaying}
+              onClick={onAdvanceRound}
+            >
+              Next round
+            </button>
+            <button type="button" className="shop-button" disabled={isReplaying} onClick={handleAutoResolve}>
+              Auto-resolve
+            </button>
+            <button
+              type="button"
+              className="withdraw-button"
+              disabled={!withdrawEnabled || isReplaying}
+              onClick={onWithdraw}
+              title="Keep damage, forfeit reward, node is lost"
+            >
+              Withdraw
+            </button>
+          </>
+        )}
+        {finished && (
+          <button type="button" className="continue-button" disabled={isReplaying} onClick={onContinue}>
+            Continue
+          </button>
+        )}
+      </div>
+
       {!finished && (
         <div className="combat-hand">
           <h3>Your hand</h3>
@@ -324,38 +445,6 @@ export function CombatScreen({
           )}
         </div>
       )}
-
-      <div className="combat-screen__actions">
-        {!finished && (
-          <>
-            <button
-              type="button"
-              className="continue-button"
-              disabled={isReplaying}
-              onClick={onAdvanceRound}
-            >
-              Next round
-            </button>
-            <button type="button" className="shop-button" disabled={isReplaying} onClick={handleAutoResolve}>
-              Auto-resolve
-            </button>
-            <button
-              type="button"
-              className="withdraw-button"
-              disabled={!withdrawEnabled || isReplaying}
-              onClick={onWithdraw}
-              title="Keep damage, forfeit reward, node is lost"
-            >
-              Withdraw
-            </button>
-          </>
-        )}
-        {finished && (
-          <button type="button" className="continue-button" disabled={isReplaying} onClick={onContinue}>
-            Continue
-          </button>
-        )}
-      </div>
       </div>
       {!finished && !canWithdraw && (
         <p className="hint">No line of retreat here — this fight must be finished.</p>

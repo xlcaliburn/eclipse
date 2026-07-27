@@ -3,7 +3,17 @@ import type { RunState } from './types';
 // Bump whenever RunState's shape changes incompatibly — no migrations at
 // this stage (post-1.0 problem); a version mismatch just discards the old
 // save silently and offers a new run instead.
-export const SAVE_VERSION = 1;
+//
+// v2 (iteration 9/10 cleanup): several required fields (`rngCounter`,
+// `targetingStance`, etc.) were added to RunState across iteration 9 without
+// bumping this, so a save written before they existed was accepted as valid
+// and loaded with those fields `undefined`. App.tsx renders each non-trivial
+// phase behind an extra guard (e.g. `phase === 'combat' && combat &&
+// currentEnemy`) with no fallback branch, so a save missing the right
+// companion field for its phase rendered nothing at all — a blank screen,
+// no error. Bumping the version discards those old saves; `isValidRunState`
+// below catches the same shape of bug for any future schema drift.
+export const SAVE_VERSION = 2;
 const SAVE_KEY = 'eclipse.save.v1';
 
 interface SaveEnvelope {
@@ -45,9 +55,37 @@ export function saveRun(state: RunState, storage: StorageLike | null = defaultSt
   }
 }
 
-// Never throws. Returns null on: no storage, no save, corrupt JSON, or a
-// version mismatch — every one of those cases means "act as if there is no
-// save" (offer only New run).
+// Mirrors the extra per-phase guards App.tsx's render checks beyond
+// `phase` itself (e.g. `phase === 'combat' && combat && currentEnemy`) —
+// those have no fallback branch, so a save whose phase and companion field
+// have drifted apart renders nothing. Also checks a few always-required
+// fields added to RunState after saving already shipped, so a save from an
+// older schema doesn't come back with them silently `undefined`.
+function isValidRunState(state: RunState): boolean {
+  if (!state || typeof state !== 'object') return false;
+  if (typeof state.rngCounter !== 'number') return false;
+  if (state.targetingStance !== 'weakest' && state.targetingStance !== 'strongest') return false;
+  if (state.act !== 1 && state.act !== 2) return false;
+  if (!Array.isArray(state.fleet)) return false;
+  switch (state.phase) {
+    case 'combat':
+      return !!state.combat && !!state.currentEnemy;
+    case 'reward':
+      return !!state.pendingReward;
+    case 'shop':
+      return !!state.shopOffers;
+    case 'repair':
+      return !!state.repairSummary;
+    case 'event':
+      return !!state.currentEvent;
+    default:
+      return true;
+  }
+}
+
+// Never throws. Returns null on: no storage, no save, corrupt JSON, a
+// version mismatch, or a structurally invalid state — every one of those
+// cases means "act as if there is no save" (offer only New run).
 export function loadRun(storage: StorageLike | null = defaultStorage()): RunState | null {
   if (!storage) return null;
   try {
@@ -55,6 +93,7 @@ export function loadRun(storage: StorageLike | null = defaultStorage()): RunStat
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SaveEnvelope>;
     if (parsed.version !== SAVE_VERSION || !parsed.state) return null;
+    if (!isValidRunState(parsed.state)) return null;
     return parsed.state;
   } catch {
     return null;

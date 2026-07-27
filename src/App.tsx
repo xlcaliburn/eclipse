@@ -83,7 +83,9 @@ function App() {
     return (
       <>
         <Starfield />
-        <LandingScreen onContinue={() => setAwaitingBootChoice(false)} onNewRun={handleNewRun} />
+        <div className="app">
+          <LandingScreen onContinue={() => setAwaitingBootChoice(false)} onNewRun={handleNewRun} />
+        </div>
       </>
     );
   }
@@ -106,12 +108,35 @@ function App() {
   );
 
   const showHud = state.phase !== 'commander' && state.phase !== 'setup';
+  // Peeking at the chart is safe from anywhere mid-run: PICK_NODE is guarded
+  // to the 'map' phase, so a peek can never move the fleet by accident.
+  const canPeekMap =
+    showHud && state.phase !== 'map' && state.phase !== 'victory' && state.phase !== 'defeat';
+
+  if (viewingMap && canPeekMap) {
+    return (
+      <>
+        <Starfield act={state.act} />
+        <div className="app">
+          <HudBar credits={state.credits} intel={state.intel} />
+          {mapPeek(() => setViewingMap(false))}
+        </div>
+      </>
+    );
+  }
 
   return (
+    <>
+    <Starfield act={state.act} />
     <div className="app">
-      <Starfield act={state.act} />
       {warping && <div className="warp-transition" aria-hidden="true" />}
-      {showHud && <HudBar credits={state.credits} intel={state.intel} />}
+      {showHud && (
+        <HudBar
+          credits={state.credits}
+          intel={state.intel}
+          onViewMap={canPeekMap ? () => setViewingMap(true) : undefined}
+        />
+      )}
       {savingUnavailable && <p className="warning">Saving unavailable — this run won't be saved if you close the tab.</p>}
 
       {state.phase === 'commander' && (
@@ -142,8 +167,6 @@ function App() {
           escalations={state.escalations}
           bossRevealed={state.bossRevealed}
           activeQuest={state.activeQuest}
-          credits={state.credits}
-          intel={state.intel}
           onViewFleet={() => setViewingFleet(true)}
           onAbandon={handleAbandon}
           onPickNode={(row) => dispatch({ type: 'PICK_NODE', row })}
@@ -179,9 +202,7 @@ function App() {
         />
       )}
 
-      {state.phase === 'shop' && state.shopOffers && (viewingMap ? (
-        mapPeek(() => setViewingMap(false))
-      ) : (
+      {state.phase === 'shop' && state.shopOffers && (
         <ShopScreen
           credits={state.credits}
           intel={state.intel}
@@ -209,7 +230,7 @@ function App() {
           onEquip={(shipIndex, partId) => dispatch({ type: 'EQUIP', shipIndex, partId })}
           onUnequip={(shipIndex, partId) => dispatch({ type: 'UNEQUIP', shipIndex, partId })}
         />
-      ))}
+      )}
 
       {state.phase === 'interlude' && (
         <InterludeScreen
@@ -222,9 +243,7 @@ function App() {
         <RepairScreen summary={state.repairSummary} onContinue={() => dispatch({ type: 'LEAVE_REPAIR' })} />
       )}
 
-      {state.phase === 'event' && state.currentEvent && (viewingMap ? (
-        mapPeek(() => setViewingMap(false))
-      ) : (
+      {state.phase === 'event' && state.currentEvent && (
         <EventScreen
           event={state.currentEvent}
           onChoose={(choiceIndex) => dispatch({ type: 'EVENT_CHOOSE', choiceIndex })}
@@ -232,7 +251,7 @@ function App() {
           onViewMap={() => setViewingMap(true)}
           onViewFleet={() => setViewingFleet(true)}
         />
-      ))}
+      )}
 
       {(state.phase === 'victory' || state.phase === 'defeat') && (
         <EndScreen
@@ -257,6 +276,7 @@ function App() {
         />
       )}
     </div>
+    </>
   );
 }
 

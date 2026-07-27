@@ -377,3 +377,65 @@ full run is playable entirely inside the new skin with zero regressions
 (`npm test` untouched and green); auto-resolve is exactly as fast as it is
 today; and turning on reduced-motion yields a complete, calm, instant
 version of every screen.
+
+---
+
+## Post-iteration-10 UI revisions (user-directed, in session)
+
+Requested directly in chat after iteration 10 landed. These partly
+reverse earlier decisions — recorded here so the reversals read as
+intent, not regression. Later files override earlier ones (see
+`PLAN.md`), so this section is the current rule for the prep screen.
+
+- **Win-rate forecast removed from the prep screen.** The two per-stance
+  `ForecastBar` readouts (9.4) and their segmented pip bar (10.1) are
+  gone, and `ForecastBar.tsx` is deleted. `forecast.ts` itself is
+  untouched — `scripts/balance.ts` and `forecast.test.ts` still use it,
+  so the model survives even though the player-facing number does not.
+  This supersedes 10.1's "bars (HP, forecast) become segmented pip bars"
+  for the forecast half; `HpPipRow` still carries the pip treatment.
+- **Targeting-doctrine picker removed.** The "Focus weakest / Focus
+  strongest" buttons are gone; the doctrine now stays at its default
+  (`weakest`) for the whole run. `RunState.targetingStance`,
+  `SET_TARGETING_STANCE`, and the engine's stance support are
+  *deliberately left in place*: the engine path is still exercised by the
+  siege cannon's per-die `targetHighest` override and its own tests, and
+  dropping the state field would force another `SAVE_VERSION` bump for no
+  player-visible gain. Nothing dispatches the action today.
+- **Doctrine is now shown, not chosen.** `EnemyPanel` renders one
+  silhouette per ship (not one per group) and highlights the ship the
+  fleet's opening dice will pick, backed by a new `openingTargetIndex()`
+  export in `combatEngine.ts`. That helper is built on `initCombat` +
+  `pickTarget` rather than reimplementing the rule, so the highlight
+  cannot drift from real targeting behavior — pinned by four tests in
+  `combatEngine.test.ts`, one of which asserts it matches where the first
+  cannon shot actually lands.
+- **Prep screen is now two columns**, fleet left / enemy right, matching
+  the combat theater's reading order, with the shared controls spanning
+  underneath. Previously the enemy panel sat alone in the left column
+  with the right half empty.
+
+Verified: 274 tests green, `tsc -b` clean, `vite build` clean, plus
+in-browser DOM checks (side-by-side columns at 1280px; 2 ship icons and
+exactly 1 accent-highlighted target for a 2-ship group).
+
+**Deviation from 10.8:** the milestone screenshot pass stays skipped per
+the standing instruction for this repo — verification here was DOM and
+computed-style assertions in the preview browser, not eyes on a
+screenshot.
+
+### Also in this session: save-load blank screen
+
+`SAVE_VERSION` had stayed at `1` while `RunState` gained required fields
+during iteration 9 (`rngCounter`, `targetingStance`, …), so a save
+written before those existed still passed the version check and loaded
+with them `undefined`. `App.tsx` guards each non-trivial phase on a
+companion field (`phase === 'combat' && combat && currentEnemy`, etc.)
+with no fallback branch, so a phase/field mismatch rendered *nothing* —
+a blank screen with no console error. Fixed by bumping `SAVE_VERSION` to
+`2` and adding `isValidRunState()` in `persistence.ts`, which re-checks
+those same phase/companion pairings so any future schema drift fails
+closed into "no save" instead of a blank screen. Two regression tests
+cover both shapes. Note: this defect was found by reading the code and
+never reproduced against the user's reported symptom, which may have a
+separate cause.

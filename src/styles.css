@@ -39,6 +39,26 @@ h1, h2, h3 {
   backdrop-filter: blur(4px);
 }
 
+/* Sits left of the counters (the bar is flex-end aligned), so the readouts
+   stay pinned to the corner where they've always been. */
+.hud-bar__map-button {
+  margin-right: auto;
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 3px 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.hud-bar__map-button:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
 .hud-bar__counter {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -218,8 +238,7 @@ h1, h2, h3 {
 .stat-grid dd,
 .ship-card__stats,
 .combat-ship__hp,
-.combat-ship__stats,
-.forecast__label strong {
+.combat-ship__stats {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -273,17 +292,147 @@ h1, h2, h3 {
   }
 }
 
-/* HP as segmented pips (10.3), same visual family as the forecast bar */
+/* --- Tactical readout (iteration 12.3) ------------------------------------
+   Forecast per doctrine (restored after the ForecastBar refactor), the
+   hovered-part delta line, and the firing-solutions hit-chance tables. */
+.tactical-readout {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.tactical-readout__title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.forecast-stances {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.forecast-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+}
+
+.forecast-row--active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.forecast-row__label {
+  min-width: 110px;
+  font-size: 12px;
+}
+
+.forecast-row__pips {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+}
+
+.forecast-pip {
+  width: 6px;
+  height: 12px;
+  background: var(--panel-2);
+  border-radius: 1px;
+}
+
+.forecast-row__pips--danger .forecast-pip--filled { background: var(--danger); }
+.forecast-row__pips--warning .forecast-pip--filled { background: var(--warning); }
+.forecast-row__pips--success .forecast-pip--filled { background: var(--success); }
+
+.forecast-row__pct {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  min-width: 44px;
+  text-align: right;
+}
+
+.forecast-row__pct--danger { color: var(--danger); }
+.forecast-row__pct--warning { color: var(--warning); }
+.forecast-row__pct--success { color: var(--success); }
+
+.forecast-delta {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.firing-solutions {
+  margin-top: 10px;
+}
+
+.firing-solutions summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.firing-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.firing-table th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 400;
+  padding: 3px 8px 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.firing-table td {
+  padding: 3px 8px 3px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.firing-table td:not(:first-child),
+.firing-table th:not(:first-child) {
+  text-align: right;
+}
+
+.firing-table--enemy th {
+  color: var(--danger);
+}
+
+/* HP as segmented pips (10.3) */
+/* One pip per point of HP, so the row is countable. Fixed-size pips (not
+   flex-filled) keep a 3 HP ship visibly shorter than a 16 HP boss; wraps
+   rather than shrinking once a hull runs long. */
 .hp-pips {
   display: flex;
-  gap: 1px;
-  height: 6px;
-  width: 100%;
-  max-width: 96px;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 132px;
 }
 
 .hp-pips__pip {
-  flex: 1;
+  width: 6px;
+  height: 8px;
   border-radius: 1px;
   background: var(--border);
 }
@@ -309,24 +458,73 @@ h1, h2, h3 {
   padding: 24px;
 }
 
-.map-screen__lanes {
-  display: flex;
-  gap: 10px;
+/* Starchart coordinate layer (iteration 12.1): nodes are absolutely
+   positioned from (col,row) math and an SVG layer beneath them draws the
+   constellation edges + the visited trail at the same coordinates. */
+.starchart {
   overflow-x: auto;
   padding: 8px 0;
 }
 
-.map-screen__column {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  justify-content: center;
-  flex-shrink: 0;
+.starchart__canvas {
+  position: relative;
+}
+
+.starchart__edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.map-edge {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.45;
+}
+
+.map-edge--reachable {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0.9;
+  stroke-dasharray: 6 6;
+  animation: edge-march 1.2s linear infinite;
+  filter: drop-shadow(0 0 2px var(--accent-glow));
+}
+
+/* Hovering a reachable node previews its own onward connections. */
+.map-edge--onward {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0.7;
+}
+
+.map-edge--fled {
+  opacity: 0.12;
+}
+
+.map-trail {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 0.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@keyframes edge-march {
+  to { stroke-dashoffset: -12; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-edge--reachable {
+    animation: none;
+  }
 }
 
 /* Starchart nodes (iteration 10.4): each node is a small "star system"
    circle with a node-type glyph + label, rather than a rectangular button. */
 .map-node {
+  position: absolute;
   width: 76px;
   height: 76px;
   border-radius: 50%;
@@ -342,7 +540,6 @@ h1, h2, h3 {
   justify-content: center;
   gap: 3px;
   padding: 6px;
-  position: relative;
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
@@ -653,10 +850,13 @@ h1, h2, h3 {
 }
 
 /* Prep screen layout */
+/* Fleet (left) and enemy (right) sit side by side, mirroring the combat
+   theater's two-column read; the shared controls span underneath. */
 .prep-screen {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
+  align-items: start;
 }
 
 .prep-screen__center {
@@ -718,6 +918,30 @@ h1, h2, h3 {
   text-transform: capitalize;
 }
 
+/* One icon per ship, so a formation reads as a formation. Wraps, since a
+   swarm group can run to six or more hulls. */
+.enemy-panel__formation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.enemy-panel__ship {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+/* The ship the player's opening dice pick — cyan (the player's own accent)
+   rather than the enemy red, since it marks *your* fire, not their threat. */
+.enemy-panel__ship--target {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -745,78 +969,6 @@ h1, h2, h3 {
 
 .weapon-list li {
   padding: 2px 0;
-}
-
-/* Forecast */
-.forecast {
-  width: 100%;
-  max-width: 360px;
-}
-
-.forecast__label {
-  font-size: 14px;
-  margin-bottom: 6px;
-  text-align: center;
-}
-
-/* Segmented "armor pip" bar (iteration 10.1) — reads better at small sizes
-   and feels more console-like than a smooth fill. */
-.forecast__track {
-  display: flex;
-  gap: 2px;
-  height: 10px;
-  padding: 2px;
-  border-radius: 3px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-}
-
-.forecast__pip {
-  flex: 1;
-  height: 100%;
-  border-radius: 1px;
-  background: var(--border);
-}
-
-.forecast__pip--low {
-  background: var(--danger);
-  box-shadow: 0 0 4px var(--danger-glow);
-}
-
-.forecast__pip--mid {
-  background: var(--warning);
-  box-shadow: 0 0 4px var(--warning-glow);
-}
-
-.forecast__pip--high {
-  background: var(--success);
-  box-shadow: 0 0 4px var(--success-glow);
-}
-
-/* Targeting doctrine (iteration 9.4) */
-.prep-screen__stances {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.forecast--active .forecast__label {
-  font-weight: 600;
-}
-
-.prep-screen__stance-picker {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  margin-bottom: 8px;
-}
-
-.shop-button--active {
-  border-color: var(--success);
-  border-width: 2px;
 }
 
 /* Buttons */
@@ -1057,8 +1209,149 @@ h1, h2, h3 {
 }
 
 /* The theater is clickable to fast-forward a replaying round. */
+.combat-theater {
+  position: relative;
+}
+
 .combat-theater--replaying {
   cursor: pointer;
+}
+
+/* --- Theater fx layer (iteration 12.2) ------------------------------------
+   Transient SVG/DOM effects positioned from measured ship-card centers.
+   Everything is pointer-transparent and self-removing; reduced motion never
+   spawns these at all (gated in CombatScreen). */
+.theater-fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+}
+
+.fx-tracer {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dashoffset: var(--fx-len);
+  animation: fx-tracer-sweep 0.55s ease-out forwards;
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+.fx-tracer--player {
+  stroke: var(--accent);
+  color: var(--accent);
+}
+
+.fx-tracer--enemy {
+  stroke: var(--danger);
+  color: var(--danger);
+}
+
+.fx-tracer--missile {
+  stroke-width: 2.5;
+  animation-duration: 0.8s;
+}
+
+.fx-tracer--veer {
+  opacity: 0.55;
+}
+
+@keyframes fx-tracer-sweep {
+  0% { stroke-dashoffset: var(--fx-len); opacity: 1; }
+  75% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+.fx-ripple {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  animation: fx-ripple-bloom 0.65s ease-out forwards;
+}
+
+@keyframes fx-ripple-bloom {
+  0% { r: 10; opacity: 0; }
+  30% { opacity: 0.9; }
+  100% { r: 34; opacity: 0; }
+}
+
+.fx-shard {
+  fill: var(--panel-2);
+  stroke: var(--danger);
+  stroke-width: 1.5;
+}
+
+.fx-shard--left {
+  animation: fx-shard-left 1s ease-out forwards;
+}
+
+.fx-shard--right {
+  animation: fx-shard-right 1s ease-out forwards;
+}
+
+.fx-blast {
+  fill: var(--danger);
+  animation: fx-blast 0.5s ease-out forwards;
+}
+
+@keyframes fx-shard-left {
+  to { transform: translate(-26px, 18px) rotate(-40deg); opacity: 0; }
+}
+
+@keyframes fx-shard-right {
+  to { transform: translate(24px, -14px) rotate(35deg); opacity: 0; }
+}
+
+@keyframes fx-blast {
+  0% { r: 6; opacity: 1; }
+  100% { r: 28; opacity: 0; }
+}
+
+.fx-damage {
+  position: absolute;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--danger);
+  text-shadow: 0 0 6px var(--danger-glow);
+  pointer-events: none;
+  z-index: 7;
+  animation: fx-damage-float 0.95s ease-out forwards;
+}
+
+@keyframes fx-damage-float {
+  0% { opacity: 0; margin-top: 0; }
+  15% { opacity: 1; }
+  100% { opacity: 0; margin-top: -34px; }
+}
+
+.fx-banner {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 18px;
+  border: 1px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, var(--panel));
+  color: var(--warning);
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 7;
+  animation: fx-banner-slide 1.45s ease-out forwards;
+}
+
+@keyframes fx-banner-slide {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  12% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 /* Command bar (iteration 10.5): hand, actives, and round controls docked
@@ -1095,6 +1388,38 @@ h1, h2, h3 {
   font-size: 13px;
   color: var(--danger);
   font-weight: 600;
+}
+
+/* Collapsible secondary ship info (stats & weapons) */
+.combat-ship__secondary {
+  margin-top: 4px;
+}
+
+.combat-ship__secondary-toggle {
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  user-select: none;
+}
+
+.combat-ship__secondary-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.combat-ship__secondary-toggle::before {
+  content: '▸';
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 9px;
+}
+
+.combat-ship__secondary[open] .combat-ship__secondary-toggle::before {
+  transform: rotate(90deg);
 }
 
 @media (max-width: 640px) {

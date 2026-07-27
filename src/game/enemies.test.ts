@@ -13,6 +13,8 @@ import {
   MID_POOL,
   MID_POOL_ACT2,
   veterancyBonus,
+  FINAL_BOSS_IDS,
+  getFinalBoss,
 } from './enemies';
 import type { EnemyDef } from './types';
 
@@ -21,6 +23,40 @@ import type { EnemyDef } from './types';
 function totalHp(enemy: EnemyDef): number {
   return enemy.groups.reduce((sum, g) => sum + g.stats.hp * g.count, 0);
 }
+
+describe('final bosses bring support', () => {
+  it('every final boss fields more than one hull', () => {
+    for (const id of FINAL_BOSS_IDS) {
+      const boss = getFinalBoss(id);
+      const ships = boss.groups.reduce((n, g) => n + g.count, 0);
+      expect(ships, `${id} should not be a lone ship`).toBeGreaterThan(1);
+    }
+  });
+
+  it('escorts are their own group, with the centerpiece first', () => {
+    // ShipSilhouette's archetype heuristic treats group 0 as the flagship,
+    // so escorts must never lead the list.
+    for (const id of ['titan', 'citadel'] as const) {
+      const boss = getFinalBoss(id);
+      expect(boss.groups.length).toBeGreaterThan(1);
+      const [centerpiece, ...escorts] = boss.groups;
+      for (const escort of escorts) {
+        expect(escort.stats.hp, `${id} escort should be lighter than its flagship`).toBeLessThan(
+          centerpiece.stats.hp,
+        );
+      }
+    }
+  });
+
+  it('the citadel keeps a screen the player can hit without shield pierce', () => {
+    const citadel = getFinalBoss('citadel');
+    const [core, ...escorts] = citadel.groups;
+    expect(core.stats.shield).toBe(5);
+    for (const escort of escorts) {
+      expect(escort.stats.shield).toBeLessThan(core.stats.shield);
+    }
+  });
+});
 
 describe('combatEnemyPool (iteration 8: act + depth band)', () => {
   it('act 1 uses the original pools, re-banded to easy 0-3 / mid 4-6 / hard 7-9', () => {

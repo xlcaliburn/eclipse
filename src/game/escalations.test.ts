@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { drawEscalationSchedule } from './escalations';
-import { applyEscalations, GAUNTLET } from './enemies';
+import { applyEscalations, GAUNTLET, getFinalBoss } from './enemies';
 import { mulberry32 } from './rng';
 import type { ScheduledEscalation } from './escalations';
 import type { EnemyDef } from './types';
@@ -72,15 +72,46 @@ describe('applyEscalations', () => {
     expect(mainGroup(enemy).stats.hp).toBe(mainGroup(scoutPack).stats.hp + 1);
   });
 
-  it('squadrons only adds a ship to groups of 2 or more', () => {
-    const soloSchedule: ScheduledEscalation[] = [{ id: 'squadrons', act: 1, landsAfterColumn: 0, revealed: false }];
-    const soloEnemy = findEnemy('missile-frigate'); // count 1
-    const groupEnemy = findEnemy('scout-pack'); // count 2
+  const squadronsOnly: ScheduledEscalation[] = [
+    { id: 'squadrons', act: 1, landsAfterColumn: 0, revealed: false },
+  ];
 
-    const soloResult = applyEscalations(soloEnemy, 1, soloSchedule);
-    const groupResult = applyEscalations(groupEnemy, 1, soloSchedule);
+  it('squadrons never leaves a lone ship — anything it touches ends at 2+', () => {
+    const soloResult = applyEscalations(findEnemy('missile-frigate'), 1, squadronsOnly); // count 1
+    const groupResult = applyEscalations(findEnemy('scout-pack'), 1, squadronsOnly); // count 2
 
-    expect(mainGroup(soloResult).count).toBe(1);
+    expect(mainGroup(soloResult).count).toBe(2); // gains a wingman rather than being skipped
     expect(mainGroup(groupResult).count).toBe(3);
+  });
+
+  it('badges squadrons exactly when it reinforced something', () => {
+    // The panel reads appliedEscalations — the badge must never appear over
+    // a single hull, and must appear whenever ships were actually added.
+    const result = applyEscalations(findEnemy('missile-frigate'), 1, squadronsOnly);
+    expect(result.appliedEscalations).toContain('squadrons');
+    expect(mainGroup(result).count).toBeGreaterThanOrEqual(2);
+  });
+
+  it('reinforces a boss escort screen without cloning the boss itself', () => {
+    const titan = getFinalBoss('titan');
+    const reinforced = applyEscalations(titan, 1, squadronsOnly);
+
+    expect(reinforced.groups[0].count).toBe(1); // one Titan stays one Titan
+    expect(reinforced.groups[1].count).toBe(titan.groups[1].count + 1); // its guard grows
+    expect(reinforced.appliedEscalations).toContain('squadrons');
+  });
+
+  it('does not badge an escalation that changed nothing', () => {
+    // A boss with no escorts has nothing for squadrons to reinforce.
+    const loneBoss: EnemyDef = {
+      id: 'titan',
+      name: 'Titan',
+      blurb: '',
+      groups: [{ label: 'titan', count: 1, stats: getFinalBoss('titan').groups[0].stats }],
+    };
+    const result = applyEscalations(loneBoss, 1, squadronsOnly);
+
+    expect(result.groups[0].count).toBe(1);
+    expect(result.appliedEscalations ?? []).not.toContain('squadrons');
   });
 });

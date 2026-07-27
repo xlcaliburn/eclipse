@@ -446,6 +446,22 @@ export function initCombat(
   };
 }
 
+// Which defender the player's dice open on, as a flattened enemy-ship index
+// (the same indexing initCombat produces). Built from initCombat +
+// pickTarget rather than reimplementing the rule, so the prep screen's
+// target highlight can never drift from what the fight actually does.
+// Defenders are at full HP here, so this is a pure stats comparison; a siege
+// cannon's per-die `targetHighest` still redirects that one weapon in the
+// actual fight. Returns -1 for an enemy with no ships.
+export function openingTargetIndex(
+  enemyDef: EnemyDef,
+  stance: TargetingStance = 'weakest',
+): number {
+  const { enemyShips } = initCombat([], enemyDef, 1, stance);
+  const target = pickTarget(enemyShips, stance === 'strongest');
+  return target ? target.index : -1;
+}
+
 // Whether either fleet has any missiles at all — if not, the missile phase
 // is a guaranteed no-op and can be skipped without ever showing it.
 export function hasMissilePhase(state: CombatState): boolean {

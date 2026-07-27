@@ -15,14 +15,13 @@ interface FleetOverlayProps {
 // A read-only snapshot of the fleet + inventory + credit/intel balance,
 // viewable as a popup from the map, a shop, or an event — so the player can
 // check "what do I have" without leaving whatever they're doing.
-export function FleetOverlay({ fleet, inventory, credits, intel, onClose }: FleetOverlayProps) {
+export function FleetOverlay({ fleet, inventory, onClose }: FleetOverlayProps) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-panel__header">
           <h2>Your fleet</h2>
-          <div className="credits-badge">{credits} credits</div>
-          <div className="credits-badge credits-badge--intel">{intel} intel</div>
+          {/* Credits/intel live in the persistent HUD bar — no per-screen copy. */}
         </div>
 
         {fleet.map((ship, shipIndex) => {

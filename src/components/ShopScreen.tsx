@@ -95,8 +95,7 @@ export function ShopScreen({
     <div className="shop-screen">
       <div className="shop-screen__header">
         <h2>Trade station</h2>
-        <div className="credits-badge">{credits} credits</div>
-        <div className="credits-badge credits-badge--intel">{intel} intel</div>
+        {/* Credits/intel live in the persistent HUD bar — no per-screen copy. */}
         <button type="button" className="shop-button" onClick={onViewMap}>
           View map
         </button>

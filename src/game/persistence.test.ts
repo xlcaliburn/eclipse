@@ -71,6 +71,27 @@ describe('save / load roundtrip (iteration 9.2)', () => {
     expect(loadRun(storage)).toBeNull();
   });
 
+  it('loadRun discards a same-version save missing a field added after saving shipped (blank-screen regression)', () => {
+    // Reproduces the bug: a save from before `targetingStance` existed on
+    // RunState was still accepted (SAVE_VERSION never bumped), loading with
+    // `targetingStance: undefined` and rendering nothing useful downstream.
+    const storage = fakeStorage();
+    const { targetingStance: _drop, ...withoutStance } = initialRunState();
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state: withoutStance }));
+    expect(loadRun(storage)).toBeNull();
+  });
+
+  it('loadRun discards a save whose phase and companion field have drifted apart', () => {
+    // App.tsx renders 'combat'/'reward'/'shop'/'repair'/'event' behind an
+    // extra guard (e.g. `phase === 'combat' && combat && currentEnemy`) with
+    // no fallback — a save in one of these phases missing its companion
+    // field would otherwise load fine and render a blank screen.
+    const storage = fakeStorage();
+    const state: RunState = { ...initialRunState(), phase: 'combat' }; // no `combat`/`currentEnemy`
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state }));
+    expect(loadRun(storage)).toBeNull();
+  });
+
   it('loadRun discards silently on corrupt JSON', () => {
     const storage = fakeStorage();
     storage.setItem('eclipse.save.v1', '{not valid json');

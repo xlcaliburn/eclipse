@@ -39,14 +39,17 @@ Rules for working with these files:
 | [8](plans/iteration-8.md) | The long war: two-act map, safe opener, veterancy scaling, act-2 roster, final bosses, Dreadnought (+ addendum: Jink, job stakes, chaff, upgrade cap) | implemented |
 | [9](plans/iteration-9.md) | Persistence (localStorage saves + full-run determinism), mixed formations + targeting doctrine, Cruiser frame | implemented |
 | [10](plans/iteration-10.md) | Space-game visual overhaul: design system, starchart map, ship silhouettes, animated combat theater (presentation only) | implemented (partial — see iteration-10.md deviations) |
+| [11](plans/iteration-11.md) | Tempo & teeth: auto-heal interlude, initiative-as-evasion rework, act-1-late/act-2 difficulty pass tuned via the re-armed balance script | **in progress** (partial in working tree: I8-addendum items landed; evasion + tuning outstanding) |
+| [12](plans/iteration-12.md) | Coordinate layer & decision support: starchart edges/trail, combat-theater fx, hit-chance matrix, forecast restore + delta preview | implemented |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes
 
-- **Balance gate suspended as of iteration 5:** `npm run balance` and its
-  sanity targets are not a milestone gate until further notice — numbers are
-  eyeballed and tuned by live play testing. The in-game forecast bar and the
-  deterministic unit tests are NOT suspended. Details in
-  [iteration-5](plans/iteration-5.md).
+- **Balance gate suspended as of iteration 5** (`npm run balance` is not a
+  merge gate; forecast bar and unit tests are NOT suspended — details in
+  [iteration-5](plans/iteration-5.md)). **Partially re-armed by iteration
+  11:** the script is refreshed there as the tuning instrument, with
+  reference fleets, target bands, and a fight-length column — still not a
+  gate, but tuning-by-eyeball is over.
 - Verification bar for every milestone: `npm test` green, `tsc -b` clean,
   `vite build` clean.

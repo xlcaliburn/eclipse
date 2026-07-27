@@ -9,13 +9,20 @@ export type EnemyArchetype = 'swarm' | 'frigate' | 'cruiser' | 'fortress' | 'bos
 
 // One archetype per enemy *silhouette*, not per enemy — a small heuristic
 // over an enemy group's own stats, kept entirely in presentation code so
-// no engine/type files need an "archetype" field. `knownBossId` covers the
+// no engine/type files need an "archetype" field. `BOSS_IDS` covers the
 // hand-tuned boss trios (act-1 mid-bosses + act-2 finals), whose ids are
 // stable and never elite/bounty-suffixed.
 const BOSS_IDS = new Set(['gcds', 'hive', 'dread', 'titan', 'empress', 'citadel']);
 
-export function classifyArchetype(enemyId: string, group: { count: number; stats: { hp: number; shield: number } }): EnemyArchetype {
-  if (BOSS_IDS.has(enemyId)) return 'boss';
+// A boss's centerpiece is always its first group, by convention in
+// enemies.ts — later groups are escorts and get the ordinary heuristic, so
+// a Titan's picket screen doesn't render as three Titans.
+export function classifyArchetype(
+  enemyId: string,
+  group: { count: number; stats: { hp: number; shield: number } },
+  groupIndex = 0,
+): EnemyArchetype {
+  if (BOSS_IDS.has(enemyId) && groupIndex === 0) return 'boss';
   if (group.count >= 3) return 'swarm';
   if (group.stats.shield >= 3 || group.stats.hp >= 8) return 'fortress';
   if (group.stats.hp <= 2 && group.count <= 2) return 'frigate';

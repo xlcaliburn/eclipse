@@ -30,6 +30,9 @@ interface CombatFleetViewProps {
   // is just a view of "which entry is showing right now."
   activeAttacker?: ActiveAttacker | null;
   activeTarget?: ActiveTarget | null;
+  // Iteration 12.2: the fx layer needs real card positions to draw tracers
+  // between ships. Each card reports its element; null on unmount.
+  onShipEl?: (side: Side, index: number, el: HTMLElement | null) => void;
 }
 
 function shipCard(
@@ -41,6 +44,7 @@ function shipCard(
   activeAttacker: ActiveAttacker | null | undefined,
   activeTarget: ActiveTarget | null | undefined,
   upgrades?: UpgradeId[],
+  onShipEl?: (side: Side, index: number, el: HTMLElement | null) => void,
 ) {
   const hp = Math.max(0, ship.stats.hp - ship.damage);
   const destroyed = hp <= 0;
@@ -55,7 +59,11 @@ function shipCard(
   const highlight = isAttacker ? ' combat-ship--firing' : isTarget ? (activeTarget!.hit ? ' combat-ship--hit' : ' combat-ship--miss') : '';
 
   return (
-    <div key={label} className={`combat-ship${destroyed ? ' combat-ship--destroyed' : ''}${highlight}`}>
+    <div
+      key={label}
+      ref={onShipEl ? (el) => onShipEl(side, index, el) : undefined}
+      className={`combat-ship${destroyed ? ' combat-ship--destroyed' : ''}${highlight}`}
+    >
       <div className="combat-ship__name">{label}</div>
       {destroyed ? (
         <>
@@ -69,25 +77,28 @@ function shipCard(
           <div className="combat-ship__hp">
             HP {hp}/{ship.stats.hp}
           </div>
-          <div className="combat-ship__stats">
-            Init {ship.stats.initiative} · Comp {ship.stats.computer} · Shield {ship.stats.shield}
-          </div>
-          {weapons.length > 0 && (
-            <ul className="combat-ship__weapons">
-              {weapons.map((w, i) => (
-                <li key={i}>{w}</li>
-              ))}
-            </ul>
-          )}
-          {upgrades && upgrades.length > 0 && (
-            <div className="ship-card__upgrades">
-              {upgrades.map((upgradeId, i) => (
-                <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
-                  {getUpgrade(upgradeId).name}
-                </span>
-              ))}
+          <details className="combat-ship__secondary">
+            <summary className="combat-ship__secondary-toggle">Stats &amp; weapons</summary>
+            <div className="combat-ship__stats">
+              Init {ship.stats.initiative} · Comp {ship.stats.computer} · Shield {ship.stats.shield}
             </div>
-          )}
+            {weapons.length > 0 && (
+              <ul className="combat-ship__weapons">
+                {weapons.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            )}
+            {upgrades && upgrades.length > 0 && (
+              <div className="ship-card__upgrades">
+                {upgrades.map((upgradeId, i) => (
+                  <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
+                    {getUpgrade(upgradeId).name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </details>
         </>
       )}
     </div>
@@ -105,6 +116,7 @@ export function CombatFleetView({
   enemyArchetypes,
   activeAttacker,
   activeTarget,
+  onShipEl,
 }: CombatFleetViewProps) {
   return (
     <div className="combat-fleets">
@@ -120,6 +132,7 @@ export function CombatFleetView({
             activeAttacker,
             activeTarget,
             playerUpgrades?.[i],
+            onShipEl,
           ),
         )}
       </div>
@@ -134,6 +147,8 @@ export function CombatFleetView({
             <EnemySilhouette archetype={enemyArchetypes[i] ?? 'cruiser'} size={64} />,
             activeAttacker,
             activeTarget,
+            undefined,
+            onShipEl,
           ),
         )}
       </div>

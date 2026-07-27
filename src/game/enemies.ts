@@ -420,6 +420,14 @@ export function applyVeterancy(enemy: EnemyDef, col: number): EnemyDef {
 // changes what you can do about it beforehand. Applies to every group
 // (iteration 9) — a formation's screen gets exactly as hardened as its
 // centerpiece.
+// A boss's own hull is always group 0 (see the boss/final-boss definitions);
+// later groups are its escorts. Ids here are the hand-tuned boss trios,
+// which are never elite- or bounty-suffixed.
+function isBossCenterpiece(enemyId: string, groupIndex: number): boolean {
+  if (groupIndex !== 0) return false;
+  return (BOSS_IDS as readonly string[]).includes(enemyId) || (FINAL_BOSS_IDS as readonly string[]).includes(enemyId);
+}
+
 export function applyEscalations(enemy: EnemyDef, col: number, escalations: ScheduledEscalation[]): EnemyDef {
   const active = escalations.filter((e) => col > e.landsAfterColumn);
   if (active.length === 0) return enemy;
@@ -428,31 +436,54 @@ export function applyEscalations(enemy: EnemyDef, col: number, escalations: Sche
   const groups = enemy.groups.map((g) => ({ ...g, stats: { ...g.stats }, count: g.count }));
 
   for (const esc of active) {
-    appliedIds.push(esc.id);
-    for (const g of groups) {
+    // Only badge an escalation that actually changed this enemy — advertising
+    // one that did nothing promises a fight the player never gets.
+    let changed = false;
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
       switch (esc.id) {
         case 'hardened':
           g.stats.hp += 1;
+          changed = true;
           break;
         case 'deflectors':
           g.stats.shield += 1;
+          changed = true;
           break;
         case 'firecontrol':
           g.stats.computer += 1;
+          changed = true;
           break;
         case 'overdrive':
           g.stats.initiative += 1;
+          changed = true;
           break;
-        case 'squadrons':
-          if (g.count >= 2) g.count += 1;
+        case 'squadrons': {
+          // Reinforced squadrons always leaves a real squadron behind: a
+          // lone ship gains a wingman rather than being skipped, so the
+          // badge never appears over a single hull. The one exception is a
+          // boss's centerpiece (always group 0) — two Titans is a different
+          // fight, not an escalated one; its escorts still reinforce.
+          if (isBossCenterpiece(enemy.id, i)) break;
+          const reinforced = Math.max(2, g.count + 1);
+          if (reinforced !== g.count) {
+            g.count = reinforced;
+            changed = true;
+          }
           break;
+        }
         default:
           break;
       }
     }
+    if (changed) appliedIds.push(esc.id);
   }
 
-  return { ...enemy, groups, appliedEscalations: appliedIds };
+  return {
+    ...enemy,
+    groups,
+    appliedEscalations: appliedIds.length > 0 ? appliedIds : undefined,
+  };
 }
 
 // --- Boss variety (iteration 5) -------------------------------------------
@@ -514,21 +545,42 @@ export type FinalBossId = 'titan' | 'empress' | 'citadel';
 
 export const FINAL_BOSS_IDS: FinalBossId[] = ['titan', 'empress', 'citadel'];
 
+// A final boss's centerpiece is always group 0 — the silhouette heuristic
+// in ShipSilhouette.tsx relies on that ordering to tell a flagship from
+// its escorts.
 const TITAN: EnemyDef = {
   id: 'titan',
   name: 'Titan',
-  blurb: 'Demands maximum sustained damage and real defense — no shortcuts.',
-  groups: solo('titan', 1, {
-    initiative: 1,
-    hp: 16,
-    computer: 3,
-    shield: 3,
-    cannons: [
-      { diceCount: 4, damage: 2 },
-      { diceCount: 2, damage: 4 },
-    ],
-    missiles: [],
-  }),
+  blurb: 'Demands maximum sustained damage and real defense — no shortcuts, and it does not come alone.',
+  groups: [
+    {
+      label: 'titan',
+      count: 1,
+      stats: {
+        initiative: 1,
+        hp: 16,
+        computer: 3,
+        shield: 3,
+        cannons: [
+          { diceCount: 4, damage: 2 },
+          { diceCount: 2, damage: 4 },
+        ],
+        missiles: [],
+      },
+    },
+    {
+      label: 'honor guard',
+      count: 2,
+      stats: {
+        initiative: 2,
+        hp: 4,
+        computer: 2,
+        shield: 1,
+        cannons: [{ diceCount: 1, damage: 2 }],
+        missiles: [],
+      },
+    },
+  ],
 };
 
 const HIVE_EMPRESS: EnemyDef = {
@@ -548,19 +600,40 @@ const HIVE_EMPRESS: EnemyDef = {
 const VOID_CITADEL: EnemyDef = {
   id: 'citadel',
   name: 'Void Citadel',
-  blurb: 'Demands lances, optics, or computer 6 — shield 5 is a statement — and cannons, not missiles.',
-  groups: solo('citadel', 1, {
-    initiative: 0,
-    hp: 20,
-    computer: 2,
-    shield: 5,
-    cannons: [
-      { diceCount: 2, damage: 4 },
-      { diceCount: 2, damage: 2 },
-    ],
-    missiles: [],
-    flak: 3,
-  }),
+  blurb:
+    'Demands lances, optics, or computer 6 — shield 5 is a statement — and cannons, not missiles. Its pickets you can actually hit.',
+  groups: [
+    {
+      label: 'citadel',
+      count: 1,
+      stats: {
+        initiative: 0,
+        hp: 20,
+        computer: 2,
+        shield: 5,
+        cannons: [
+          { diceCount: 2, damage: 4 },
+          { diceCount: 2, damage: 2 },
+        ],
+        missiles: [],
+        flak: 3,
+      },
+    },
+    {
+      // Deliberately low-shield: something the player's dice can kill
+      // without the pierce tech the citadel itself demands.
+      label: 'picket',
+      count: 2,
+      stats: {
+        initiative: 2,
+        hp: 4,
+        computer: 2,
+        shield: 1,
+        cannons: [{ diceCount: 1, damage: 2 }],
+        missiles: [],
+      },
+    },
+  ],
 };
 
 export const FINAL_BOSSES: Record<FinalBossId, EnemyDef> = {

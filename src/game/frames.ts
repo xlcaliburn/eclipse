@@ -39,12 +39,12 @@ export const FRAMES: Record<FrameId, Frame> = {
   bastion: {
     id: 'bastion',
     name: 'Bastion',
-    slots: 5,
+    slots: 3,
     baseInitiative: 0,
     baseHp: 6,
     cost: 12,
     maxWeapons: 1,
-    blurb: 'Durable protector. 5 slots, at most 1 weapon, arrives with a lure beacon.',
+    blurb: 'Durable protector. 3 slots, at most 1 weapon, arrives with a lure beacon.',
   },
   dreadnought: {
     id: 'dreadnought',

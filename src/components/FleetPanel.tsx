@@ -17,6 +17,7 @@ interface FleetPanelProps {
   cargoCarrierIndex?: number; // ship carrying an active delivery quest's pod, if any
   onMoveCargoPod?: (toShipIndex: number) => void;
   onScuttle?: (shipIndex: number) => void; // shop only — decommissions a non-Flagship ship (iteration 8)
+  onPartHover?: (partId: PartId | null) => void; // prep only — feeds the forecast delta preview (iteration 12.3)
 }
 
 export { playerShipLabel };
@@ -32,6 +33,7 @@ export function FleetPanel({
   cargoCarrierIndex,
   onMoveCargoPod,
   onScuttle,
+  onPartHover,
 }: FleetPanelProps) {
   const selectedShip = fleet[selectedShipIndex];
   const selectedHasRoom = selectedShip
@@ -125,7 +127,12 @@ export function FleetPanel({
       ) : (
         <div className="inventory-grid">
           {inventory.map((partId, i) => (
-            <div key={`${partId}-${i}`} className="inventory-item">
+            <div
+              key={`${partId}-${i}`}
+              className="inventory-item"
+              onMouseEnter={onPartHover ? () => onPartHover(partId) : undefined}
+              onMouseLeave={onPartHover ? () => onPartHover(null) : undefined}
+            >
               <PartCard
                 part={getPart(partId)}
                 onClick={selectedHasRoom ? () => onEquip(selectedShipIndex, partId) : undefined}

@@ -1,3 +1,4 @@
+import { openingTargetIndex } from '../game/combatEngine';
 import { getEscalation } from '../game/escalations';
 import type { EnemyDef, EnemyGroup, ShipStats } from '../game/types';
 import { classifyArchetype, EnemySilhouette } from './ShipSilhouette';
@@ -5,6 +6,19 @@ import { classifyArchetype, EnemySilhouette } from './ShipSilhouette';
 interface EnemyPanelProps {
   enemy: EnemyDef;
   fleetStats?: ShipStats[];
+}
+
+// Flattened index of the first ship in each group, matching the per-side
+// indexing initCombat builds — lets a group-shaped render address the
+// engine's flat ship indices.
+function groupStartIndices(groups: EnemyGroup[]): number[] {
+  const starts: number[] = [];
+  let n = 0;
+  for (const group of groups) {
+    starts.push(n);
+    n += group.count;
+  }
+  return starts;
 }
 
 function weaponSummary(stats: ShipStats): string[] {
@@ -49,6 +63,12 @@ export function EnemyPanel({ enemy, fleetStats }: EnemyPanelProps) {
   // tool that does (optics upgrade, the Gauss lance's per-die pierce).
   const pierceRecommended = rawComputer !== undefined && rawComputer < requiredComputer;
 
+  // Where the fleet's opening dice land, so the formation can point at it
+  // instead of the player having to work it out from the stat blocks.
+  const targetIndex = openingTargetIndex(enemy);
+  const groupStarts = groupStartIndices(enemy.groups);
+  const totalShips = enemy.groups.reduce((n, g) => n + g.count, 0);
+
   return (
     <section className="enemy-panel">
       <h2 className="enemy-panel__name">{enemy.name}</h2>
@@ -56,7 +76,22 @@ export function EnemyPanel({ enemy, fleetStats }: EnemyPanelProps) {
 
       {enemy.groups.map((group, i) => (
         <div key={i} className="enemy-panel__group">
-          <EnemySilhouette archetype={classifyArchetype(enemy.id, group)} size={48} />
+          {/* One icon per ship, so a formation reads as a formation — with
+              the ship your fire opens on marked. */}
+          <div className="enemy-panel__formation">
+            {Array.from({ length: group.count }, (_, s) => {
+              const isTarget = groupStarts[i] + s === targetIndex;
+              return (
+                <span
+                  key={s}
+                  className={`enemy-panel__ship${isTarget ? ' enemy-panel__ship--target' : ''}`}
+                  title={isTarget ? 'Your fire opens on this ship' : undefined}
+                >
+                  <EnemySilhouette archetype={classifyArchetype(enemy.id, group, i)} size={44} />
+                </span>
+              );
+            })}
+          </div>
           {enemy.groups.length > 1 && <h3 className="enemy-panel__group-label">{group.label}</h3>}
           <div className="enemy-panel__count">
             {group.count} ship{group.count > 1 ? 's' : ''} per side
@@ -78,6 +113,10 @@ export function EnemyPanel({ enemy, fleetStats }: EnemyPanelProps) {
           </ul>
         </div>
       ))}
+
+      {totalShips > 1 && targetIndex >= 0 && (
+        <p className="hint">Highlighted — where your fire opens: the weakest hull first.</p>
+      )}
 
       {enemyShield > 0 && (
         <p className={short ? 'warning' : 'hint'}>

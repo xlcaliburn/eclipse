@@ -1,14 +1,22 @@
 interface HudBarProps {
   credits: number;
   intel: number;
+  // Omitted wherever a map peek makes no sense (on the map itself, or once
+  // the run is over) — the button simply isn't rendered.
+  onViewMap?: () => void;
 }
 
 // Iteration 10.6: a persistent top-bar HUD readout, always visible once a
-// run's economy is live — additive to (not a replacement for) the existing
-// per-screen credit/intel badges.
-export function HudBar({ credits, intel }: HudBarProps) {
+// run's economy is live. This is the single place credits/intel are shown —
+// per-screen copies were removed once this bar existed.
+export function HudBar({ credits, intel, onViewMap }: HudBarProps) {
   return (
     <div className="hud-bar">
+      {onViewMap && (
+        <button type="button" className="hud-bar__map-button" onClick={onViewMap}>
+          Map
+        </button>
+      )}
       <span className="hud-bar__counter hud-bar__counter--credits">{credits} cr</span>
       <span className="hud-bar__counter hud-bar__counter--intel">{intel} intel</span>
     </div>

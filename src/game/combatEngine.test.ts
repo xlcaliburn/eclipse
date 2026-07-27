@@ -7,6 +7,7 @@ import {
   combatOutcome,
   hasMissilePhase,
   initCombat,
+  openingTargetIndex,
   runToEnd,
   unconsumedContingentCards,
   useActive,
@@ -826,6 +827,53 @@ describe('Chaff launcher active (iteration 8, addendum A.3)', () => {
 
     state = advanceRound(state); // cannon round 2 — chaff gone, natural 6s auto-hit again
     expect(state.roundModifiers.chaffShipIndices).toHaveLength(0);
+  });
+});
+
+// Backs the prep screen's "your fire opens here" highlight — if this and
+// pickTarget ever disagree, the highlight lies about the coming fight.
+describe('openingTargetIndex', () => {
+  it('points at the lowest-HP ship, addressed by flattened index across groups', () => {
+    const foe = enemy({
+      groups: [
+        { label: 'escort', count: 2, stats: blankStats({ hp: 6 }) },
+        { label: 'runt', count: 1, stats: blankStats({ hp: 1 }) },
+      ],
+    });
+    expect(openingTargetIndex(foe)).toBe(2); // escorts occupy 0 and 1
+  });
+
+  it('points at the highest-HP ship under the strongest stance', () => {
+    const foe = enemy({
+      groups: [
+        { label: 'runt', count: 1, stats: blankStats({ hp: 1 }) },
+        { label: 'brute', count: 1, stats: blankStats({ hp: 9 }) },
+      ],
+    });
+    expect(openingTargetIndex(foe, 'strongest')).toBe(1);
+  });
+
+  it('breaks ties toward the first ship, and handles a lone defender', () => {
+    const evenFormation = enemy({ count: 3 }, { hp: 4 });
+    expect(openingTargetIndex(evenFormation)).toBe(0);
+    expect(openingTargetIndex(enemy({ count: 1 }, { hp: 4 }))).toBe(0);
+  });
+
+  it('agrees with where the first shot actually lands', () => {
+    const foe = enemy({
+      groups: [
+        { label: 'escort', count: 1, stats: blankStats({ hp: 6 }) },
+        { label: 'runt', count: 1, stats: blankStats({ hp: 2 }) },
+      ],
+    });
+    const fleet = [{ stats: blankStats({ hp: 20, computer: 9, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    let state = initCombat(fleet, foe, 3);
+    state = advanceRound(state); // missile (no-op)
+    state = advanceRound(state); // cannon round 1
+    const firstPlayerShot = state.log.find(
+      (e) => e.kind === 'roll' && e.phase === 'cannon' && e.side === 'player',
+    ) as { targetIndex: number } | undefined;
+    expect(firstPlayerShot?.targetIndex).toBe(openingTargetIndex(foe));
   });
 });
 
