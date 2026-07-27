@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { Side } from '../game/types';
+import { DieFace } from './Die';
 
 // Iteration 12.2: transient combat-theater visuals. Each FxItem is spawned
 // by CombatScreen when the replay reveals an event, positioned from the
@@ -11,6 +12,7 @@ export type FxItem =
   | { key: number; kind: 'ripple'; x: number; y: number }
   | { key: number; kind: 'shards'; x: number; y: number }
   | { key: number; kind: 'damage'; x: number; y: number; text: string }
+  | { key: number; kind: 'die'; x: number; y: number; raw: number; hit: boolean }
   | { key: number; kind: 'banner'; text: string };
 
 // Omit that distributes over the union, so spawn-site literals keep their
@@ -66,6 +68,17 @@ export function TheaterFxLayer({ fx }: { fx: FxItem[] }) {
         })}
       </svg>
       {fx.map((item) => {
+        if (item.kind === 'die') {
+          return (
+            <span
+              key={item.key}
+              className={`fx-die ${item.hit ? 'fx-die--hit' : 'fx-die--miss'}`}
+              style={{ left: item.x, top: item.y }}
+            >
+              <DieFace value={item.raw} size={26} />
+            </span>
+          );
+        }
         if (item.kind === 'damage') {
           return (
             <span key={item.key} className="fx-damage" style={{ left: item.x, top: item.y }}>

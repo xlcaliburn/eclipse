@@ -292,6 +292,148 @@ h1, h2, h3 {
   }
 }
 
+/* --- Dice + shared stat bar (iteration 13) -------------------------------- */
+.die-face__body {
+  fill: var(--panel-2);
+  stroke: var(--text-dim);
+  stroke-width: 4;
+}
+
+.die-face__pip {
+  fill: var(--text);
+}
+
+.fx-die {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 8;
+  animation: fx-die-pop 0.85s ease-out forwards;
+}
+
+.fx-die--hit .die-face__body { stroke: var(--success); }
+.fx-die--hit .die-face__pip { fill: var(--success); }
+.fx-die--miss .die-face__body { stroke: var(--danger); }
+.fx-die--miss .die-face__pip { fill: var(--danger); }
+
+@keyframes fx-die-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4) rotate(-40deg); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1.15) rotate(6deg); }
+  35% { transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+}
+
+.weapon-dice {
+  display: inline-flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.weapon-dice--none {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.weapon-die__body {
+  fill: var(--panel-2);
+  stroke: var(--accent);
+  stroke-width: 5;
+}
+
+.weapon-die--missile .weapon-die__body {
+  stroke: var(--warning);
+  stroke-dasharray: 14 8;
+}
+
+.weapon-die__num {
+  fill: var(--text);
+  font-family: var(--font-mono);
+  font-size: 52px;
+  font-weight: 600;
+}
+
+.stat-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+
+.stat-bar__line {
+  display: flex;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.stat-bar__stat abbr {
+  color: var(--text-dim);
+  text-decoration: none;
+  margin-right: 2px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+/* Priority target (iteration 13) */
+.combat-ship--clickable {
+  cursor: crosshair;
+}
+
+.combat-ship--clickable:hover {
+  border-color: var(--danger);
+  box-shadow: 0 0 8px var(--danger-glow);
+}
+
+.combat-ship--priority {
+  border: 1px solid var(--danger);
+  box-shadow: 0 0 0 2px var(--danger-glow), 0 0 14px var(--danger-glow);
+}
+
+.combat-ship__priority-mark {
+  color: var(--danger);
+}
+
+.stance-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.stance-toggle__label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.stance-toggle__option {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.stance-toggle__option--active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.map-screen__escalations-title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+
 /* --- Tactical readout (iteration 12.3) ------------------------------------
    Forecast per doctrine (restored after the ForecastBar refactor), the
    hovered-part delta line, and the firing-solutions hit-chance tables. */

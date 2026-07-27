@@ -9,6 +9,7 @@ import {
   initCombat,
   openingTargetIndex,
   runToEnd,
+  setPriorityTarget,
   unconsumedContingentCards,
   useActive,
 } from './combatEngine';
@@ -965,6 +966,49 @@ describe('targeting doctrine (iteration 9.4)', () => {
     state = advanceRound(state); // cannon round 1
     const roll = state.log.find((e) => e.kind === 'roll' && e.side === 'player') as { targetIndex: number };
     expect(roll.targetIndex).toBe(0); // tough group, index 0
+  });
+
+  it('a clicked priority target overrides the stance while it lives (iteration 13)', () => {
+    const fleet = [{ stats: blankStats({ initiative: 5, hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({
+      groups: [
+        { label: 'tough', count: 1, stats: blankStats({ hp: 5 }) },
+        { label: 'fragile', count: 1, stats: blankStats({ hp: 1 }) },
+      ],
+    });
+    let state = initCombat(fleet, foe, 1, 'weakest'); // stance would pick fragile (index 1)
+    state = setPriorityTarget(state, 0);
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1
+    const roll = state.log.find((e) => e.kind === 'roll' && e.side === 'player') as { targetIndex: number };
+    expect(roll.targetIndex).toBe(0); // priority wins over the weakest stance
+  });
+
+  it('priority beats even the siege cannon\'s own override, and a dead/invalid priority clears', () => {
+    const fleet = [
+      {
+        stats: blankStats({ initiative: 5, hp: 20, cannons: [{ diceCount: 1, damage: 1, targetHighest: true }] }),
+        initialDamage: 0,
+      },
+    ];
+    const foe = enemy({
+      groups: [
+        { label: 'tough', count: 1, stats: blankStats({ hp: 5 }) },
+        { label: 'fragile', count: 1, stats: blankStats({ hp: 1 }) },
+      ],
+    });
+    let state = initCombat(fleet, foe, 1, 'weakest');
+    state = setPriorityTarget(state, 1); // point everything at the fragile ship despite the siege die
+    state = advanceRound(state);
+    state = advanceRound(state);
+    const roll = state.log.find((e) => e.kind === 'roll' && e.side === 'player') as { targetIndex: number };
+    expect(roll.targetIndex).toBe(1);
+    // Setting a priority on a destroyed ship clears instead of sticking.
+    const cleared = setPriorityTarget(
+      { ...state, enemyShips: state.enemyShips.map((s) => ({ ...s, damage: s.stats.hp })) },
+      0,
+    );
+    expect(cleared.priorityTargetIndex).toBeNull();
   });
 
   it('the siege cannon\'s per-die override always targets highest-HP, regardless of stance', () => {

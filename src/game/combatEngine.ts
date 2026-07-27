@@ -52,6 +52,12 @@ export interface CombatState {
   // the player changes it on the prep screen), applies to every player die.
   // Enemy targeting is always lowest-HP-first, untouched by this.
   targetingStance: TargetingStance;
+  // Iteration 13: a manually-picked enemy ship (flattened index) that ALL
+  // player dice fire at while it lives — clicked in the combat theater.
+  // Beats the stance and the siege cannon's per-die override (player intent
+  // outranks doctrine); dead/absent priority falls back to the stance.
+  // Additive + optional, so pre-13 saves stay loadable.
+  priorityTargetIndex?: number | null;
   log: CombatEvent[];
   winner?: Side;
 }
@@ -172,6 +178,7 @@ function fireShip(
   armedEffects: ArmedEffects,
   flakState: FlakState,
   targetingStance: TargetingStance,
+  priorityTargetIndex: number | null | undefined,
   checkWinner: () => Side | null,
 ): Side | null {
   if (!isAlive(ship)) return null;
@@ -209,12 +216,18 @@ function fireShip(
         }
       }
 
-      // The siege cannon's per-die override always wins; otherwise a player
-      // ship's dice follow the fleet's targeting doctrine (9.4) — enemy
-      // targeting is always lowest-HP-first, untouched by the stance.
+      // Iteration 13: a clicked priority target outranks everything for
+      // player dice while it's alive and legal. Otherwise the siege
+      // cannon's per-die override wins, then the fleet doctrine (9.4) —
+      // enemy targeting is always lowest-HP-first, untouched by any of it.
+      const defenders = legalDefenders(opponentsOf(ship), roundModifiers);
+      const priority =
+        ship.side === 'player' && priorityTargetIndex != null
+          ? defenders.find((s) => s.index === priorityTargetIndex)
+          : undefined;
       const preferHighest =
         ship.side === 'player' ? weapon.targetHighest || targetingStance === 'strongest' : !!weapon.targetHighest;
-      const target = pickTarget(legalDefenders(opponentsOf(ship), roundModifiers), preferHighest);
+      const target = priority ?? pickTarget(defenders, preferHighest);
       if (!target) return checkWinner(); // no legal target — the barrage finds nothing
 
       // Shield capacitors add bonus shield only during the missile phase
@@ -441,6 +454,7 @@ export function initCombat(
     armedEffects: { bulkheadsArmed: false },
     usedActives: [],
     targetingStance,
+    priorityTargetIndex: null,
     log: [],
     winner: undefined,
   };
@@ -519,6 +533,7 @@ export function advanceRound(state: CombatState): CombatState {
       armedEffects,
       flakState,
       state.targetingStance,
+      state.priorityTargetIndex,
       checkWinner,
     );
     if (winner) break;
@@ -539,9 +554,18 @@ export function advanceRound(state: CombatState): CombatState {
     armedEffects,
     usedActives: state.usedActives,
     targetingStance: state.targetingStance,
+    priorityTargetIndex: state.priorityTargetIndex,
     log,
     winner: winner ?? undefined,
   };
+}
+
+// Iteration 13: set (or clear, with null) the manual priority target.
+// Only an alive enemy ship is accepted; anything else clears instead —
+// clicking a wreck should never leave a stale lock.
+export function setPriorityTarget(state: CombatState, index: number | null): CombatState {
+  const valid = index !== null && state.enemyShips.some((s) => s.index === index && s.stats.hp - s.damage > 0);
+  return { ...state, priorityTargetIndex: valid ? index : null };
 }
 
 export function runToEnd(state: CombatState): CombatState {

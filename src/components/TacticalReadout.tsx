@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
-import { forecastWinRate } from '../game/forecast';
 import { weaponHitChance } from '../game/hitMath';
-import { getPart } from '../game/parts';
-import { effectiveSlots, playerShipLabel } from '../game/ship';
+import { playerShipLabel } from '../game/ship';
 import type { TargetingStance } from '../game/combatEngine';
-import type { EnemyDef, PartId, PlayerShipState, ShipStats, WeaponStats } from '../game/types';
+import type { EnemyDef, PlayerShipState, ShipStats, WeaponStats } from '../game/types';
+
+// Iteration 13: the win-rate forecast is GONE by design — per-weapon odds
+// (below) are the only numbers the player gets before a fight; outcomes
+// are discovered by playing. `forecast.ts` still exists for the balance
+// script and tests; nothing player-facing calls it.
 
 interface TacticalReadoutProps {
   fleet: PlayerShipState[];
@@ -12,51 +14,6 @@ interface TacticalReadoutProps {
   enemy: EnemyDef;
   stance: TargetingStance;
   onSetStance: (stance: TargetingStance) => void;
-  // Iteration 12.3 delta preview: the inventory part currently hovered (and
-  // the ship it would go to). Null when nothing is hovered.
-  hoveredPartId: PartId | null;
-  selectedShipIndex: number;
-}
-
-const FORECAST_PIPS = 20;
-
-// `forecastWinRate` returns a whole-number percentage (0-100).
-function forecastTone(ratePct: number): string {
-  if (ratePct < 40) return 'danger';
-  if (ratePct <= 70) return 'warning';
-  return 'success';
-}
-
-function ForecastRow({
-  label,
-  rate,
-  active,
-  onClick,
-}: {
-  label: string;
-  rate: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const pct = Math.round(rate);
-  const filled = Math.round((rate / 100) * FORECAST_PIPS);
-  const tone = forecastTone(rate);
-  return (
-    <button
-      type="button"
-      className={`forecast-row${active ? ' forecast-row--active' : ''}`}
-      onClick={onClick}
-      title={active ? 'Current doctrine' : 'Switch doctrine'}
-    >
-      <span className="forecast-row__label">{label}</span>
-      <span className={`forecast-row__pips forecast-row__pips--${tone}`} aria-hidden="true">
-        {Array.from({ length: FORECAST_PIPS }, (_, i) => (
-          <span key={i} className={`forecast-pip${i < filled ? ' forecast-pip--filled' : ''}`} />
-        ))}
-      </span>
-      <span className={`forecast-row__pct forecast-row__pct--${tone}`}>{pct}%</span>
-    </button>
-  );
 }
 
 function weaponLabel(weapon: WeaponStats, kind: 'cannon' | 'missile'): string {
@@ -75,33 +32,7 @@ function shipWeapons(stats: ShipStats): { weapon: WeaponStats; phase: 'missile' 
   ];
 }
 
-export function TacticalReadout({
-  fleet,
-  fleetStats,
-  enemy,
-  stance,
-  onSetStance,
-  hoveredPartId,
-  selectedShipIndex,
-}: TacticalReadoutProps) {
-  const forecastWeakest = useMemo(() => forecastWinRate(fleet, enemy, undefined, 'weakest'), [fleet, enemy]);
-  const forecastStrongest = useMemo(() => forecastWinRate(fleet, enemy, undefined, 'strongest'), [fleet, enemy]);
-
-  // Delta preview: the forecast if the hovered inventory part were equipped
-  // to the selected ship right now. Null when un-equippable (no free slot).
-  const preview = useMemo(() => {
-    if (!hoveredPartId) return null;
-    const ship = fleet[selectedShipIndex];
-    if (!ship) return null;
-    if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades)) return { blocked: true as const };
-    const withPart = fleet.map((s, i) =>
-      i === selectedShipIndex ? { ...s, equipped: [...s.equipped, hoveredPartId] } : s,
-    );
-    return { blocked: false as const, rate: forecastWinRate(withPart, enemy, undefined, stance) };
-  }, [hoveredPartId, fleet, selectedShipIndex, enemy, stance]);
-
-  const current = stance === 'weakest' ? forecastWeakest : forecastStrongest;
-
+export function TacticalReadout({ fleet, fleetStats, enemy, stance, onSetStance }: TacticalReadoutProps) {
   const playerRows = fleet.flatMap((_ship, shipIndex) => {
     const stats = fleetStats[shipIndex];
     if (!stats) return [];
@@ -128,33 +59,26 @@ export function TacticalReadout({
     <section className="tactical-readout">
       <h3 className="tactical-readout__title">Tactical readout</h3>
 
-      <div className="forecast-stances">
-        <ForecastRow
-          label="Focus weakest"
-          rate={forecastWeakest}
-          active={stance === 'weakest'}
+      <div className="stance-toggle" role="group" aria-label="Targeting doctrine">
+        <span className="stance-toggle__label">Doctrine:</span>
+        <button
+          type="button"
+          className={`stance-toggle__option${stance === 'weakest' ? ' stance-toggle__option--active' : ''}`}
           onClick={() => onSetStance('weakest')}
-        />
-        <ForecastRow
-          label="Focus strongest"
-          rate={forecastStrongest}
-          active={stance === 'strongest'}
+          title="Dice hunt the lowest-HP enemy first — clears screens and swarms fastest"
+        >
+          Focus weakest
+        </button>
+        <button
+          type="button"
+          className={`stance-toggle__option${stance === 'strongest' ? ' stance-toggle__option--active' : ''}`}
           onClick={() => onSetStance('strongest')}
-        />
+          title="Dice hunt the highest-HP enemy first — punches through screens to the threat"
+        >
+          Focus strongest
+        </button>
       </div>
-      {hoveredPartId && (
-        <p className="forecast-delta">
-          {getPart(hoveredPartId).name} on {playerShipLabel(fleet, selectedShipIndex)}:{' '}
-          {preview?.blocked ? (
-            <strong>no free slot</strong>
-          ) : preview ? (
-            <>
-              {Math.round(current)}% → <strong>{Math.round(preview.rate)}%</strong>
-            </>
-          ) : null}
-        </p>
-      )}
-      <p className="hint">Forecast excludes reaction cards and active abilities — those are your edge.</p>
+      <p className="hint">In the fight, click an enemy ship to override doctrine and focus fire on it.</p>
 
       <details className="firing-solutions" open>
         <summary>Firing solutions</summary>

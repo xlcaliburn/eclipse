@@ -161,19 +161,37 @@ export function MapScreen({
           : "Pick your next stop. Only nearby columns, repair yards, and the boss are known up front — the rest is fog until you scout it or get there."}
       </p>
 
+      {/* Iteration 13: legible copy, 1-indexed columns everywhere (players
+          count columns from 1; the quest badge already did). "From column
+          N" = the first column whose fights carry the buff. */}
       <div className="map-screen__escalations">
+        {(escalations.filter((esc) => esc.act === act).length > 0 || activeQuest) && (
+          <span className="map-screen__escalations-title">Sector threats</span>
+        )}
         {escalations
           .filter((esc) => esc.act === act)
           .map((esc, i) => (
-            <span key={i} className="escalation-badge">
-              After col {esc.landsAfterColumn}:{' '}
-              {esc.revealed ? `${getEscalation(esc.id).name} (${getEscalation(esc.id).description})` : 'unknown'}
+            <span
+              key={i}
+              className="escalation-badge"
+              title={
+                esc.revealed
+                  ? getEscalation(esc.id).description
+                  : 'A fleet-wide enemy upgrade is coming. Reveal it early with intel (broker or events).'
+              }
+            >
+              {esc.revealed
+                ? `From column ${esc.landsAfterColumn + 2}: ${getEscalation(esc.id).name} — ${getEscalation(esc.id).description}`
+                : `From column ${esc.landsAfterColumn + 2}: unknown enemy upgrade (decrypt via intel)`}
             </span>
           ))}
         {activeQuest && (
-          <span className="escalation-badge escalation-badge--quest">
-            {QUEST_MARKER_LABEL[activeQuest.archetype]} quest: column {activeQuest.target.col + 1}, lane{' '}
-            {activeQuest.target.row + 1}
+          <span
+            className="escalation-badge escalation-badge--quest"
+            title="Your active job — route through the marked node to complete it."
+          >
+            {QUEST_MARKER_LABEL[activeQuest.archetype]} quest target: column {activeQuest.target.col + 1}, lane{' '}
+            {activeQuest.target.row + 1} (★ on the chart)
           </span>
         )}
       </div>

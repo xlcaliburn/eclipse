@@ -31,10 +31,10 @@ interface CombatScreenProps {
   canWithdraw: boolean;
   onPlayCard: (cardId: CardId) => void;
   onAdvanceRound: () => void;
-  onAutoResolve: () => void;
   onContinue: () => void;
   onWithdraw: () => void;
   onUseActive: (shipIndex: number, abilityIndex: number) => void;
+  onSelectEnemy: (index: number) => void;
 }
 
 // Resolves a flattened enemy-side index (see combatEngine.ts's initCombat,
@@ -121,14 +121,23 @@ export function CombatScreen({
   canWithdraw,
   onPlayCard,
   onAdvanceRound,
-  onAutoResolve,
   onContinue,
   onWithdraw,
   onUseActive,
+  onSelectEnemy,
 }: CombatScreenProps) {
   const finished = Boolean(combat.winner);
   const won = combat.winner === 'player';
   const withdrawEnabled = canWithdraw && combat.round >= 1;
+
+  // Iteration 13: the priority lock only *displays* while its target lives —
+  // the engine already ignores a dead priority, but a ring on a wreck reads
+  // as a stale lock the player can't click away.
+  const effectivePriority =
+    combat.priorityTargetIndex != null &&
+    combat.enemyShips.some((s) => s.index === combat.priorityTargetIndex && s.stats.hp - s.damage > 0)
+      ? combat.priorityTargetIndex
+      : null;
 
   // Every active part any player ship carries, identified by (shipIndex,
   // abilityIndex) — the same pair `canUseActive`/`onUseActive` key off of.
@@ -144,7 +153,6 @@ export function CombatScreen({
   const reducedMotion = usePrefersReducedMotion();
   const [revealedCount, setRevealedCount] = useState(combat.log.length);
   const prevLogLengthRef = useRef(combat.log.length);
-  const skipNextReplayRef = useRef(false);
   const tickTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -167,8 +175,7 @@ export function CombatScreen({
       setRevealedCount(newLength); // fresh combat, or nothing new to reveal
       return;
     }
-    if (reducedMotion || skipNextReplayRef.current) {
-      skipNextReplayRef.current = false;
+    if (reducedMotion) {
       setRevealedCount(newLength);
       return;
     }
@@ -232,6 +239,11 @@ export function CombatScreen({
       if (from && to) {
         const lastPhase = [...combat.log.slice(0, revealedCount)].reverse().find((e) => e.kind === 'phase-start');
         const missile = lastPhase?.kind === 'phase-start' && lastPhase.phase === 'missile';
+        // Iteration 13: show the actual die, near the shooter, tinted by outcome.
+        push(
+          { kind: 'die', x: from.x + (to.x - from.x) * 0.18, y: from.y + (to.y - from.y) * 0.18 - 26, raw: event.raw, hit: event.hit },
+          900,
+        );
         if (event.hit) {
           push({ kind: 'tracer', x1: from.x, y1: from.y, x2: to.x, y2: to.y, side: event.side, missile, veer: false }, 650);
           push({ kind: 'damage', x: to.x, y: to.y - 34, text: `−${event.damage}` }, 1000);
@@ -258,12 +270,6 @@ export function CombatScreen({
 
     if (spawned.length > 0) setFx((all) => [...all, ...spawned]);
   }, [revealedCount, reducedMotion, combat.log, centerOf]);
-
-  function handleAutoResolve() {
-    skipNextReplayRef.current = true;
-    setFx([]);
-    onAutoResolve();
-  }
 
   function fastForwardReplay() {
     if (tickTimerRef.current !== null) {
@@ -300,10 +306,8 @@ export function CombatScreen({
 
   return (
     <div className="combat-screen">
-      {finished ? (
+      {finished && (
         <h2 className={won ? 'verdict verdict--win' : 'verdict verdict--loss'}>{won ? 'Victory' : 'Defeat'}</h2>
-      ) : (
-        <h2>In progress…</h2>
       )}
 
       {/* Click anywhere in the theater to fast-forward the round replaying. */}
@@ -329,8 +333,17 @@ export function CombatScreen({
           activeAttacker={activeAttacker}
           activeTarget={activeTarget}
           onShipEl={registerShipEl}
+          onSelectEnemy={!finished && !isReplaying ? onSelectEnemy : undefined}
+          priorityTargetIndex={effectivePriority}
         />
       </div>
+      {!finished && (
+        <p className="hint combat-priority-hint">
+          {effectivePriority != null
+            ? 'All guns locked on the marked ship — click it again to release.'
+            : 'Click an enemy ship to focus all fire on it.'}
+        </p>
+      )}
 
       {/* Open by default — the log is the fight, not an appendix. React only
           patches `open` when the prop itself changes, so collapsing it by
@@ -362,9 +375,6 @@ export function CombatScreen({
               onClick={onAdvanceRound}
             >
               Next round
-            </button>
-            <button type="button" className="shop-button" disabled={isReplaying} onClick={handleAutoResolve}>
-              Auto-resolve
             </button>
             <button
               type="button"

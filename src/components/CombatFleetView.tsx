@@ -5,7 +5,7 @@ import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
 import { EnemySilhouette, FrameSilhouette, BrokenHullGlyph } from './ShipSilhouette';
 import type { EnemyArchetype } from './ShipSilhouette';
-import { HpPipRow } from './HpPipRow';
+import { StatBar } from './StatBar';
 
 interface ActiveAttacker {
   side: Side;
@@ -33,6 +33,10 @@ interface CombatFleetViewProps {
   // Iteration 12.2: the fx layer needs real card positions to draw tracers
   // between ships. Each card reports its element; null on unmount.
   onShipEl?: (side: Side, index: number, el: HTMLElement | null) => void;
+  // Iteration 13: click an enemy card to make it the fleet's priority
+  // target (click again to clear). Set only during a live fight.
+  onSelectEnemy?: (index: number) => void;
+  priorityTargetIndex?: number | null;
 }
 
 function shipCard(
@@ -45,26 +49,33 @@ function shipCard(
   activeTarget: ActiveTarget | null | undefined,
   upgrades?: UpgradeId[],
   onShipEl?: (side: Side, index: number, el: HTMLElement | null) => void,
+  onSelectEnemy?: (index: number) => void,
+  isPriority = false,
 ) {
   const hp = Math.max(0, ship.stats.hp - ship.damage);
   const destroyed = hp <= 0;
   const damaged = !destroyed && hp < ship.stats.hp * 0.5;
-  const weapons = [
-    ...ship.stats.missiles.map((w) => `${w.diceCount}× missile (${w.damage} dmg)`),
-    ...ship.stats.cannons.map((w) => `${w.diceCount}× cannon (${w.damage} dmg)`),
-  ];
 
   const isAttacker = activeAttacker?.side === side && activeAttacker.index === index;
   const isTarget = activeTarget?.side === side && activeTarget.index === index;
   const highlight = isAttacker ? ' combat-ship--firing' : isTarget ? (activeTarget!.hit ? ' combat-ship--hit' : ' combat-ship--miss') : '';
+  const clickable = side === 'enemy' && !destroyed && !!onSelectEnemy;
 
   return (
     <div
       key={label}
       ref={onShipEl ? (el) => onShipEl(side, index, el) : undefined}
-      className={`combat-ship${destroyed ? ' combat-ship--destroyed' : ''}${highlight}`}
+      className={`combat-ship${destroyed ? ' combat-ship--destroyed' : ''}${highlight}${clickable ? ' combat-ship--clickable' : ''}${isPriority ? ' combat-ship--priority' : ''}`}
+      onClick={clickable ? () => onSelectEnemy!(index) : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') onSelectEnemy!(index); } : undefined}
+      title={clickable ? (isPriority ? 'Priority target — click to clear' : 'Click to focus all fire here') : undefined}
     >
-      <div className="combat-ship__name">{label}</div>
+      <div className="combat-ship__name">
+        {isPriority && <span className="combat-ship__priority-mark" aria-label="priority target">◎ </span>}
+        {label}
+      </div>
       {destroyed ? (
         <>
           <BrokenHullGlyph size={48} />
@@ -73,32 +84,16 @@ function shipCard(
       ) : (
         <>
           <div className={damaged ? 'silhouette--damaged' : undefined}>{silhouette}</div>
-          <HpPipRow hp={hp} maxHp={ship.stats.hp} />
-          <div className="combat-ship__hp">
-            HP {hp}/{ship.stats.hp}
-          </div>
-          <details className="combat-ship__secondary">
-            <summary className="combat-ship__secondary-toggle">Stats &amp; weapons</summary>
-            <div className="combat-ship__stats">
-              Init {ship.stats.initiative} · Comp {ship.stats.computer} · Shield {ship.stats.shield}
+          <StatBar stats={ship.stats} damage={ship.damage} />
+          {upgrades && upgrades.length > 0 && (
+            <div className="ship-card__upgrades">
+              {upgrades.map((upgradeId, i) => (
+                <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
+                  {getUpgrade(upgradeId).name}
+                </span>
+              ))}
             </div>
-            {weapons.length > 0 && (
-              <ul className="combat-ship__weapons">
-                {weapons.map((w, i) => (
-                  <li key={i}>{w}</li>
-                ))}
-              </ul>
-            )}
-            {upgrades && upgrades.length > 0 && (
-              <div className="ship-card__upgrades">
-                {upgrades.map((upgradeId, i) => (
-                  <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
-                    {getUpgrade(upgradeId).name}
-                  </span>
-                ))}
-              </div>
-            )}
-          </details>
+          )}
         </>
       )}
     </div>
@@ -117,11 +112,12 @@ export function CombatFleetView({
   activeAttacker,
   activeTarget,
   onShipEl,
+  onSelectEnemy,
+  priorityTargetIndex,
 }: CombatFleetViewProps) {
   return (
     <div className="combat-fleets">
       <div className="combat-fleets__side">
-        <h3>Your fleet</h3>
         {playerShips.map((ship, i) =>
           shipCard(
             ship,
@@ -137,7 +133,6 @@ export function CombatFleetView({
         )}
       </div>
       <div className="combat-fleets__side combat-fleets__side--enemy">
-        <h3>{enemyName}</h3>
         {enemyShips.map((ship, i) =>
           shipCard(
             ship,
@@ -149,6 +144,8 @@ export function CombatFleetView({
             activeTarget,
             undefined,
             onShipEl,
+            onSelectEnemy,
+            priorityTargetIndex === i,
           ),
         )}
       </div>

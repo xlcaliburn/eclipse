@@ -2,8 +2,8 @@ import { CARGO_POD_PART_ID, getPart } from '../game/parts';
 import { deriveStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
-import { HpPipRow } from './HpPipRow';
 import { PartCard } from './PartCard';
+import { StatBar } from './StatBar';
 import { FrameSilhouette } from './ShipSilhouette';
 
 interface FleetPanelProps {
@@ -61,10 +61,6 @@ export function FleetPanel({
             <div className="ship-card__header">
               <FrameSilhouette frameId={ship.frameId} size={36} />
               <span className="ship-card__name">{playerShipLabel(fleet, shipIndex)}</span>
-              <span className="ship-card__stats">
-                HP {Math.max(0, stats.hp - ship.damage)}/{stats.hp} · Init {stats.initiative} · Comp{' '}
-                {stats.computer} · Shield {stats.shield}
-              </span>
               {onScuttle && ship.frameId !== 'cruiser' && (
                 <button
                   type="button"
@@ -78,7 +74,8 @@ export function FleetPanel({
                 </button>
               )}
             </div>
-            <HpPipRow hp={Math.max(0, stats.hp - ship.damage)} maxHp={stats.hp} />
+            {/* Iteration 13: same StatBar as the enemy panel and combat cards. */}
+            <StatBar stats={stats} damage={ship.damage} />
             {ship.upgrades.length > 0 && (
               <div className="ship-card__upgrades">
                 {ship.upgrades.map((upgradeId, i) => (

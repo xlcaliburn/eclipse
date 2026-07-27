@@ -41,6 +41,7 @@ Rules for working with these files:
 | [10](plans/iteration-10.md) | Space-game visual overhaul: design system, starchart map, ship silhouettes, animated combat theater (presentation only) | implemented (partial — see iteration-10.md deviations) |
 | [11](plans/iteration-11.md) | Tempo & teeth: auto-heal interlude, initiative-as-evasion rework, act-1-late/act-2 difficulty pass tuned via the re-armed balance script | **in progress** (partial in working tree: I8-addendum items landed; evasion + tuning outstanding) |
 | [12](plans/iteration-12.md) | Coordinate layer & decision support: starchart edges/trail, combat-theater fx, hit-chance matrix, forecast restore + delta preview | implemented |
+| [13](plans/iteration-13.md) | Dice on the table: weapons/rolls as dice, shared stat bar, click-to-focus priority targeting, forecast removed, combat declutter, map threat-strip copy | implemented |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes

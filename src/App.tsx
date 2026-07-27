@@ -186,10 +186,10 @@ function App() {
           canWithdraw={hasLineOfRetreat(state)}
           onPlayCard={(cardId) => dispatch({ type: 'PLAY_CARD', cardId })}
           onAdvanceRound={() => dispatch({ type: 'ADVANCE_ROUND' })}
-          onAutoResolve={() => dispatch({ type: 'AUTO_RESOLVE' })}
           onContinue={() => dispatch({ type: 'CONTINUE' })}
           onWithdraw={() => dispatch({ type: 'WITHDRAW' })}
           onUseActive={(shipIndex, abilityIndex) => dispatch({ type: 'USE_ACTIVE', shipIndex, abilityIndex })}
+          onSelectEnemy={(index) => dispatch({ type: 'SET_PRIORITY_TARGET', index })}
         />
       )}
 

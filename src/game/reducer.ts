@@ -7,6 +7,7 @@ import {
   hasMissilePhase,
   initCombat,
   playCard,
+  setPriorityTarget,
   runToEnd,
   unconsumedContingentCards,
   useActive,
@@ -62,6 +63,7 @@ export type RunAction =
   | { type: 'ADVANCE_ROUND' }
   | { type: 'AUTO_RESOLVE' }
   | { type: 'PLAY_CARD'; cardId: CardId }
+  | { type: 'SET_PRIORITY_TARGET'; index: number | null }
   | { type: 'CONTINUE' }
   | { type: 'WITHDRAW' }
   | { type: 'PICK_UPGRADE'; upgradeId: UpgradeId; shipIndex: number }
@@ -569,6 +571,15 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (!canPlayCard(state.combat, action.cardId)) return state;
       const combat = playCard(state.combat, action.cardId);
       return { ...state, combat, hand: removeOnce(state.hand, action.cardId) };
+    }
+
+    // Iteration 13: click an enemy ship in the theater to make every player
+    // die fire at it while it lives; clicking the current priority again
+    // clears it. No RNG — determinism untouched.
+    case 'SET_PRIORITY_TARGET': {
+      if (state.phase !== 'combat' || !state.combat || state.combat.winner) return state;
+      const index = state.combat.priorityTargetIndex === action.index ? null : action.index;
+      return { ...state, combat: setPriorityTarget(state.combat, index) };
     }
 
     case 'CONTINUE': {

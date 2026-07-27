@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { deriveFleetStats, fleetHasOnlyMissiles, fleetHasWeapon } from '../game/ship';
 import { BOUNTY_BONUS_CREDITS, hasLineOfRetreat } from '../game/reducer';
 import type { RunAction } from '../game/reducer';
-import type { PartId, RunState } from '../game/types';
+import type { RunState } from '../game/types';
 import { EnemyPanel } from './EnemyPanel';
 import { FleetPanel } from './FleetPanel';
 import { TacticalReadout } from './TacticalReadout';
@@ -15,7 +15,6 @@ interface PrepScreenProps {
 export function PrepScreen({ state, dispatch }: PrepScreenProps) {
   const enemy = state.currentEnemy;
   const [selectedShipIndex, setSelectedShipIndex] = useState(0);
-  const [hoveredPartId, setHoveredPartId] = useState<PartId | null>(null);
   const safeSelectedIndex = Math.min(selectedShipIndex, state.fleet.length - 1);
 
   const fleetStats = useMemo(() => deriveFleetStats(state.fleet), [state.fleet]);
@@ -47,7 +46,6 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
             state.activeQuest?.archetype === 'delivery' ? state.activeQuest.carrierShipIndex : undefined
           }
           onMoveCargoPod={(toShipIndex) => dispatch({ type: 'MOVE_CARGO_POD', toShipIndex })}
-          onPartHover={setHoveredPartId}
         />
       </div>
 
@@ -63,8 +61,6 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
           enemy={enemy}
           stance={state.targetingStance}
           onSetStance={(stance) => dispatch({ type: 'SET_TARGETING_STANCE', stance })}
-          hoveredPartId={hoveredPartId}
-          selectedShipIndex={safeSelectedIndex}
         />
         {isBountyFight && (
           <p className="hint">

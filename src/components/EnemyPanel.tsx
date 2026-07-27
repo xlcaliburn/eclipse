@@ -2,6 +2,7 @@ import { openingTargetIndex } from '../game/combatEngine';
 import { getEscalation } from '../game/escalations';
 import type { EnemyDef, EnemyGroup, ShipStats } from '../game/types';
 import { classifyArchetype, EnemySilhouette } from './ShipSilhouette';
+import { StatBar } from './StatBar';
 
 interface EnemyPanelProps {
   enemy: EnemyDef;
@@ -19,17 +20,6 @@ function groupStartIndices(groups: EnemyGroup[]): number[] {
     n += group.count;
   }
   return starts;
-}
-
-function weaponSummary(stats: ShipStats): string[] {
-  const lines: string[] = [];
-  for (const w of stats.missiles) {
-    lines.push(`${w.diceCount}× missile (${w.damage} dmg)`);
-  }
-  for (const w of stats.cannons) {
-    lines.push(`${w.diceCount}× cannon (${w.damage} dmg)`);
-  }
-  return lines;
 }
 
 // Each point of computer (or shield-piercing) is worth exactly one die face
@@ -96,21 +86,8 @@ export function EnemyPanel({ enemy, fleetStats }: EnemyPanelProps) {
           <div className="enemy-panel__count">
             {group.count} ship{group.count > 1 ? 's' : ''} per side
           </div>
-          <dl className="stat-grid">
-            <dt>HP</dt>
-            <dd>{group.stats.hp}</dd>
-            <dt>Initiative</dt>
-            <dd>{group.stats.initiative}</dd>
-            <dt>Computer</dt>
-            <dd>{group.stats.computer}</dd>
-            <dt>Shield</dt>
-            <dd>{group.stats.shield}</dd>
-          </dl>
-          <ul className="weapon-list">
-            {weaponSummary(group.stats).map((line, j) => (
-              <li key={j}>{line}</li>
-            ))}
-          </ul>
+          {/* Iteration 13: identical stat presentation to the player's side. */}
+          <StatBar stats={group.stats} />
         </div>
       ))}
 
