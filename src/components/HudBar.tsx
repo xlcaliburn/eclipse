@@ -1,3 +1,6 @@
+import { setMotionSetting } from '../motionPreference';
+import { useMotionSetting } from './useReducedMotion';
+
 interface HudBarProps {
   credits: number;
   intel: number;
@@ -10,6 +13,9 @@ interface HudBarProps {
 // run's economy is live. This is the single place credits/intel are shown —
 // per-screen copies were removed once this bar existed.
 export function HudBar({ credits, intel, onViewMap }: HudBarProps) {
+  const motion = useMotionSetting();
+  const reduced = motion === 'reduced';
+
   return (
     <div className="hud-bar">
       {onViewMap && (
@@ -17,6 +23,19 @@ export function HudBar({ credits, intel, onViewMap }: HudBarProps) {
           Map
         </button>
       )}
+      <button
+        type="button"
+        className="hud-bar__motion-button"
+        onClick={() => setMotionSetting(reduced ? 'full' : 'reduced')}
+        aria-pressed={!reduced}
+        title={
+          reduced
+            ? 'Animations are off (following your system setting unless you change it here). Click to turn them on.'
+            : 'Animations are on. Click to turn them off.'
+        }
+      >
+        Motion: {reduced ? 'off' : 'on'}
+      </button>
       <span className="hud-bar__counter hud-bar__counter--credits">{credits} cr</span>
       <span className="hud-bar__counter hud-bar__counter--intel">{intel} intel</span>
     </div>

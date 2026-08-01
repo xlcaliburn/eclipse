@@ -1,20 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
+import { getMotionSetting, isReducedMotion, subscribeMotion } from '../motionPreference';
+import type { MotionSetting } from '../motionPreference';
 
-// Iteration 10.7: a JS-level read of prefers-reduced-motion for the one
-// place that can't be handled by CSS alone — the combat theater's replay
-// timing (everything else honors the preference via @media rules in CSS).
+// Iteration 10.7: a JS-level read of the motion preference for the places
+// CSS can't cover — the combat theater's replay timing and the fx spawner.
+// Reads the resolved setting (OS preference, unless the player overrode it),
+// so an in-app override reaches the JS-timed animations too.
 export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(
-    () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
-  );
+  return useSyncExternalStore(subscribeMotion, isReducedMotion, () => true);
+}
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return;
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  return reduced;
+// The raw setting, for the UI control that changes it.
+export function useMotionSetting(): MotionSetting {
+  return useSyncExternalStore(subscribeMotion, getMotionSetting, () => 'reduced' as const);
 }

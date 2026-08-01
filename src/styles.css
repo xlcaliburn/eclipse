@@ -59,6 +59,24 @@ h1, h2, h3 {
   box-shadow: 0 0 8px var(--accent-glow);
 }
 
+/* Quiet by design — a settings affordance, not a game action. */
+.hud-bar__motion-button {
+  margin-right: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 10px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.hud-bar__motion-button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
 .hud-bar__counter {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -186,12 +204,13 @@ h1, h2, h3 {
   to { opacity: 0.75; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .starfield__layer,
-  .starfield__nebula {
-    animation: none !important;
-    transition: none !important;
-  }
+/* Motion suppression keys off <html data-motion>, not @media, so the in-app
+   setting can override the OS preference (see motionPreference.ts). The
+   attribute defaults to the OS value, so behavior is unchanged by default. */
+:root[data-motion='reduced'] .starfield__layer,
+:root[data-motion='reduced'] .starfield__nebula {
+  animation: none !important;
+  transition: none !important;
 }
 
 /* Panel chrome (iteration 10.1): one shared treatment for every card/panel
@@ -285,11 +304,9 @@ h1, h2, h3 {
   50% { opacity: 0.7; filter: brightness(0.7) saturate(1.4) drop-shadow(0 0 5px var(--danger-glow)); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .silhouette--damaged {
-    animation: none;
-    opacity: 0.85;
-  }
+:root[data-motion='reduced'] .silhouette--damaged {
+  animation: none;
+  opacity: 0.85;
 }
 
 /* --- Dice + shared stat bar (iteration 13) -------------------------------- */
@@ -502,10 +519,8 @@ h1, h2, h3 {
   to { stroke-dashoffset: -12; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .map-edge--reachable {
-    animation: none;
-  }
+:root[data-motion='reduced'] .map-edge--reachable {
+  animation: none;
 }
 
 /* Starchart nodes (iteration 10.4): each node is a small "star system"
@@ -635,11 +650,9 @@ h1, h2, h3 {
   50% { box-shadow: 0 0 16px var(--success-glow); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .map-node--boss,
-  .map-node--repair {
-    animation: none;
-  }
+:root[data-motion='reduced'] .map-node--boss,
+:root[data-motion='reduced'] .map-node--repair {
+  animation: none;
 }
 
 .escalation-badge--quest {
@@ -1225,10 +1238,8 @@ h1, h2, h3 {
   75% { transform: translateX(2px); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .combat-ship--hit {
-    animation: none;
-  }
+:root[data-motion='reduced'] .combat-ship--hit {
+  animation: none;
 }
 
 /* The theater is clickable to fast-forward a replaying round. */
@@ -1719,10 +1730,8 @@ h1, h2, h3 {
   50% { box-shadow: inset 0 0 100px var(--danger-glow); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .end-screen--defeat {
-    animation: none;
-  }
+:root[data-motion='reduced'] .end-screen--defeat {
+  animation: none;
 }
 
 .end-screen__fleet {
@@ -1732,8 +1741,12 @@ h1, h2, h3 {
   margin: 20px 0;
 }
 
+/* Block-level (not inline-grid) and shrink-wrapped: inline-grid put the
+   stats and the New run button on the same line box, so the two centered
+   together and the button landed right of center. */
 .end-screen__stats {
-  display: inline-grid;
+  display: grid;
+  width: max-content;
   margin: 16px auto;
   text-align: left;
 }
