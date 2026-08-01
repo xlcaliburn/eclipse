@@ -129,6 +129,9 @@ export function MapScreen({
       ? 'Boss — unknown'
       : 'Final boss — unknown';
   const fogState = { visited, revealedNodes, visionCol };
+  // Only decrypted escalations are listed — an undecrypted one is a threat
+  // you have no information about, so a placeholder row just adds noise.
+  const revealedEscalations = escalations.filter((esc) => esc.act === act && esc.revealed);
   const isQuestTarget = (col: number, row: number) =>
     !!activeQuest && activeQuest.target.col === col && activeQuest.target.row === row;
 
@@ -165,26 +168,15 @@ export function MapScreen({
           count columns from 1; the quest badge already did). "From column
           N" = the first column whose fights carry the buff. */}
       <div className="map-screen__escalations">
-        {(escalations.filter((esc) => esc.act === act).length > 0 || activeQuest) && (
+        {(revealedEscalations.length > 0 || activeQuest) && (
           <span className="map-screen__escalations-title">Sector threats</span>
         )}
-        {escalations
-          .filter((esc) => esc.act === act)
-          .map((esc, i) => (
-            <span
-              key={i}
-              className="escalation-badge"
-              title={
-                esc.revealed
-                  ? getEscalation(esc.id).description
-                  : 'A fleet-wide enemy upgrade is coming. Reveal it early with intel (broker or events).'
-              }
-            >
-              {esc.revealed
-                ? `From column ${esc.landsAfterColumn + 2}: ${getEscalation(esc.id).name} — ${getEscalation(esc.id).description}`
-                : `From column ${esc.landsAfterColumn + 2}: unknown enemy upgrade (decrypt via intel)`}
-            </span>
-          ))}
+        {revealedEscalations.map((esc, i) => (
+          <span key={i} className="escalation-badge" title={getEscalation(esc.id).description}>
+            From column {esc.landsAfterColumn + 2}: {getEscalation(esc.id).name} —{' '}
+            {getEscalation(esc.id).description}
+          </span>
+        ))}
         {activeQuest && (
           <span
             className="escalation-badge escalation-badge--quest"

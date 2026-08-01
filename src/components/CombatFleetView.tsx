@@ -72,30 +72,37 @@ function shipCard(
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') onSelectEnemy!(index); } : undefined}
       title={clickable ? (isPriority ? 'Priority target — click to clear' : 'Click to focus all fire here') : undefined}
     >
-      <div className="combat-ship__name">
-        {isPriority && <span className="combat-ship__priority-mark" aria-label="priority target">◎ </span>}
-        {label}
-      </div>
-      {destroyed ? (
-        <>
-          <BrokenHullGlyph size={48} />
-          <div className="combat-ship__destroyed">Destroyed</div>
-        </>
-      ) : (
-        <>
+      {/* Art beside the readout, not above it — a fight with six hulls has
+          to fit on screen alongside the log and the round controls. */}
+      <div className="combat-ship__art">
+        {destroyed ? (
+          <BrokenHullGlyph size={36} />
+        ) : (
           <div className={damaged ? 'silhouette--damaged' : undefined}>{silhouette}</div>
-          <StatBar stats={ship.stats} damage={ship.damage} />
-          {upgrades && upgrades.length > 0 && (
-            <div className="ship-card__upgrades">
-              {upgrades.map((upgradeId, i) => (
-                <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
-                  {getUpgrade(upgradeId).name}
-                </span>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+        )}
+      </div>
+      <div className="combat-ship__body">
+        <div className="combat-ship__name">
+          {isPriority && <span className="combat-ship__priority-mark" aria-label="priority target">◎ </span>}
+          {label}
+        </div>
+        {destroyed ? (
+          <div className="combat-ship__destroyed">Destroyed</div>
+        ) : (
+          <>
+            <StatBar stats={ship.stats} damage={ship.damage} />
+            {upgrades && upgrades.length > 0 && (
+              <div className="ship-card__upgrades">
+                {upgrades.map((upgradeId, i) => (
+                  <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
+                    {getUpgrade(upgradeId).name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -124,7 +131,7 @@ export function CombatFleetView({
             'player',
             i,
             playerLabels[i] ?? `Ship #${i + 1}`,
-            <FrameSilhouette frameId={playerFrameIds[i] ?? 'cruiser'} size={64} />,
+            <FrameSilhouette frameId={playerFrameIds[i] ?? 'cruiser'} size={40} />,
             activeAttacker,
             activeTarget,
             playerUpgrades?.[i],
@@ -139,7 +146,7 @@ export function CombatFleetView({
             'enemy',
             i,
             enemyLabels[i] ?? enemyName,
-            <EnemySilhouette archetype={enemyArchetypes[i] ?? 'cruiser'} size={64} />,
+            <EnemySilhouette archetype={enemyArchetypes[i] ?? 'cruiser'} size={40} />,
             activeAttacker,
             activeTarget,
             undefined,

@@ -655,7 +655,7 @@ export function getFinalBoss(id: FinalBossId): EnemyDef {
 export const OPENER: EnemyDef = {
   id: 'pickets',
   name: 'Picket drones',
-  blurb: 'Automated pickets — a warm-up. Missile-only; they can scratch you, never sink you.',
+  blurb: 'Automated pickets — a warm-up.',
   groups: solo('picket', 2, {
     initiative: 0,
     hp: 1,

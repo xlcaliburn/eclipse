@@ -5,7 +5,6 @@ import type { RunAction } from '../game/reducer';
 import type { RunState } from '../game/types';
 import { EnemyPanel } from './EnemyPanel';
 import { FleetPanel } from './FleetPanel';
-import { TacticalReadout } from './TacticalReadout';
 
 interface PrepScreenProps {
   state: RunState;
@@ -55,13 +54,6 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
       </div>
 
       <div className="prep-screen__center">
-        <TacticalReadout
-          fleet={state.fleet}
-          fleetStats={fleetStats}
-          enemy={enemy}
-          stance={state.targetingStance}
-          onSetStance={(stance) => dispatch({ type: 'SET_TARGETING_STANCE', stance })}
-        />
         {isBountyFight && (
           <p className="hint">
             Bounty target — win for +{BOUNTY_BONUS_CREDITS} credits and an upgrade pick, on top of the usual reward.

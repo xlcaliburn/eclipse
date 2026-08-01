@@ -397,34 +397,6 @@ h1, h2, h3 {
   color: var(--danger);
 }
 
-.stance-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.stance-toggle__label {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.stance-toggle__option {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-
-.stance-toggle__option--active {
-  border-color: var(--accent);
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
 .map-screen__escalations-title {
   font-family: var(--font-display);
   font-size: 11px;
@@ -432,133 +404,6 @@ h1, h2, h3 {
   text-transform: uppercase;
   color: var(--text-dim);
   margin-right: 4px;
-}
-
-/* --- Tactical readout (iteration 12.3) ------------------------------------
-   Forecast per doctrine (restored after the ForecastBar refactor), the
-   hovered-part delta line, and the firing-solutions hit-chance tables. */
-.tactical-readout {
-  text-align: left;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  padding: 12px 14px;
-  margin-bottom: 12px;
-}
-
-.tactical-readout__title {
-  margin: 0 0 8px;
-  font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  color: var(--text-dim);
-  text-transform: uppercase;
-}
-
-.forecast-stances {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.forecast-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 1px solid transparent;
-  background: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  font: inherit;
-}
-
-.forecast-row--active {
-  border-color: var(--accent);
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-.forecast-row__label {
-  min-width: 110px;
-  font-size: 12px;
-}
-
-.forecast-row__pips {
-  display: flex;
-  gap: 2px;
-  flex: 1;
-}
-
-.forecast-pip {
-  width: 6px;
-  height: 12px;
-  background: var(--panel-2);
-  border-radius: 1px;
-}
-
-.forecast-row__pips--danger .forecast-pip--filled { background: var(--danger); }
-.forecast-row__pips--warning .forecast-pip--filled { background: var(--warning); }
-.forecast-row__pips--success .forecast-pip--filled { background: var(--success); }
-
-.forecast-row__pct {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  min-width: 44px;
-  text-align: right;
-}
-
-.forecast-row__pct--danger { color: var(--danger); }
-.forecast-row__pct--warning { color: var(--warning); }
-.forecast-row__pct--success { color: var(--success); }
-
-.forecast-delta {
-  margin: 6px 0 0;
-  font-size: 12px;
-  color: var(--accent);
-  font-family: var(--font-mono);
-}
-
-.firing-solutions {
-  margin-top: 10px;
-}
-
-.firing-solutions summary {
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.firing-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.firing-table th {
-  text-align: left;
-  color: var(--text-dim);
-  font-weight: 400;
-  padding: 3px 8px 3px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.firing-table td {
-  padding: 3px 8px 3px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-}
-
-.firing-table td:not(:first-child),
-.firing-table th:not(:first-child) {
-  text-align: right;
-}
-
-.firing-table--enemy th {
-  color: var(--danger);
 }
 
 /* HP as segmented pips (10.3) */
@@ -1284,8 +1129,8 @@ h1, h2, h3 {
 .combat-fleets {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 8px;
   text-align: left;
 }
 
@@ -1298,23 +1143,59 @@ h1, h2, h3 {
   text-align: right;
 }
 
-.combat-fleets__side--enemy .combat-ship {
-  align-items: flex-end;
-}
-
 .combat-fleets__side--enemy .combat-ship__weapons {
   text-align: right;
 }
 
+/* Compact combat card: art in a fixed column beside the readout, so a
+   six-hull fight still fits above the log and the round controls without
+   scrolling between steps. */
 .combat-ship {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
+  padding: 5px 8px;
+  margin-bottom: 5px;
   background: var(--panel-2);
+}
+
+.combat-ship__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.combat-ship__art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.combat-ship .stat-bar {
+  align-items: flex-start;
+  gap: 2px;
+}
+
+/* Enemy side reads right-to-left: readout first, art on the outside. */
+.combat-fleets__side--enemy .combat-ship {
+  grid-template-columns: 1fr auto;
+}
+
+.combat-fleets__side--enemy .combat-ship__art {
+  order: 2;
+}
+
+.combat-fleets__side--enemy .combat-ship__body {
+  order: 1;
+  align-items: flex-end;
+}
+
+.combat-fleets__side--enemy .combat-ship .stat-bar {
+  align-items: flex-end;
 }
 
 .combat-ship--destroyed {
@@ -1571,7 +1452,18 @@ h1, h2, h3 {
   .combat-fleets__side--enemy {
     text-align: left;
   }
+  /* Single column on mobile: both sides read art-first, left-aligned. */
   .combat-fleets__side--enemy .combat-ship {
+    grid-template-columns: auto 1fr;
+  }
+  .combat-fleets__side--enemy .combat-ship__art {
+    order: 1;
+  }
+  .combat-fleets__side--enemy .combat-ship__body {
+    order: 2;
+    align-items: flex-start;
+  }
+  .combat-fleets__side--enemy .combat-ship .stat-bar {
     align-items: flex-start;
   }
   .combat-fleets__side--enemy .combat-ship__weapons {
@@ -1584,7 +1476,7 @@ h1, h2, h3 {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 24px;
+  padding: 14px 16px;
   text-align: center;
 }
 
@@ -1598,17 +1490,19 @@ h1, h2, h3 {
 
 .combat-log {
   text-align: left;
-  margin: 16px 0;
+  margin: 8px 0;
   background: var(--panel-2);
   border-radius: 6px;
-  padding: 8px 16px;
+  padding: 6px 12px;
 }
 
+/* Capped short and auto-scrolled to the newest line, so the round controls
+   below it stay on screen instead of being pushed past the fold. */
 .combat-log__list {
   list-style: none;
   margin: 8px 0 0;
   padding: 0;
-  max-height: 320px;
+  max-height: 150px;
   overflow-y: auto;
   font-size: 13px;
 }
