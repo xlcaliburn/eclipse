@@ -16,8 +16,11 @@
   overhaul): a small set of synthesized/bundled SFX for the combat
   theater's event replay (shots, hits, destruction, warp), mute by
   default, volume in a settings corner. Music optional and last.
-- **Hazard tags on combat nodes** (nebula, solar flare): hold until
-  escalation has been play-tested — competes for the same mental slot.
+- **Hazard tags on combat nodes** (nebula, solar flare): was "hold until
+  escalation has been play-tested." As of iteration 15's planning
+  (2026-08-02), the heat/pursuit track now occupies the second
+  map-pressure slot these were held for — parked indefinitely; do not
+  revisit without retiring or merging with heat.
 - **Energy/reactor system: decided against.** Slots + credits + weapon caps
   already generate the tension; a third constraint isn't worth its UI.
 - **Further random-outcome dice: decided against** beyond the rift cannon.

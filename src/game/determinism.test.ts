@@ -88,8 +88,10 @@ describe('full-run determinism (iteration 9.1)', () => {
       position: { col: 3, row: 0 },
       currentEvent: { eventId: 'derelict-cruiser' as const },
     });
-    const resolvedA = runReducer(eventState(a), { type: 'EVENT_CHOOSE', choiceIndex: 1 });
-    const resolvedB = runReducer(eventState(b), { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    // Choice 1 ("crack the reactor") is chooseShip — exercises the same
+    // 50/50 rng draw the reactor risk used to make unconditionally.
+    const resolvedA = runReducer(eventState(a), { type: 'EVENT_CHOOSE', choiceIndex: 1, shipIndex: 0 });
+    const resolvedB = runReducer(eventState(b), { type: 'EVENT_CHOOSE', choiceIndex: 1, shipIndex: 0 });
     expect(resolvedA).toEqual(resolvedB);
   });
 });

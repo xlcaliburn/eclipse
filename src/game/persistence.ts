@@ -13,7 +13,13 @@ import type { RunState } from './types';
 // companion field for its phase rendered nothing at all — a blank screen,
 // no error. Bumping the version discards those old saves; `isValidRunState`
 // below catches the same shape of bug for any future schema drift.
-export const SAVE_VERSION = 2;
+// v3: the intel currency and the info broker were removed — `intel` and
+// `shopIntel` no longer exist on RunState, so older saves cannot be resumed.
+// v4 (iteration 14): events gained a data-driven option list, a defector
+// multi-stage chain (`pendingEventId`), and win-conditional ambush bonuses
+// (`pendingAmbushBonus`) — `CurrentEventState` also dropped the unused
+// `offeredPartId` field. A v3 save's event shape doesn't match; discard it.
+export const SAVE_VERSION = 4;
 const SAVE_KEY = 'eclipse.save.v1';
 
 interface SaveEnvelope {

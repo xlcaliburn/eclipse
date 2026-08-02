@@ -27,7 +27,8 @@ export const COMMANDERS: Record<CommanderId, Commander> = {
   spymaster: {
     id: 'spymaster',
     name: 'The Spymaster',
-    description: 'Vision extends 2 columns instead of 1. Earns double intel from every combat win.',
+    description:
+      'Vision extends 2 columns instead of 1. Every combat win uncovers something: a lane, the next enemy upgrade, the boss ahead, or more of the chart.',
   },
 };
 

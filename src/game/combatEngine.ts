@@ -651,35 +651,44 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
   const abilityId: PartId = state.playerShips[shipIndex].stats.actives![abilityIndex];
   const usedActives = [...state.usedActives, { shipIndex, abilityIndex }];
 
+  // Every activation logs a part-effect line (2026-08-02). Before, only the
+  // dcbay did — the round-modifier actives changed nothing visible until the
+  // next round resolved, so an activation looked like a dead click and
+  // players re-clicked into the spent state.
+  const armed = (text: string): CombatEvent[] => [...state.log, { kind: 'part-effect', text }];
+
   switch (abilityId) {
     case 'injector':
       return {
         ...state,
         usedActives,
+        log: armed('Overdrive injector armed — your ships fire first this round.'),
         roundModifiers: { ...state.roundModifiers, initiativeBonus: state.roundModifiers.initiativeBonus + 99 },
       };
     case 'uplink2':
       return {
         ...state,
         usedActives,
+        log: armed('Targeting uplink armed — +2 computer for your fleet this round.'),
         roundModifiers: { ...state.roundModifiers, computerBonus: state.roundModifiers.computerBonus + 2 },
       };
     case 'modulator':
       return {
         ...state,
         usedActives,
+        log: armed('Shield modulator armed — +2 shield for your fleet this round.'),
         roundModifiers: { ...state.roundModifiers, playerShieldBonus: state.roundModifiers.playerShieldBonus + 2 },
       };
     case 'dcbay': {
       const playerShips = cloneShips(state.playerShips);
       playerShips[shipIndex].damage = Math.max(0, playerShips[shipIndex].damage - 2);
-      const log: CombatEvent[] = [...state.log, { kind: 'part-effect', text: 'Damage control bay repairs 2 damage.' }];
-      return { ...state, usedActives, playerShips, log };
+      return { ...state, usedActives, playerShips, log: armed('Damage control bay repairs 2 damage.') };
     }
     case 'override':
       return {
         ...state,
         usedActives,
+        log: armed('Fire-control override armed — this ship rerolls each missed die this round.'),
         roundModifiers: {
           ...state.roundModifiers,
           overrideShipIndices: [...state.roundModifiers.overrideShipIndices, shipIndex],
@@ -689,6 +698,7 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
       return {
         ...state,
         usedActives,
+        log: armed('Emergency thrusters armed — this ship evades everything this round, and fires nothing.'),
         roundModifiers: {
           ...state.roundModifiers,
           evadingShipIndices: [...state.roundModifiers.evadingShipIndices, shipIndex],
@@ -698,6 +708,7 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
       return {
         ...state,
         usedActives,
+        log: armed('Chaff launcher armed — natural 6s against this ship are not automatic hits this round.'),
         roundModifiers: {
           ...state.roundModifiers,
           chaffShipIndices: [...state.roundModifiers.chaffShipIndices, shipIndex],

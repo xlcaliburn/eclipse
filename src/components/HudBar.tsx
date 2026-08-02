@@ -3,7 +3,6 @@ import { useMotionSetting } from './useReducedMotion';
 
 interface HudBarProps {
   credits: number;
-  intel: number;
   // Omitted wherever a map peek makes no sense (on the map itself, or once
   // the run is over) — the button simply isn't rendered.
   onViewMap?: () => void;
@@ -12,7 +11,7 @@ interface HudBarProps {
 // Iteration 10.6: a persistent top-bar HUD readout, always visible once a
 // run's economy is live. This is the single place credits/intel are shown —
 // per-screen copies were removed once this bar existed.
-export function HudBar({ credits, intel, onViewMap }: HudBarProps) {
+export function HudBar({ credits, onViewMap }: HudBarProps) {
   const motion = useMotionSetting();
   const reduced = motion === 'reduced';
 
@@ -37,7 +36,6 @@ export function HudBar({ credits, intel, onViewMap }: HudBarProps) {
         Motion: {reduced ? 'off' : 'on'}
       </button>
       <span className="hud-bar__counter hud-bar__counter--credits">{credits} cr</span>
-      <span className="hud-bar__counter hud-bar__counter--intel">{intel} intel</span>
     </div>
   );
 }

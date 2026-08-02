@@ -188,7 +188,10 @@ describe('PICK_NODE — map flow', () => {
     expect(state.phase).toBe('event');
     expect(state.currentEvent).toBeDefined();
 
-    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    // Option 0 is always the safe, unrequired, non-ambush choice across the
+    // whole table (Salvage/Detour/Leave it/Sell.../Move on/...), so this
+    // stays valid no matter which event the map's rng happens to draw.
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 });
     expect(state.currentEvent?.outcomeText).toBeDefined();
 
     state = runReducer(state, { type: 'EVENT_CONTINUE' });
@@ -528,7 +531,6 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
     expect(result.phase).toBe('interlude');
     expect(result.pendingReward).toBeUndefined();
     expect(result.credits).toBe(18); // eliteReward(globalColumn(1, 10)) = 8 + 10
-    expect(result.intel).toBe(3); // WIN_INTEL + ELITE_BONUS_INTEL, no upgrade pick
   });
 
   it('winning the final (act-2) boss ends the run in victory and skips the reward screen', () => {
@@ -695,7 +697,7 @@ describe('PICK_NODE — escalations apply to the chosen enemy', () => {
 describe('ambush events (ancient-cache)', () => {
   it('choosing to force it open sets an ambush; EVENT_CONTINUE routes to prep with that enemy', () => {
     let state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'ancient-cache' } });
-    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 });
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 }); // "Force it open"
     expect(state.currentEvent?.ambushEnemy).toBeDefined();
 
     const result = runReducer(state, { type: 'EVENT_CONTINUE' });
@@ -706,7 +708,7 @@ describe('ambush events (ancient-cache)', () => {
 
   it('declining sets no ambush and EVENT_CONTINUE goes straight to the map', () => {
     let state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'ancient-cache' } });
-    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 }); // "Leave it sealed"
     expect(state.currentEvent?.ambushEnemy).toBeUndefined();
 
     const result = runReducer(state, { type: 'EVENT_CONTINUE' });
@@ -733,6 +735,170 @@ describe('ambush events (ancient-cache)', () => {
     expect(result.phase).toBe('reward');
     expect(result.pendingReward?.credits).toBe(4 + 1); // winReward(1)
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
+  });
+});
+
+describe('EVENT_CHOOSE — framework validation (14.1)', () => {
+  it('a locked (unmet-requirement) option is a no-op', () => {
+    // ancient-cache's option 2 requires a Cloaking field — nobody has one.
+    const state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'ancient-cache' } });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 2 });
+    expect(result).toEqual(state);
+  });
+
+  it('a chooseShip option without a valid shipIndex is a no-op', () => {
+    const state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'derelict-cruiser' } });
+    const missing = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    expect(missing).toEqual(state);
+    const outOfRange = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1, shipIndex: 99 });
+    expect(outOfRange).toEqual(state);
+  });
+
+  it('a chooseCard option without that card actually in hand is a no-op', () => {
+    const state = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'militia-requisition' },
+      hand: ['bulkheads'],
+    });
+    const missing = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    expect(missing).toEqual(state);
+    const wrongCard = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1, cardId: 'volley' });
+    expect(wrongCard).toEqual(state);
+  });
+
+  it('a chosen card actually leaves the hand once validated', () => {
+    const state = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'militia-requisition' },
+      hand: ['bulkheads'],
+    });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1, cardId: 'bulkheads' });
+    expect(result.hand).not.toContain('bulkheads');
+    expect(result.credits).toBe(state.credits + 7);
+  });
+
+  it('an out-of-range choiceIndex is a no-op', () => {
+    const state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'militia-requisition' } });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 5 });
+    expect(result).toEqual(state);
+  });
+
+  it('credits never go negative through the reducer either', () => {
+    const state = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'asteroid-field' },
+      credits: 1,
+    });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 }); // detour, -2
+    expect(result.credits).toBe(0);
+  });
+
+  it('a second EVENT_CHOOSE dispatch after the event is already decided is a no-op', () => {
+    const state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'derelict-cruiser' } });
+    const decided = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 });
+    expect(decided.currentEvent?.outcomeText).toBeDefined();
+    const again = runReducer(decided, { type: 'EVENT_CHOOSE', choiceIndex: 0 });
+    expect(again).toEqual(decided); // credits not doubled, nothing changed further
+  });
+});
+
+describe('defector pursuit chain (14.3)', () => {
+  it('taking the defector aboard sets pendingEventId; turning them in does not', () => {
+    const state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'defector' } });
+
+    const turnedIn = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 });
+    expect(turnedIn.pendingEventId).toBeUndefined();
+
+    const aboard = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    expect(aboard.pendingEventId).toBe('defector-pursuit');
+    // Escalations are revealed immediately — no takebacks later, whatever
+    // happens in the pursuit.
+    expect(aboard.escalations.every((e) => e.revealed)).toBe(true);
+  });
+
+  it('the next event node draws the pursuit instead of rolling the pool, then clears the field', () => {
+    let state = runReducer(stateWithMap('event'), { type: 'PICK_NODE', row: 0 }); // position -> col 0
+    state = { ...state, currentEvent: { eventId: 'defector' } };
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 }); // take them aboard
+    expect(state.pendingEventId).toBe('defector-pursuit');
+    state = runReducer(state, { type: 'EVENT_CONTINUE' });
+    expect(state.phase).toBe('map');
+    expect(state.pendingEventId).toBe('defector-pursuit'); // still queued, not yet consumed
+
+    const nextMap = forceNodeType(state.map, 1, 0, 'event', state.act);
+    state = { ...state, map: nextMap };
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(state.currentEvent?.eventId).toBe('defector-pursuit');
+    expect(state.pendingEventId).toBeUndefined();
+  });
+
+  it('pendingEventId survives a non-event node visited in between', () => {
+    let state = runReducer(stateWithMap('event'), { type: 'PICK_NODE', row: 0 });
+    state = { ...state, currentEvent: { eventId: 'defector' } };
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    state = runReducer(state, { type: 'EVENT_CONTINUE' });
+
+    const combatMap = forceNodeType(state.map, 1, 0, 'combat', state.act);
+    state = { ...state, map: combatMap };
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(state.phase).toBe('prep'); // an ordinary fight, unrelated to the chain
+    expect(state.pendingEventId).toBe('defector-pursuit'); // untouched
+
+    // Resolve the fight and move on to a forced event node next.
+    state = { ...state, phase: 'map' };
+    const eventMap = forceNodeType(state.map, 2, 0, 'event', state.act);
+    state = { ...state, map: eventMap };
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(state.currentEvent?.eventId).toBe('defector-pursuit');
+    expect(state.pendingEventId).toBeUndefined();
+  });
+});
+
+describe('ambush win bonus (14.2/14.3)', () => {
+  it('EVENT_CONTINUE carries the resolved ambush bonus onto RunState.pendingAmbushBonus', () => {
+    let state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'distress-beacon' } });
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 }); // drive the raiders off
+    expect(state.currentEvent?.ambushBonus?.credits).toBe(6);
+
+    const result = runReducer(state, { type: 'EVENT_CONTINUE' });
+    expect(result.phase).toBe('prep');
+    expect(result.pendingAmbushBonus).toEqual(state.currentEvent!.ambushBonus);
+  });
+
+  it('winning the ambush combat pays out the bonus credits and part, then clears the field', () => {
+    const enemy = GAUNTLET[0];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      enemy,
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const state: RunState = {
+      ...stateWithMap('event'),
+      phase: 'combat',
+      position: { col: 1, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      currentEnemy: enemy,
+      combat: wonCombat,
+      pendingAmbushBonus: { credits: 6, partId: 'plasma' },
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('reward');
+    expect(result.pendingReward?.credits).toBe(4 + 1 + 6); // winReward(1) + the ambush bonus
+    expect(result.inventory).toContain('plasma');
+    expect(result.pendingAmbushBonus).toBeUndefined();
+  });
+
+  it('withdrawing from an event ambush forfeits the pending bonus', () => {
+    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
+    state = {
+      ...state,
+      phase: 'combat',
+      combat: { ...freshCombat(), round: 1 },
+      pendingAmbushBonus: { credits: 6 },
+    };
+    const result = runReducer(state, { type: 'WITHDRAW' });
+    expect(result.pendingAmbushBonus).toBeUndefined();
   });
 });
 
@@ -854,24 +1020,8 @@ describe('boss variety + dossier (iteration 5)', () => {
     expect(result.currentEnemy!.id).toBe(state.map.act1BossId);
   });
 
-  it('BUY_DOSSIER flips bossRevealed and charges intel (iteration 7: priced in intel, not credits); refuses if already revealed or unaffordable', () => {
-    let state: RunState = { ...initialRunState(), phase: 'shop', intel: 3, bossRevealed: false };
-    expect(runReducer({ ...state, intel: 2 }, { type: 'BUY_DOSSIER' }).bossRevealed).toBe(false); // too poor
-
-    state = runReducer(state, { type: 'BUY_DOSSIER' });
-    expect(state.bossRevealed).toBe(true);
-    expect(state.intel).toBe(0);
-
-    const again = runReducer({ ...state, intel: 3 }, { type: 'BUY_DOSSIER' });
-    expect(again.intel).toBe(3); // refused — already revealed, intel untouched
-  });
-
-  it('BUY_DOSSIER is not affected by REROLL (it is not part of shopOffers)', () => {
-    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 20, intel: 3, shopOffers: ['ion'] };
-    state = runReducer(state, { type: 'REROLL' });
-    expect(state.bossRevealed).toBe(false);
-    state = runReducer(state, { type: 'BUY_DOSSIER' });
-    expect(state.bossRevealed).toBe(true);
+  it('the boss starts unrevealed — it is now uncovered by Spymaster intelligence, never bought', () => {
+    expect(initialRunState().bossRevealed).toBe(false);
   });
 });
 
@@ -943,70 +1093,9 @@ describe('fog of war + info broker (iteration 6)', () => {
     expect(state.visionCol).toBe(visionBefore); // still revealed
   });
 
-  it('BUY_SECTOR_SCAN extends visionCol by 2, costs intel (iteration 7), and is refused a second time this visit', () => {
-    let state: RunState = { ...initialRunState(), phase: 'shop', intel: 5, shopIntel: { sectorScan: false, deepScan: false, escalationIntercept: false }, visionCol: 1 };
-    state = runReducer(state, { type: 'BUY_SECTOR_SCAN' });
-    expect(state.visionCol).toBe(3);
-    expect(state.intel).toBe(4); // base cost 1
-    expect(state.shopIntel?.sectorScan).toBe(true);
-
-    const again = runReducer(state, { type: 'BUY_SECTOR_SCAN' });
-    expect(again.visionCol).toBe(3); // refused — already used this visit
-    expect(again.intel).toBe(4);
-  });
-
-  it('BUY_DEEP_SCAN reveals every node in the chosen lane through column 9, once per visit', () => {
-    let state: RunState = { ...initialRunState(), phase: 'shop', intel: 5, shopIntel: { sectorScan: false, deepScan: false, escalationIntercept: false } };
-    state = runReducer(state, { type: 'BUY_DEEP_SCAN', row: 1 });
-    expect(state.intel).toBe(3); // base cost 2
-    // Columns 1-9 (9 nodes) — act-1 column 0 is the single-node opener, so
-    // it has no row-1 node to reveal.
-    expect(state.revealedNodes).toHaveLength(9);
-    expect(state.revealedNodes.every((n) => n.row === 1)).toBe(true);
-    expect(state.shopIntel?.deepScan).toBe(true);
-
-    const again = runReducer(state, { type: 'BUY_DEEP_SCAN', row: 0 });
-    expect(again.intel).toBe(3); // refused — already used this visit
-    expect(again.revealedNodes).toHaveLength(9);
-  });
-
-  it('BUY_ESCALATION_INTERCEPT reveals the soonest-landing unrevealed escalation, once per visit', () => {
-    let state: RunState = {
-      ...initialRunState(),
-      phase: 'shop',
-      intel: 5,
-      shopIntel: { sectorScan: false, deepScan: false, escalationIntercept: false },
-      escalations: [
-        { id: 'hardened', act: 1, landsAfterColumn: 4, revealed: false },
-        { id: 'deflectors', act: 1, landsAfterColumn: 2, revealed: false },
-      ],
-    };
-    state = runReducer(state, { type: 'BUY_ESCALATION_INTERCEPT' });
-    expect(state.intel).toBe(3); // base cost 2
-    expect(state.escalations.find((e) => e.id === 'deflectors')!.revealed).toBe(true); // soonest first
-    expect(state.escalations.find((e) => e.id === 'hardened')!.revealed).toBe(false);
-
-    const again = runReducer(state, { type: 'BUY_ESCALATION_INTERCEPT' });
-    expect(again.intel).toBe(3); // refused — already used this visit
-  });
-
-  it('LEAVE_SHOP resets shopIntel so a new visit can buy each item again', () => {
-    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 20, shopIntel: { sectorScan: true, deepScan: true, escalationIntercept: true } };
-    state = runReducer(state, { type: 'LEAVE_SHOP' });
-    expect(state.shopIntel).toBeUndefined();
-  });
-
-  it('the boss dossier stays disabled across visits even though the other Intel items reset (5.5 behavior preserved)', () => {
-    let state: RunState = { ...initialRunState(), phase: 'shop', intel: 5, bossRevealed: true, shopIntel: { sectorScan: false, deepScan: false, escalationIntercept: false } };
-    state = runReducer(state, { type: 'BUY_DOSSIER' });
-    expect(state.intel).toBe(5); // refused — already revealed
-    expect(state.bossRevealed).toBe(true);
-  });
-
-  it('REROLL does not touch shopIntel or visionCol/revealedNodes', () => {
-    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 20, shopOffers: ['ion'], shopIntel: { sectorScan: false, deepScan: false, escalationIntercept: false } };
+  it('REROLL does not touch visionCol/revealedNodes', () => {
+    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 20, shopOffers: ['ion'] };
     state = runReducer(state, { type: 'REROLL' });
-    expect(state.shopIntel).toEqual({ sectorScan: false, deepScan: false, escalationIntercept: false });
     expect(state.visionCol).toBe(0);
     expect(state.revealedNodes).toEqual([]);
   });
@@ -1076,7 +1165,7 @@ describe('quests (iteration 6)', () => {
     expect(withCarrier.credits).toBe(15); // 20 - delivery's 5cr stake
   });
 
-  it('recon completion grants +2 vision, the soonest unrevealed escalation, and +3 intel, then clears the quest', () => {
+  it('recon completion grants +2 vision plus two reveals, then clears the quest', () => {
     let state = stateForQuestTest({
       activeQuest: { archetype: 'recon', target: { col: 2, row: 1 } },
       escalations: [
@@ -1089,13 +1178,20 @@ describe('quests (iteration 6)', () => {
     state = runReducer(state, { type: 'PICK_NODE', row: 1 }); // -> col1 (shop, so it resolves back to 'map')
     expect(state.phase).toBe('shop');
     state = runReducer(state, { type: 'LEAVE_SHOP' });
-    const visionAfterCol1 = state.visionCol;
+    const before = state;
     state = runReducer(state, { type: 'PICK_NODE', row: 1 }); // -> col2, the target
+
     expect(state.activeQuest).toBeUndefined();
-    expect(state.visionCol).toBe(visionAfterCol1 + 1 + 2); // normal +1 arrival, plus the +2 quest bundle
-    expect(state.intel).toBe(3);
-    expect(state.escalations.find((e) => e.id === 'deflectors')!.revealed).toBe(true);
-    expect(state.escalations.find((e) => e.id === 'hardened')!.revealed).toBe(false);
+    expect(state.visionCol).toBeGreaterThanOrEqual(before.visionCol + 1 + 2); // +1 arrival, +2 quest bundle
+
+    // Which two reveals land is a seeded draw over whatever is still unknown,
+    // so assert the payout in general terms: strictly more is known after.
+    const knowledge = (s: typeof state) =>
+      (s.bossRevealed ? 1 : 0) +
+      s.visionCol +
+      s.revealedNodes.length +
+      s.escalations.filter((e) => e.revealed).length;
+    expect(knowledge(state)).toBeGreaterThan(knowledge(before) + 2);
   });
 
   it('delivery completion pays credits + removes the pod, and clears the quest', () => {
@@ -1268,22 +1364,33 @@ describe('commander effects (iteration 6)', () => {
     expect(state.visionCol).toBe(2); // col 0 + 2, not col 0 + 1
   });
 
-  it('the Spymaster earns double intel income per combat win (iteration 7 rework — no longer a price discount)', () => {
+  it('only the Spymaster gathers intelligence after a win', () => {
     const plain = runReducer(winningCombatState(), { type: 'CONTINUE' });
     const spymaster = runReducer(winningCombatState({ commanderId: 'spymaster' }), { type: 'CONTINUE' });
-    expect(spymaster.pendingReward!.intelGained).toBe(plain.pendingReward!.intelGained * 2);
+    expect(plain.pendingReward!.intelText).toBeUndefined();
+    expect(spymaster.pendingReward!.intelText).toBeTruthy();
   });
 
-  it('the Spymaster still pays the normal (non-discounted) intel price for broker items', () => {
-    let state: RunState = {
-      ...initialRunState(),
-      phase: 'shop',
-      intel: 5,
+  it("the Spymaster's win actually changes what the player knows", () => {
+    const before = winningCombatState({ commanderId: 'spymaster' });
+    const after = runReducer(before, { type: 'CONTINUE' });
+    const changed =
+      after.bossRevealed !== before.bossRevealed ||
+      after.visionCol !== before.visionCol ||
+      after.revealedNodes.length !== before.revealedNodes.length ||
+      after.escalations.some((e, i) => e.revealed !== before.escalations[i].revealed);
+    expect(changed).toBe(true);
+  });
+
+  it('never draws a reveal that would do nothing — with everything known, the win is silent', () => {
+    const omniscient = winningCombatState({
       commanderId: 'spymaster',
-      shopIntel: { sectorScan: false, deepScan: false, escalationIntercept: false },
-    };
-    state = runReducer(state, { type: 'BUY_SECTOR_SCAN' }); // base cost 1, unchanged for Spymaster
-    expect(state.intel).toBe(4);
+      bossRevealed: true,
+      visionCol: 99,
+      escalations: initialRunState().escalations.map((e) => ({ ...e, revealed: true })),
+    });
+    const after = runReducer(omniscient, { type: 'CONTINUE' });
+    expect(after.pendingReward!.intelText).toBeUndefined();
   });
 });
 
@@ -1305,17 +1412,17 @@ describe('intel currency income (iteration 7)', () => {
     };
   }
 
-  it('a normal combat win earns +1 intel ("flight recorders salvaged")', () => {
-    const result = runReducer(winningCombatState({ intel: 0 }), { type: 'CONTINUE' });
-    expect(result.pendingReward!.intelGained).toBe(1);
-    expect(result.intel).toBe(1);
+  it('a win pays credits only — there is no intel currency to earn', () => {
+    const result = runReducer(winningCombatState(), { type: 'CONTINUE' });
+    expect(result.pendingReward!.credits).toBeGreaterThan(0);
+    expect(result.pendingReward!.intelText).toBeUndefined(); // not a Spymaster run
   });
 
-  it('an elite win earns +3 intel total (base 1 + 2 elite bonus)', () => {
+  it('an elite win still pays the elite credit premium', () => {
     const eliteEnemy = { ...GAUNTLET[0], id: `${GAUNTLET[0].id}-elite` };
-    const result = runReducer(winningCombatState({ intel: 0, currentEnemy: eliteEnemy }), { type: 'CONTINUE' });
-    expect(result.pendingReward!.intelGained).toBe(3);
-    expect(result.intel).toBe(3);
+    const plain = runReducer(winningCombatState(), { type: 'CONTINUE' });
+    const elite = runReducer(winningCombatState({ currentEnemy: eliteEnemy }), { type: 'CONTINUE' });
+    expect(elite.pendingReward!.credits).toBeGreaterThan(plain.pendingReward!.credits);
   });
 });
 
@@ -1328,6 +1435,25 @@ describe('shop rework (iteration 7): stratified draw + selling', () => {
     expect(offers.slice(2, 4).every((p) => p.type === 'shield' || p.type === 'hull')).toBe(true);
     expect(offers[4].type === 'computer' || offers[4].type === 'drive').toBe(true);
     expect(offers[5].active).toBe(true);
+  });
+
+  it('all six offers are always unique, across many redraws (2026-08-02 fix)', () => {
+    // The old draw was with-replacement: the doubled weapon/defense strata
+    // could duplicate within themselves, and the actives stratum overlaps
+    // the typed ones (every active part also has a type), so slot 6 could
+    // duplicate slots 1-5 too. Redraw many times via REROLL and assert
+    // uniqueness every time; the strata invariants must survive the fix.
+    let state = runReducer(stateWithMap('shop', { credits: 1000 }), { type: 'PICK_NODE', row: 0 });
+    for (let i = 0; i < 60; i++) {
+      const offers = state.shopOffers!;
+      expect(new Set(offers).size).toBe(offers.length);
+      const parts = offers.map((id) => getPart(id));
+      expect(parts.slice(0, 2).every((p) => p.type === 'weapon')).toBe(true);
+      expect(parts.slice(2, 4).every((p) => p.type === 'shield' || p.type === 'hull')).toBe(true);
+      expect(parts[4].type === 'computer' || parts[4].type === 'drive').toBe(true);
+      expect(parts[5].active).toBe(true);
+      state = runReducer(state, { type: 'REROLL' });
+    }
   });
 
   it('SELL_PART pays floor(cost/2), removes the part from inventory, and refuses a part not owned', () => {
@@ -1392,7 +1518,6 @@ describe('iteration 8: the opener (act-1 column 0)', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.pendingReward?.credits).toBe(4);
-    expect(result.pendingReward?.intelGained).toBe(1);
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
   });
 

@@ -26,7 +26,7 @@ import {
   OPENER,
 } from './enemies';
 import { drawEscalationSchedule } from './escalations';
-import { drawEvent, nextUnrevealedIndex, resolveEventChoice } from './events';
+import { drawEvent, getEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
 import type { EventId } from './events';
 import { getFrame, MAX_FLEET_SIZE } from './frames';
 import { actColumns, BOSS_COLUMN, generateMap, getNode, globalColumn, LANE_COLUMNS, reachableNodes } from './map';
@@ -74,29 +74,18 @@ export type RunAction =
   | { type: 'BUY_SHIP'; frameId: 'interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser' } // the Flagship is never purchasable
   | { type: 'SCUTTLE_SHIP'; shipIndex: number }
   | { type: 'SET_TARGETING_STANCE'; stance: TargetingStance }
-  | { type: 'BUY_DOSSIER' }
-  | { type: 'BUY_SECTOR_SCAN' }
-  | { type: 'BUY_DEEP_SCAN'; row: number }
-  | { type: 'BUY_ESCALATION_INTERCEPT' }
   | { type: 'ACCEPT_QUEST'; carrierShipIndex?: number }
   | { type: 'MOVE_CARGO_POD'; toShipIndex: number }
   | { type: 'USE_ACTIVE'; shipIndex: number; abilityIndex: number }
   | { type: 'REROLL' }
   | { type: 'LEAVE_SHOP' }
   | { type: 'LEAVE_REPAIR' }
-  | { type: 'EVENT_CHOOSE'; choiceIndex: 0 | 1 }
+  | { type: 'EVENT_CHOOSE'; choiceIndex: number; shipIndex?: number; cardId?: CardId }
   | { type: 'EVENT_CONTINUE' }
   | { type: 'NEW_RUN' };
 
 export const SHOP_OFFER_COUNT = 6;
 export const REROLL_COST = 2;
-// Iteration 7: the info broker is priced in intel, never credits.
-export const DOSSIER_INTEL_COST = 3;
-export const SECTOR_SCAN_INTEL_COST = 1;
-export const DEEP_SCAN_INTEL_COST = 2;
-export const ESCALATION_INTERCEPT_INTEL_COST = 2;
-export const WIN_INTEL = 1; // every combat win salvages flight recorders
-export const ELITE_BONUS_INTEL = 2; // elites additionally yield this much (3 total)
 // Addendum A.2 (iteration 8): every job now costs an upfront stake, forfeit
 // on failure (passive lapse, fled bounty node, dead cargo carrier) — with no
 // stake, accepting was never a real decision. Rewards raised to ~3x stake.
@@ -104,11 +93,12 @@ export const QUEST_STAKE: Record<ActiveQuest['archetype'], number> = { bounty: 6
 export const BOUNTY_BONUS_CREDITS = 18;
 export const DELIVERY_REWARD_CREDITS = 15;
 export const DELIVERY_FALLBACK_CREDITS = 4;
-export const RECON_BONUS_INTEL = 3;
-
-// How many columns beyond the current vision high-water mark a sector scan
-// reveals in one purchase.
+// How many columns beyond the current vision high-water mark a long-range
+// sweep reveals.
 const SECTOR_SCAN_DEPTH = 2;
+
+// How many separate reveals a completed recon job hands over.
+export const RECON_REVEALS = 2;
 
 // The starting cruiser is fitted out from a fixed credit budget rather than
 // a free pick of parts — sized to match the original reference loadout
@@ -189,7 +179,6 @@ export function initialRunState(): RunState {
     visited: [],
     fled: [],
     credits: 0,
-    intel: 0,
     inventory: [],
     fleet: [{ frameId: 'cruiser', equipped: [...STARTING_LOADOUT], damage: 0, upgrades: [] }],
     hand: ['bulkheads', 'volley'], // iteration 7: cards are found, never bought — start with one of each
@@ -206,9 +195,85 @@ function visionStep(state: RunState): number {
   return state.commanderId === 'spymaster' ? 2 : 1;
 }
 
-// The Spymaster earns double intel income per combat win.
-function intelMultiplier(commanderId: CommanderId | undefined): number {
-  return commanderId === 'spymaster' ? 2 : 1;
+// --- Intelligence (the Spymaster's whole identity) -------------------------
+// There is no intel currency and no info broker. Instead the Spymaster is
+// handed one free piece of intelligence after every combat win. The draw is
+// taken only from options that would actually reveal something, so a late
+// run never rolls a dud.
+
+type RevealKind = 'dossier' | 'sector-scan' | 'deep-scan' | 'escalation';
+
+// Lanes that still hide at least one node the player cannot already see.
+function scannableRows(state: RunState): number[] {
+  const columns = actColumns(state.map, state.act);
+  const rows: number[] = [];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < LANE_COLUMNS; col++) {
+      if (!columns[col][row]) continue;
+      if (col <= state.visionCol) continue;
+      if (state.revealedNodes.some((p) => p.col === col && p.row === row)) continue;
+      rows.push(row);
+      break;
+    }
+  }
+  return rows;
+}
+
+function availableReveals(state: RunState): RevealKind[] {
+  const kinds: RevealKind[] = [];
+  if (!state.bossRevealed) kinds.push('dossier');
+  if (state.visionCol < LANE_COLUMNS - 1) kinds.push('sector-scan');
+  if (scannableRows(state).length > 0) kinds.push('deep-scan');
+  if (nextUnrevealedIndex(state) !== -1) kinds.push('escalation');
+  return kinds;
+}
+
+// Applies one random still-useful reveal. Returns the state unchanged (and
+// no text) once there is nothing left to learn.
+function grantIntel(state: RunState, rng: RngFn): { state: RunState; text?: string } {
+  const kinds = availableReveals(state);
+  if (kinds.length === 0) return { state };
+  const kind = kinds[Math.floor(rng() * kinds.length)];
+
+  switch (kind) {
+    case 'dossier':
+      return {
+        state: { ...state, bossRevealed: true },
+        text: 'Intercepted traffic identifies the boss waiting at the end of the sector.',
+      };
+    case 'sector-scan':
+      return {
+        state: { ...state, visionCol: state.visionCol + SECTOR_SCAN_DEPTH },
+        text: 'A long-range sweep resolves two more columns of the chart.',
+      };
+    case 'deep-scan': {
+      const rows = scannableRows(state);
+      const row = rows[Math.floor(rng() * rows.length)];
+      const columns = actColumns(state.map, state.act);
+      const newlyRevealed: MapPosition[] = [];
+      for (let col = 0; col < LANE_COLUMNS; col++) {
+        if (columns[col][row]) newlyRevealed.push({ col, row });
+      }
+      return {
+        state: { ...state, revealedNodes: [...state.revealedNodes, ...newlyRevealed] },
+        text: `Deep scan charts lane ${row + 1} end to end.`,
+      };
+    }
+    case 'escalation': {
+      const index = nextUnrevealedIndex(state);
+      const escalations = state.escalations.map((e, i) => (i === index ? { ...e, revealed: true } : e));
+      return {
+        state: { ...state, escalations },
+        text: 'Decrypted orders reveal the enemy fleet’s next upgrade.',
+      };
+    }
+  }
+}
+
+// Only the Spymaster gathers intelligence; everyone else fights blind.
+function grantCommanderIntel(state: RunState, rng: RngFn): { state: RunState; text?: string } {
+  if (state.commanderId !== 'spymaster') return { state };
+  return grantIntel(state, rng);
 }
 
 // Shop rerolls cost 1cr instead of 2 for the Merchant.
@@ -227,25 +292,35 @@ function removeOnce<T>(list: T[], item: T): T[] {
 // Iteration 7: a flat uniform draw over ~30 parts can no longer reliably
 // surface an answer to a given threat. The 6 offers are drawn stratified
 // instead — 2 weapons, 2 defense (shield/hull), 1 computer-or-drive, 1
-// active part — uniform within each stratum; duplicates across strata (or
-// within one) are allowed.
+// active part — uniform within each stratum. All six offers are unique
+// (2026-08-02): a duplicate wastes a slot, and the actives stratum overlaps
+// the typed ones (every active part also has a type), so cross-slot
+// duplicates were possible too, not just the double weapon/defense draws.
 const WEAPON_POOL = PARTS.filter((p) => p.type === 'weapon');
 const DEFENSE_POOL = PARTS.filter((p) => p.type === 'shield' || p.type === 'hull');
 const COMPUTER_DRIVE_POOL = PARTS.filter((p) => p.type === 'computer' || p.type === 'drive');
 const ACTIVE_POOL = PARTS.filter((p) => p.active);
 
-function drawFrom(pool: { id: PartId }[], rng: RngFn): PartId {
-  return pool[Math.floor(rng() * pool.length)].id;
+// Uniqueness by filtering the stratum to parts not already drawn — exactly
+// one rng draw per slot either way. The fallback to the unfiltered pool is
+// defensive only: no stratum can be exhausted by the five other slots.
+function drawUniqueFrom(pool: { id: PartId }[], taken: Set<PartId>, rng: RngFn): PartId {
+  const fresh = pool.filter((p) => !taken.has(p.id));
+  const source = fresh.length > 0 ? fresh : pool;
+  const id = source[Math.floor(rng() * source.length)].id;
+  taken.add(id);
+  return id;
 }
 
 function drawShopOffers(rng: RngFn): PartId[] {
+  const taken = new Set<PartId>();
   return [
-    drawFrom(WEAPON_POOL, rng),
-    drawFrom(WEAPON_POOL, rng),
-    drawFrom(DEFENSE_POOL, rng),
-    drawFrom(DEFENSE_POOL, rng),
-    drawFrom(COMPUTER_DRIVE_POOL, rng),
-    drawFrom(ACTIVE_POOL, rng),
+    drawUniqueFrom(WEAPON_POOL, taken, rng),
+    drawUniqueFrom(WEAPON_POOL, taken, rng),
+    drawUniqueFrom(DEFENSE_POOL, taken, rng),
+    drawUniqueFrom(DEFENSE_POOL, taken, rng),
+    drawUniqueFrom(COMPUTER_DRIVE_POOL, taken, rng),
+    drawUniqueFrom(ACTIVE_POOL, taken, rng),
   ];
 }
 
@@ -393,18 +468,14 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (quest) {
         const atTarget = samePosition(quest.target, position);
         if (atTarget && quest.archetype === 'recon') {
-          const escIndex = nextUnrevealedIndex(state);
-          const escalations =
-            escIndex === -1
-              ? state.escalations
-              : state.escalations.map((e, i) => (i === escIndex ? { ...e, revealed: true } : e));
-          base = {
-            ...base,
-            visionCol: base.visionCol + 2,
-            escalations,
-            intel: base.intel + RECON_BONUS_INTEL,
-            activeQuest: undefined,
-          };
+          // A recon job pays in intelligence itself now that there is no
+          // intel currency: extra vision plus a couple of free reveals,
+          // available to every commander (this is the job, not a perk).
+          let reconState: RunState = { ...base, visionCol: base.visionCol + 2 };
+          for (let i = 0; i < RECON_REVEALS; i++) {
+            reconState = grantIntel(reconState, rng).state;
+          }
+          base = { ...reconState, activeQuest: undefined };
         } else if (atTarget && quest.archetype === 'delivery') {
           const handFull = state.hand.length >= MAX_HAND_SIZE;
           const cardId = handFull ? undefined : drawRandomCard(rng);
@@ -483,7 +554,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           ...base,
           phase: 'shop',
           shopOffers: drawShopOffers(rng),
-          shopIntel: { sectorScan: false, deepScan: false, escalationIntercept: false },
           shopQuestOffer: generateQuestOffer(columns, node, rng) ?? undefined,
           rngCounter: nextCounter(),
         };
@@ -500,12 +570,16 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       }
 
       // event
-      const eventId: EventId = drawEvent(rng, state.lastEventId);
+      // 14.3: the defector's "take them aboard" choice schedules the pursuit
+      // as the very next event node instead of rolling the pool — a one-off
+      // forced follow-up, consumed here and then cleared.
+      const eventId: EventId = state.pendingEventId ?? drawEvent(rng, state.lastEventId);
       return {
         ...base,
         phase: 'event',
         currentEvent: { eventId },
         lastEventId: eventId,
+        pendingEventId: undefined,
         rngCounter: nextCounter(),
       };
     }
@@ -589,10 +663,17 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const returnedCards = unconsumedContingentCards(state.combat);
 
       if (outcome.winner === 'enemy') {
-        return { ...state, phase: 'defeat', rngCounter: nextCounter() };
+        return { ...state, phase: 'defeat', pendingAmbushBonus: undefined, rngCounter: nextCounter() };
       }
 
-      let inventory = [...state.inventory];
+      // 14.3: a win-conditional bonus from an event ambush (e.g. the
+      // defector-pursuit's bounty) — the event resolver couldn't know the
+      // fight's outcome at choice time, so it rides along on RunState until
+      // now. Consumed (and cleared) regardless of which branch below pays
+      // out, so it can never leak into an unrelated later fight.
+      const ambushBonus = state.pendingAmbushBonus;
+
+      let inventory = ambushBonus?.partId ? [...state.inventory, ambushBonus.partId] : [...state.inventory];
       const salvagedParts: PartId[] = [];
       const lostShips: string[] = [];
       const survivingFleet: PlayerShipState[] = [];
@@ -630,6 +711,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           inventory,
           combat: undefined,
           activeQuest: activeQuestAfterFight,
+          pendingAmbushBonus: undefined,
           rngCounter: nextCounter(),
         };
       }
@@ -639,18 +721,17 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // reward-screen purposes: no card, no upgrade pick, straight into
         // the interlude (no shop between acts).
         const creditsEarned = eliteReward(globalCol);
-        const intelEarned = (WIN_INTEL + ELITE_BONUS_INTEL) * intelMultiplier(state.commanderId);
         return {
           ...state,
           phase: 'interlude',
           fleet: survivingFleet,
           inventory,
           credits: state.credits + creditsEarned,
-          intel: state.intel + intelEarned,
           hand: [...state.hand, ...returnedCards],
           combat: undefined,
           currentEnemy: undefined,
           activeQuest: activeQuestAfterFight,
+          pendingAmbushBonus: undefined,
           rngCounter: nextCounter(),
         };
       }
@@ -691,19 +772,20 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
       const bountyBonus = isBounty ? BOUNTY_BONUS_CREDITS : 0;
       const merchantBonus = state.commanderId === 'merchant' ? 2 : 0;
-      const creditsEarned = baseReward + bountyBonus + merchantBonus + (cardInsteadCredits ?? 0) + salvageTotal;
+      const ambushBonusCredits = ambushBonus?.credits ?? 0;
+      const creditsEarned =
+        baseReward + bountyBonus + merchantBonus + (cardInsteadCredits ?? 0) + salvageTotal + ambushBonusCredits;
       const credits = state.credits + creditsEarned;
       const upgradeOptions = isElite || isBounty ? randomUpgradeIds(3, rng) : undefined;
 
-      // "Flight recorders salvaged" — the intel currency, earned whether or
-      // not you fight well, doubled for the Spymaster.
-      const intelEarned = (WIN_INTEL + (isElite ? ELITE_BONUS_INTEL : 0)) * intelMultiplier(state.commanderId);
-      const intel = state.intel + intelEarned;
+      // The Spymaster's free intelligence, drawn from the same rng stream so
+      // the whole run stays reproducible from its seed.
+      const intelDraw = grantCommanderIntel(state, rng);
 
       const pendingReward: RewardSummary = {
         credits: creditsEarned,
         creditsTotal: credits,
-        intelGained: intelEarned,
+        intelText: intelDraw.text,
         cardGained,
         cardInsteadCredits,
         salvagedParts,
@@ -712,16 +794,16 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       };
 
       return {
-        ...state,
+        ...intelDraw.state,
         phase: 'reward',
         fleet: healedFleet,
         inventory,
         credits,
-        intel,
         hand,
         combat: undefined,
         currentEnemy: undefined,
         pendingReward,
+        pendingAmbushBonus: undefined,
         activeQuest: isBounty ? undefined : activeQuestAfterFight,
         rngCounter: nextCounter(),
       };
@@ -781,6 +863,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         position,
         visited,
         activeQuest,
+        pendingAmbushBonus: undefined, // withdrawing from an event ambush forfeits any win-conditional bonus
       };
     }
 
@@ -911,58 +994,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return { ...state, targetingStance: action.stance };
     }
 
-    case 'BUY_DOSSIER': {
-      if (state.phase !== 'shop') return state;
-      if (state.bossRevealed) return state;
-      if (state.intel < DOSSIER_INTEL_COST) return state;
-      return { ...state, intel: state.intel - DOSSIER_INTEL_COST, bossRevealed: true };
-    }
-
-    case 'BUY_SECTOR_SCAN': {
-      if (state.phase !== 'shop' || !state.shopIntel) return state;
-      if (state.shopIntel.sectorScan) return state;
-      if (state.intel < SECTOR_SCAN_INTEL_COST) return state;
-      return {
-        ...state,
-        intel: state.intel - SECTOR_SCAN_INTEL_COST,
-        visionCol: state.visionCol + SECTOR_SCAN_DEPTH,
-        shopIntel: { ...state.shopIntel, sectorScan: true },
-      };
-    }
-
-    case 'BUY_DEEP_SCAN': {
-      if (state.phase !== 'shop' || !state.shopIntel) return state;
-      if (state.shopIntel.deepScan) return state;
-      if (state.intel < DEEP_SCAN_INTEL_COST) return state;
-      if (action.row < 0 || action.row > 2) return state;
-      const columns = actColumns(state.map, state.act);
-      const newlyRevealed: MapPosition[] = [];
-      for (let col = 0; col < LANE_COLUMNS; col++) {
-        if (columns[col][action.row]) newlyRevealed.push({ col, row: action.row });
-      }
-      return {
-        ...state,
-        intel: state.intel - DEEP_SCAN_INTEL_COST,
-        revealedNodes: [...state.revealedNodes, ...newlyRevealed],
-        shopIntel: { ...state.shopIntel, deepScan: true },
-      };
-    }
-
-    case 'BUY_ESCALATION_INTERCEPT': {
-      if (state.phase !== 'shop' || !state.shopIntel) return state;
-      if (state.shopIntel.escalationIntercept) return state;
-      if (state.intel < ESCALATION_INTERCEPT_INTEL_COST) return state;
-      const index = nextUnrevealedIndex(state);
-      if (index === -1) return state;
-      const escalations = state.escalations.map((e, i) => (i === index ? { ...e, revealed: true } : e));
-      return {
-        ...state,
-        intel: state.intel - ESCALATION_INTERCEPT_INTEL_COST,
-        escalations,
-        shopIntel: { ...state.shopIntel, escalationIntercept: true },
-      };
-    }
-
     case 'ACCEPT_QUEST': {
       if (state.phase !== 'shop' || !state.shopQuestOffer) return state;
       if (state.activeQuest) return state; // cap 1 active
@@ -1033,7 +1064,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         ...state,
         phase: 'map',
         shopOffers: undefined,
-        shopIntel: undefined,
         shopQuestOffer: undefined,
         currentEnemy: undefined,
       };
@@ -1046,23 +1076,34 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'EVENT_CHOOSE': {
       if (state.phase !== 'event' || !state.currentEvent) return state;
+      if (state.currentEvent.outcomeText !== undefined) return state; // already resolved — no double-dispatch
+      const def = getEvent(state.currentEvent.eventId);
+      const option = def.options[action.choiceIndex];
+      if (!option) return state;
+      if (option.requirement && !meetsRequirement(option.requirement, state)) return state;
+      if (option.chooseShip && (action.shipIndex === undefined || !state.fleet[action.shipIndex])) return state;
+      if (option.chooseCard && (action.cardId === undefined || !state.hand.includes(action.cardId))) return state;
+
       const { rng, nextCounter } = runRng(state);
-      const { state: nextState, outcomeText, ambushEnemy } = resolveEventChoice(
-        state.currentEvent.eventId,
-        action.choiceIndex,
-        state,
-        rng,
-      );
+      const {
+        state: nextState,
+        outcomeText,
+        ambushEnemy,
+        ambushBonus,
+      } = resolveEventChoice(state.currentEvent.eventId, action.choiceIndex, state, rng, {
+        shipIndex: action.shipIndex,
+        cardId: action.cardId,
+      });
       return {
         ...nextState,
-        currentEvent: { ...state.currentEvent, outcomeText, ambushEnemy },
+        currentEvent: { ...state.currentEvent, outcomeText, ambushEnemy, ambushBonus },
         rngCounter: nextCounter(),
       };
     }
 
     case 'EVENT_CONTINUE': {
       if (state.phase !== 'event' || !state.currentEvent) return state;
-      const { ambushEnemy } = state.currentEvent;
+      const { ambushEnemy, ambushBonus } = state.currentEvent;
       if (ambushEnemy) {
         const { rng, nextCounter } = runRng(state);
         return {
@@ -1070,6 +1111,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           phase: 'prep',
           currentEvent: undefined,
           currentEnemy: ambushEnemy,
+          pendingAmbushBonus: ambushBonus,
           currentCombatSeed: drawCombatSeed(rng),
           rngCounter: nextCounter(),
         };

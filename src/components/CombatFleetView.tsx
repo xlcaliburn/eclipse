@@ -1,6 +1,7 @@
 import type { CombatShip } from '../game/combatEngine';
 import type { FrameId } from '../game/frames';
 import type { Side } from '../game/types';
+import type { CardBadge } from './CombatScreen';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
 import { EnemySilhouette, FrameSilhouette, BrokenHullGlyph } from './ShipSilhouette';
@@ -30,6 +31,10 @@ interface CombatFleetViewProps {
   // is just a view of "which entry is showing right now."
   activeAttacker?: ActiveAttacker | null;
   activeTarget?: ActiveTarget | null;
+  // Replay rollback: damage/destruction not yet revealed, keyed `side:index`.
+  pendingDamage?: Map<string, number>;
+  pendingDestroyed?: Set<string>;
+  cardBadges?: Record<string, CardBadge>;
   // Iteration 12.2: the fx layer needs real card positions to draw tracers
   // between ships. Each card reports its element; null on unmount.
   onShipEl?: (side: Side, index: number, el: HTMLElement | null) => void;
@@ -51,9 +56,16 @@ function shipCard(
   onShipEl?: (side: Side, index: number, el: HTMLElement | null) => void,
   onSelectEnemy?: (index: number) => void,
   isPriority = false,
+  pendingDamage = 0,
+  destructionPending = false,
+  badge?: CardBadge,
 ) {
-  const hp = Math.max(0, ship.stats.hp - ship.damage);
-  const destroyed = hp <= 0;
+  // Show the fight as of the revealed point in the replay, not the end of
+  // the round: damage that has not been shown yet is rolled back, and a hull
+  // stays intact until its destruction is actually played out.
+  const shownDamage = Math.max(0, ship.damage - pendingDamage);
+  const hp = Math.max(0, ship.stats.hp - shownDamage);
+  const destroyed = hp <= 0 && !destructionPending;
   const damaged = !destroyed && hp < ship.stats.hp * 0.5;
 
   const isAttacker = activeAttacker?.side === side && activeAttacker.index === index;
@@ -72,6 +84,11 @@ function shipCard(
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') onSelectEnemy!(index); } : undefined}
       title={clickable ? (isPriority ? 'Priority target — click to clear' : 'Click to focus all fire here') : undefined}
     >
+      {badge && (
+        <span key={badge.id} className={`combat-ship__badge combat-ship__badge--${badge.tone}`}>
+          {badge.text}
+        </span>
+      )}
       {/* Art beside the readout, not above it — a fight with six hulls has
           to fit on screen alongside the log and the round controls. */}
       <div className="combat-ship__art">
@@ -90,7 +107,7 @@ function shipCard(
           <div className="combat-ship__destroyed">Destroyed</div>
         ) : (
           <>
-            <StatBar stats={ship.stats} damage={ship.damage} />
+                  <StatBar stats={ship.stats} damage={shownDamage} />
             {upgrades && upgrades.length > 0 && (
               <div className="ship-card__upgrades">
                 {upgrades.map((upgradeId, i) => (
@@ -118,6 +135,9 @@ export function CombatFleetView({
   enemyArchetypes,
   activeAttacker,
   activeTarget,
+  pendingDamage,
+  pendingDestroyed,
+  cardBadges,
   onShipEl,
   onSelectEnemy,
   priorityTargetIndex,
@@ -136,6 +156,11 @@ export function CombatFleetView({
             activeTarget,
             playerUpgrades?.[i],
             onShipEl,
+            undefined,
+            false,
+            pendingDamage?.get(`player:${i}`) ?? 0,
+            pendingDestroyed?.has(`player:${i}`) ?? false,
+            cardBadges?.[`player:${i}`],
           ),
         )}
       </div>
@@ -153,6 +178,9 @@ export function CombatFleetView({
             onShipEl,
             onSelectEnemy,
             priorityTargetIndex === i,
+            pendingDamage?.get(`enemy:${i}`) ?? 0,
+            pendingDestroyed?.has(`enemy:${i}`) ?? false,
+            cardBadges?.[`enemy:${i}`],
           ),
         )}
       </div>

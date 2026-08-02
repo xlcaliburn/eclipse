@@ -203,11 +203,20 @@ export type Phase =
   | 'victory'
   | 'defeat';
 
+// A bonus payout conditional on winning the fight an ambush choice leads
+// into — the reward pipeline can't know the outcome at EVENT_CHOOSE time, so
+// it rides along on RunState (`pendingAmbushBonus`) until CONTINUE resolves
+// the combat.
+export interface AmbushBonus {
+  credits?: number;
+  partId?: PartId;
+}
+
 export interface CurrentEventState {
   eventId: EventId;
-  offeredPartId?: PartId; // pre-rolled for the wandering-trader event
   outcomeText?: string; // set once a choice has been made
   ambushEnemy?: EnemyDef; // set when this choice leads into a fight
+  ambushBonus?: AmbushBonus; // carried onto RunState.pendingAmbushBonus by EVENT_CONTINUE
 }
 
 // What a won combat paid out, shown on the `reward` screen. Credits,
@@ -217,7 +226,7 @@ export interface CurrentEventState {
 export interface RewardSummary {
   credits: number; // credits earned at this node
   creditsTotal: number; // running total after the award
-  intelGained: number; // "flight recorders salvaged" — 1 per win, +2 more on elites, doubled for the Spymaster
+  intelText?: string; // the Spymaster's post-fight intelligence, if any was gained
   cardGained?: CardId; // elite card drop, if any
   cardInsteadCredits?: number; // the +4 fallback when the hand was full
   salvagedParts: PartId[]; // parts recovered from destroyed ships
@@ -244,7 +253,6 @@ export interface RunState {
   visited: MapPosition[];
   fled: MapPosition[]; // withdrawn-from nodes — visible on the map, never pickable again
   credits: number;
-  intel: number; // iteration 7: the info broker's currency — earned from combat wins, never bought with credits
   inventory: PartId[]; // owned, unequipped parts
   fleet: PlayerShipState[];
   hand: CardId[]; // reaction cards currently held
@@ -252,7 +260,6 @@ export interface RunState {
   bossRevealed: boolean; // the boss dossier has been bought
   visionCol: number; // fog of war high-water mark — node types in columns <= this are visible
   revealedNodes: MapPosition[]; // targeted reveals (deep scan) on top of the vision high-water mark
-  shopIntel?: { sectorScan: boolean; deepScan: boolean; escalationIntercept: boolean }; // one-per-visit intel purchases
   activeQuest?: ActiveQuest; // capped at 1
   shopQuestOffer?: ActiveQuest; // this shop visit's job-board offer, if any
   commanderChoices: CommanderId[]; // 3 of 4, seeded at run start
@@ -263,5 +270,15 @@ export interface RunState {
   shopOffers?: PartId[]; // parts currently for sale
   currentEvent?: CurrentEventState;
   lastEventId?: EventId; // avoids repeating the same event back-to-back
+  // Iteration 14.3: set by the defector's "take them aboard" choice. The
+  // next event node drawn consumes this instead of rolling the pool, then
+  // clears it — a one-off forced follow-up, not a queue. Never un-set by
+  // anything except being consumed (if the run ends first, it just never
+  // fires).
+  pendingEventId?: EventId;
+  // Set by EVENT_CONTINUE when an event choice's ambush carries a
+  // win-conditional bonus (see `AmbushBonus`); consumed and cleared by
+  // CONTINUE once that combat resolves, win or lose.
+  pendingAmbushBonus?: AmbushBonus;
   repairSummary?: string; // flavor text shown after a repair-yard visit
 }

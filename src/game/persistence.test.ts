@@ -60,6 +60,28 @@ describe('save / load roundtrip (iteration 9.2)', () => {
     expect(JSON.parse(JSON.stringify(midEvent))).toEqual(midEvent);
   });
 
+  it('a save/load roundtrip mid-defector-chain preserves pendingEventId (iteration 14.3, v4)', () => {
+    const storage = fakeStorage();
+    // The defector's "take them aboard" choice has resolved, but the player
+    // hasn't reached the next event node yet — pendingEventId is the only
+    // record that the pursuit is still owed.
+    const midChain: RunState = { ...initialRunState(), phase: 'map', pendingEventId: 'defector-pursuit' };
+    expect(saveRun(midChain, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(midChain);
+  });
+
+  it('a save mid-ambush preserves the pending win-conditional bonus (iteration 14.3, v4)', () => {
+    const storage = fakeStorage();
+    const midAmbush: RunState = {
+      ...initialRunState(),
+      phase: 'prep',
+      currentEnemy: GAUNTLET[0],
+      pendingAmbushBonus: { credits: 8 },
+    };
+    expect(saveRun(midAmbush, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(midAmbush);
+  });
+
   it('loadRun returns null when nothing has been saved', () => {
     expect(loadRun(fakeStorage())).toBeNull();
   });

@@ -30,9 +30,7 @@ export function RewardScreen({ reward, fleet, onPickUpgrade, onLeave }: RewardSc
       <p className="reward-screen__credits">
         +{reward.credits} credits <span className="hint">(total {reward.creditsTotal})</span>
       </p>
-      {reward.intelGained > 0 && (
-        <p className="hint">Flight recorders salvaged: +{reward.intelGained} intel</p>
-      )}
+      {reward.intelText && <p className="hint reward-screen__intel">Intelligence: {reward.intelText}</p>}
 
       {reward.cardGained && <p className="hint">Reaction card gained: {getCard(reward.cardGained).name}</p>}
       {reward.cardInsteadCredits !== undefined && (

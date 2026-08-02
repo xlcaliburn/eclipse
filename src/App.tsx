@@ -118,7 +118,7 @@ function App() {
       <>
         <Starfield act={state.act} />
         <div className="app">
-          <HudBar credits={state.credits} intel={state.intel} />
+          <HudBar credits={state.credits} />
           {mapPeek(() => setViewingMap(false))}
         </div>
       </>
@@ -131,11 +131,7 @@ function App() {
     <div className="app">
       {warping && <div className="warp-transition" aria-hidden="true" />}
       {showHud && (
-        <HudBar
-          credits={state.credits}
-          intel={state.intel}
-          onViewMap={canPeekMap ? () => setViewingMap(true) : undefined}
-        />
+        <HudBar credits={state.credits} onViewMap={canPeekMap ? () => setViewingMap(true) : undefined} />
       )}
       {savingUnavailable && <p className="warning">Saving unavailable — this run won't be saved if you close the tab.</p>}
 
@@ -205,12 +201,9 @@ function App() {
       {state.phase === 'shop' && state.shopOffers && (
         <ShopScreen
           credits={state.credits}
-          intel={state.intel}
           offers={state.shopOffers}
           fleet={state.fleet}
           inventory={state.inventory}
-          bossRevealed={state.bossRevealed}
-          shopIntel={state.shopIntel}
           shopQuestOffer={state.shopQuestOffer}
           activeQuest={state.activeQuest}
           commanderId={state.commanderId}
@@ -218,10 +211,6 @@ function App() {
           onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}
           onBuyShip={(frameId) => dispatch({ type: 'BUY_SHIP', frameId })}
           onScuttle={(shipIndex) => dispatch({ type: 'SCUTTLE_SHIP', shipIndex })}
-          onBuyDossier={() => dispatch({ type: 'BUY_DOSSIER' })}
-          onBuySectorScan={() => dispatch({ type: 'BUY_SECTOR_SCAN' })}
-          onBuyDeepScan={(row) => dispatch({ type: 'BUY_DEEP_SCAN', row })}
-          onBuyEscalationIntercept={() => dispatch({ type: 'BUY_ESCALATION_INTERCEPT' })}
           onAcceptQuest={(carrierShipIndex) => dispatch({ type: 'ACCEPT_QUEST', carrierShipIndex })}
           onMoveCargoPod={(toShipIndex) => dispatch({ type: 'MOVE_CARGO_POD', toShipIndex })}
           onReroll={() => dispatch({ type: 'REROLL' })}
@@ -245,8 +234,8 @@ function App() {
 
       {state.phase === 'event' && state.currentEvent && (
         <EventScreen
-          event={state.currentEvent}
-          onChoose={(choiceIndex) => dispatch({ type: 'EVENT_CHOOSE', choiceIndex })}
+          state={state}
+          onChoose={(choiceIndex, shipIndex, cardId) => dispatch({ type: 'EVENT_CHOOSE', choiceIndex, shipIndex, cardId })}
           onContinue={() => dispatch({ type: 'EVENT_CONTINUE' })}
           onViewMap={() => setViewingMap(true)}
           onViewFleet={() => setViewingFleet(true)}
@@ -259,7 +248,6 @@ function App() {
           column={state.position?.col ?? 0}
           act={state.act}
           credits={state.credits}
-          intel={state.intel}
           visitedCount={state.visited.length}
           fleet={state.fleet}
           onNewRun={() => dispatch({ type: 'NEW_RUN' })}
@@ -271,7 +259,6 @@ function App() {
           fleet={state.fleet}
           inventory={state.inventory}
           credits={state.credits}
-          intel={state.intel}
           onClose={() => setViewingFleet(false)}
         />
       )}

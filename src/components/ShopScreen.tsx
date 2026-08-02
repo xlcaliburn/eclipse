@@ -3,16 +3,9 @@ import type { CommanderId } from '../game/commanders';
 import { FRAMES, MAX_FLEET_SIZE } from '../game/frames';
 import { getPart } from '../game/parts';
 import type { ActiveQuest } from '../game/quests';
-import {
-  DEEP_SCAN_INTEL_COST,
-  DOSSIER_INTEL_COST,
-  ESCALATION_INTERCEPT_INTEL_COST,
-  QUEST_STAKE,
-  rerollCost,
-  SECTOR_SCAN_INTEL_COST,
-} from '../game/reducer';
+import { QUEST_STAKE, rerollCost } from '../game/reducer';
 import { playerShipLabel } from '../game/ship';
-import type { PartId, PlayerShipState, RunState } from '../game/types';
+import type { PartId, PlayerShipState } from '../game/types';
 import { FleetPanel } from './FleetPanel';
 import { PartCard } from './PartCard';
 import { FrameSilhouette } from './ShipSilhouette';
@@ -28,17 +21,14 @@ const QUEST_ARCHETYPE_LABEL: Record<ActiveQuest['archetype'], string> = {
 const QUEST_ARCHETYPE_BLURB: Record<ActiveQuest['archetype'], string> = {
   bounty: 'A named elite waits at that combat node — win it for +18 cr and an upgrade pick.',
   delivery: 'Carry a cargo pod there for +15 cr and a reaction card.',
-  recon: 'Visit it for an intel bundle: +2 columns of vision, the next escalation, and +3 intel.',
+  recon: 'Visit it for an intelligence haul: +2 columns of vision and two free reveals.',
 };
 
 interface ShopScreenProps {
   credits: number;
-  intel: number;
   offers: PartId[];
   fleet: PlayerShipState[];
   inventory: PartId[];
-  bossRevealed: boolean;
-  shopIntel: RunState['shopIntel'];
   shopQuestOffer?: ActiveQuest;
   activeQuest?: ActiveQuest;
   commanderId?: CommanderId;
@@ -46,10 +36,6 @@ interface ShopScreenProps {
   onSellPart: (partId: PartId) => void;
   onBuyShip: (frameId: 'interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser') => void;
   onScuttle: (shipIndex: number) => void;
-  onBuyDossier: () => void;
-  onBuySectorScan: () => void;
-  onBuyDeepScan: (row: number) => void;
-  onBuyEscalationIntercept: () => void;
   onAcceptQuest: (carrierShipIndex?: number) => void;
   onMoveCargoPod: (toShipIndex: number) => void;
   onReroll: () => void;
@@ -61,12 +47,9 @@ interface ShopScreenProps {
 
 export function ShopScreen({
   credits,
-  intel,
   offers,
   fleet,
   inventory,
-  bossRevealed,
-  shopIntel,
   shopQuestOffer,
   activeQuest,
   commanderId,
@@ -74,10 +57,6 @@ export function ShopScreen({
   onSellPart,
   onBuyShip,
   onScuttle,
-  onBuyDossier,
-  onBuySectorScan,
-  onBuyDeepScan,
-  onBuyEscalationIntercept,
   onAcceptQuest,
   onMoveCargoPod,
   onReroll,
@@ -125,75 +104,10 @@ export function ShopScreen({
         Reroll stock ({effectiveRerollCost} cr)
       </button>
 
-      <h3>Intel</h3>
-      <p className="hint">Priced in intel, not credits — earned from combat wins, never bought with guns money.</p>
+      {/* The info broker is gone: intelligence is no longer a currency, it
+          is the Spymaster's post-fight perk (and a recon job's payout). */}
+      <h3>Jobs</h3>
       <div className="shop-screen__offers">
-        <button
-          type="button"
-          className="card-tile"
-          onClick={onBuySectorScan}
-          disabled={shopIntel?.sectorScan || intel < SECTOR_SCAN_INTEL_COST}
-        >
-          <span className="card-tile__name">Sector scan</span>
-          <span className="card-tile__desc">
-            {shopIntel?.sectorScan
-              ? 'Already scanned this visit.'
-              : 'Reveal node types in the next 2 columns beyond your current vision.'}
-          </span>
-          <span className="frame-card__cost">{SECTOR_SCAN_INTEL_COST} intel</span>
-        </button>
-
-        <div className="card-tile card-tile--deep-scan">
-          <span className="card-tile__name">Deep scan</span>
-          <span className="card-tile__desc">
-            {shopIntel?.deepScan
-              ? 'Already scanned this visit.'
-              : 'Pick a lane — reveal every node in that row through column 7.'}
-          </span>
-          <span className="frame-card__cost">{DEEP_SCAN_INTEL_COST} intel</span>
-          <div className="card-tile__lane-buttons">
-            {[0, 1, 2].map((row) => (
-              <button
-                key={row}
-                type="button"
-                className="shop-button"
-                onClick={() => onBuyDeepScan(row)}
-                disabled={shopIntel?.deepScan || intel < DEEP_SCAN_INTEL_COST}
-              >
-                Lane {row + 1}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <button
-          type="button"
-          className="card-tile"
-          onClick={onBuyEscalationIntercept}
-          disabled={shopIntel?.escalationIntercept || intel < ESCALATION_INTERCEPT_INTEL_COST}
-        >
-          <span className="card-tile__name">Escalation intercept</span>
-          <span className="card-tile__desc">
-            {shopIntel?.escalationIntercept
-              ? 'Already intercepted this visit.'
-              : 'Reveal the next unrevealed enemy escalation.'}
-          </span>
-          <span className="frame-card__cost">{ESCALATION_INTERCEPT_INTEL_COST} intel</span>
-        </button>
-
-        <button
-          type="button"
-          className="card-tile"
-          onClick={onBuyDossier}
-          disabled={bossRevealed || intel < DOSSIER_INTEL_COST}
-        >
-          <span className="card-tile__name">Boss dossier</span>
-          <span className="card-tile__desc">
-            {bossRevealed ? 'Already known — the boss ahead has been identified.' : 'Reveal the identity of the boss waiting at the end of the run.'}
-          </span>
-          <span className="frame-card__cost">{DOSSIER_INTEL_COST} intel</span>
-        </button>
-
         <div className="card-tile card-tile--deep-scan">
           <span className="card-tile__name">Job board</span>
           {!shopQuestOffer ? (

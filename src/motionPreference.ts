@@ -1,22 +1,15 @@
-// A user-overridable motion setting. The OS `prefers-reduced-motion` is the
-// default, but it is only a default — a player on a machine with animations
-// switched off system-wide can still opt back into the game's motion here,
-// without touching an OS accessibility setting.
+// The game's motion setting. Animations are ON by default regardless of the
+// OS `prefers-reduced-motion` value: they carry real information here (which
+// ship fired, what the die showed), and machines commonly have that setting
+// on for reasons unrelated to games. Players who want motion off have a
+// one-click toggle in the HUD, and that choice persists.
 //
 // The resolved value is stamped on <html data-motion="..."> so CSS can key
 // off it. Every animation-suppressing rule in styles.css uses that attribute
-// rather than an @media query, precisely so this override actually wins.
+// rather than an @media query, precisely so this setting actually wins.
 export type MotionSetting = 'full' | 'reduced';
 
 const KEY = 'eclipse.motion';
-
-function systemPrefersReduced(): boolean {
-  try {
-    return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  } catch {
-    return false;
-  }
-}
 
 function storedSetting(): MotionSetting | null {
   try {
@@ -27,7 +20,12 @@ function storedSetting(): MotionSetting | null {
   }
 }
 
-let current: MotionSetting = storedSetting() ?? (systemPrefersReduced() ? 'reduced' : 'full');
+// Motion is ON by default, even where the OS asks for reduced motion: the
+// animations carry real information here (which ship fired, what the die
+// showed), and a player who wants them off has a one-click toggle in the
+// HUD that then sticks. The OS preference is still respected as a *hint* —
+// see the change listener below, which only moves an unset preference.
+let current: MotionSetting = storedSetting() ?? 'full';
 const listeners = new Set<() => void>();
 
 function apply(): void {
@@ -35,19 +33,6 @@ function apply(): void {
 }
 
 apply();
-
-// Follow the OS if the player has never expressed a preference; an explicit
-// choice always wins over a later system change.
-try {
-  window.matchMedia?.('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
-    if (storedSetting() !== null) return;
-    current = e.matches ? 'reduced' : 'full';
-    apply();
-    listeners.forEach((fn) => fn());
-  });
-} catch {
-  // no matchMedia — the default stands
-}
 
 export function getMotionSetting(): MotionSetting {
   return current;

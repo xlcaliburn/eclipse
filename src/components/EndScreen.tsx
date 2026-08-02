@@ -6,13 +6,12 @@ interface EndScreenProps {
   column: number;
   act: 1 | 2;
   credits: number;
-  intel: number;
   visitedCount: number;
   fleet: PlayerShipState[];
   onNewRun: () => void;
 }
 
-export function EndScreen({ outcome, column, act, credits, intel, visitedCount, fleet, onNewRun }: EndScreenProps) {
+export function EndScreen({ outcome, column, act, credits, visitedCount, fleet, onNewRun }: EndScreenProps) {
   const won = outcome === 'victory';
   return (
     <div className={`end-screen${won ? ' end-screen--victory' : ' end-screen--defeat'}`}>
@@ -38,8 +37,6 @@ export function EndScreen({ outcome, column, act, credits, intel, visitedCount, 
         <dd>{visitedCount}</dd>
         <dt>Credits</dt>
         <dd>{credits}</dd>
-        <dt>Intel</dt>
-        <dd>{intel}</dd>
         <dt>Ships remaining</dt>
         <dd>{fleet.length}</dd>
       </dl>

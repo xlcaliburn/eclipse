@@ -8,11 +8,10 @@ interface FleetOverlayProps {
   fleet: PlayerShipState[];
   inventory: PartId[];
   credits: number;
-  intel: number;
   onClose: () => void;
 }
 
-// A read-only snapshot of the fleet + inventory + credit/intel balance,
+// A read-only snapshot of the fleet + inventory,
 // viewable as a popup from the map, a shop, or an event — so the player can
 // check "what do I have" without leaving whatever they're doing.
 export function FleetOverlay({ fleet, inventory, onClose }: FleetOverlayProps) {
@@ -21,7 +20,7 @@ export function FleetOverlay({ fleet, inventory, onClose }: FleetOverlayProps) {
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-panel__header">
           <h2>Your fleet</h2>
-          {/* Credits/intel live in the persistent HUD bar — no per-screen copy. */}
+          {/* Credits live in the persistent HUD bar — no per-screen copy. */}
         </div>
 
         {fleet.map((ship, shipIndex) => {

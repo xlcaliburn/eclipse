@@ -320,12 +320,14 @@ h1, h2, h3 {
   fill: var(--text);
 }
 
+/* Held longer than the other fx: the die is the one effect the player
+   actually reads a value off, so it needs dwell time, not just a flash. */
 .fx-die {
   position: absolute;
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 8;
-  animation: fx-die-pop 0.85s ease-out forwards;
+  animation: fx-die-pop 1.9s ease-out forwards;
 }
 
 .fx-die--hit .die-face__body { stroke: var(--success); }
@@ -333,11 +335,13 @@ h1, h2, h3 {
 .fx-die--miss .die-face__body { stroke: var(--danger); }
 .fx-die--miss .die-face__pip { fill: var(--danger); }
 
+/* Snap in fast, then hold the face readable for most of the duration and
+   fade only at the very end. */
 @keyframes fx-die-pop {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4) rotate(-40deg); }
-  20% { opacity: 1; transform: translate(-50%, -50%) scale(1.15) rotate(6deg); }
-  35% { transform: translate(-50%, -50%) scale(1) rotate(0deg); }
-  80% { opacity: 1; }
+  9% { opacity: 1; transform: translate(-50%, -50%) scale(1.15) rotate(6deg); }
+  16% { transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+  88% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
 }
 
@@ -726,6 +730,15 @@ h1, h2, h3 {
   font-weight: 600;
 }
 
+/* Type eyebrow on reaction-card tiles: cards are spent on use, and nothing
+   else in the UI said so. */
+.card-tile__kind {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
 .card-tile--deep-scan {
   cursor: default;
 }
@@ -896,6 +909,34 @@ h1, h2, h3 {
   gap: 12px;
   justify-content: center;
   flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.event-screen__option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+}
+
+.event-screen__option--locked .shop-button {
+  opacity: 0.5;
+}
+
+.event-screen__reqtext {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.event-screen__picker {
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
 }
 
 .event-screen__outcome {
@@ -1218,6 +1259,7 @@ h1, h2, h3 {
    six-hull fight still fits above the log and the round controls without
    scrolling between steps. */
 .combat-ship {
+  position: relative; /* anchors the outcome badge */
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
@@ -1234,6 +1276,49 @@ h1, h2, h3 {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+}
+
+/* Outcome badge pinned to the card the shot actually hit — "−3", "DODGED".
+   Anchored top-right so it never displaces the readout. */
+.combat-ship__badge {
+  position: absolute;
+  top: -8px;
+  right: 6px;
+  z-index: 6;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  animation: combat-badge-pop 1.1s ease-out forwards;
+}
+
+.combat-ship__badge--damage {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 18%, var(--bg));
+  border: 1px solid var(--danger);
+  box-shadow: 0 0 10px var(--danger-glow);
+}
+
+.combat-ship__badge--dodge {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+@keyframes combat-badge-pop {
+  0% { opacity: 0; transform: translateY(6px) scale(0.7); }
+  15% { opacity: 1; transform: translateY(0) scale(1.12); }
+  28% { transform: translateY(0) scale(1); }
+  80% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-8px) scale(0.95); }
+}
+
+:root[data-motion='reduced'] .combat-ship__badge {
+  animation: none;
 }
 
 .combat-ship__art {

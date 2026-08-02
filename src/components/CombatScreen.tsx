@@ -20,6 +20,16 @@ import { usePrefersReducedMotion } from './useReducedMotion';
 const ROUND_REPLAY_BUDGET_MS = 1500;
 const MIN_TICK_MS = 40;
 const MAX_TICK_MS = 220;
+// Roughly how long a tracer takes to reach its target — card badges wait
+// this long so they read as the shot landing, not as the event firing.
+const TRACER_TRAVEL_MS = 260;
+const BADGE_HOLD_MS = 1100;
+
+export interface CardBadge {
+  text: string;
+  tone: 'dodge' | 'damage';
+  id: number; // changes on every badge, so the animation restarts on repeats
+}
 
 interface CombatScreenProps {
   combat: CombatState;
@@ -200,6 +210,9 @@ export function CombatScreen({
   const shipElsRef = useRef(new Map<string, HTMLElement>());
   const [fx, setFx] = useState<FxItem[]>([]);
   const fxKeyRef = useRef(0);
+  // Per-card badges ("−3", "DODGED"), keyed by `side:index`.
+  const [cardBadges, setCardBadges] = useState<Record<string, CardBadge>>({});
+  const badgeKeyRef = useRef(0);
   const prevRevealedRef = useRef(revealedCount);
 
   const registerShipEl = useCallback((side: Side, index: number, el: HTMLElement | null) => {
@@ -233,6 +246,22 @@ export function CombatScreen({
       window.setTimeout(() => setFx((all) => all.filter((i) => i.key !== key)), ttlMs);
     };
 
+    // A badge stuck on the target's own card, timed to land when the tracer
+    // does rather than the moment the event is revealed.
+    const badgeOnCard = (side: Side, index: number, text: string, tone: 'dodge' | 'damage') => {
+      const key = `${side}:${index}`;
+      window.setTimeout(() => {
+        setCardBadges((all) => ({ ...all, [key]: { text, tone, id: ++badgeKeyRef.current } }));
+        window.setTimeout(() => {
+          setCardBadges((all) => {
+            if (!all[key]) return all;
+            const { [key]: _dropped, ...rest } = all;
+            return rest;
+          });
+        }, BADGE_HOLD_MS);
+      }, TRACER_TRAVEL_MS);
+    };
+
     if (event.kind === 'roll') {
       const from = centerOf(event.side, event.shooterIndex);
       const to = centerOf(event.side === 'player' ? 'enemy' : 'player', event.targetIndex);
@@ -242,11 +271,27 @@ export function CombatScreen({
         // Iteration 13: show the actual die, near the shooter, tinted by outcome.
         push(
           { kind: 'die', x: from.x + (to.x - from.x) * 0.18, y: from.y + (to.y - from.y) * 0.18 - 26, raw: event.raw, hit: event.hit },
-          900,
+          1900,
         );
+        const targetSide: Side = event.side === 'player' ? 'enemy' : 'player';
+        // A jink logs its part-effect immediately *before* the roll it
+        // negates, so a miss preceded by that entry is a dodge, not a whiff.
+        const previous = combat.log[revealedCount - 2];
+        const dodged =
+          !event.hit && previous?.kind === 'part-effect' && previous.text.includes('jinks');
+
         if (event.hit) {
           push({ kind: 'tracer', x1: from.x, y1: from.y, x2: to.x, y2: to.y, side: event.side, missile, veer: false }, 650);
-          push({ kind: 'damage', x: to.x, y: to.y - 34, text: `−${event.damage}` }, 1000);
+          if (event.damage > 0) badgeOnCard(targetSide, event.targetIndex, `−${event.damage}`, 'damage');
+        } else if (dodged) {
+          // The shot is thrown wide by the dodge, and the card says so.
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          push(
+            { kind: 'tracer', x1: from.x, y1: from.y, x2: to.x + dx * 0.3, y2: to.y + dy * 0.3 - 44, side: event.side, missile, veer: true },
+            650,
+          );
+          badgeOnCard(targetSide, event.targetIndex, 'DODGED', 'dodge');
         } else if (event.raw === 1) {
           // Natural 1 (or a jink) — the shot veers wide past the card.
           const dx = to.x - from.x;
@@ -265,7 +310,11 @@ export function CombatScreen({
       const at = centerOf(event.side, event.shipIndex);
       if (at) push({ kind: 'shards', x: at.x, y: at.y }, 1100);
     } else if (event.kind === 'card' || event.kind === 'part-effect') {
-      push({ kind: 'banner', text: event.text }, 1500);
+      // The jink gets a badge on the dodging card instead of a top banner —
+      // it belongs to one ship, not the whole fight.
+      if (!(event.kind === 'part-effect' && event.text.includes('jinks'))) {
+        push({ kind: 'banner', text: event.text }, 1500);
+      }
     }
 
     if (spawned.length > 0) setFx((all) => [...all, ...spawned]);
@@ -278,6 +327,24 @@ export function CombatScreen({
     }
     setFx([]);
     setRevealedCount(combat.log.length);
+  }
+
+  // The ship arrays hold end-of-round state, but the theater is mid-replay —
+  // so roll back everything not yet revealed. Damage is reconstructed by
+  // subtracting the pending rolls' own logged amounts (which are the exact
+  // values applied), and a ship only reads as destroyed once its `destroyed`
+  // entry has actually been shown. Self-correcting: at full reveal there is
+  // nothing pending and this is the real state again.
+  const pendingDamage = new Map<string, number>();
+  const pendingDestroyed = new Set<string>();
+  for (let i = revealedCount; i < combat.log.length; i++) {
+    const event = combat.log[i];
+    if (event.kind === 'roll' && event.damage > 0) {
+      const key = `${event.side === 'player' ? 'enemy' : 'player'}:${event.targetIndex}`;
+      pendingDamage.set(key, (pendingDamage.get(key) ?? 0) + event.damage);
+    } else if (event.kind === 'destroyed') {
+      pendingDestroyed.add(`${event.side}:${event.shipIndex}`);
+    }
   }
 
   const visibleLog = combat.log.slice(0, revealedCount);
@@ -332,6 +399,9 @@ export function CombatScreen({
           })}
           activeAttacker={activeAttacker}
           activeTarget={activeTarget}
+          pendingDamage={pendingDamage}
+          pendingDestroyed={pendingDestroyed}
+          cardBadges={cardBadges}
           onShipEl={registerShipEl}
           onSelectEnemy={!finished && !isReplaying ? onSelectEnemy : undefined}
           priorityTargetIndex={effectivePriority}
@@ -413,6 +483,7 @@ export function CombatScreen({
                     onClick={() => onPlayCard(cardId)}
                     title={card.description}
                   >
+                    <span className="card-tile__kind">Consumable</span>
                     <span className="card-tile__name">{card.name}</span>
                     <span className="card-tile__desc">{card.description}</span>
                   </button>
@@ -442,6 +513,7 @@ export function CombatScreen({
                     onClick={() => onUseActive(shipIndex, abilityIndex)}
                     title={part.description}
                   >
+                    <span className="card-tile__kind">{usable ? '1 per combat' : 'Spent'}</span>
                     <span className="card-tile__name">
                       <ActiveSparkIcon size={14} className={usable ? 'part-icon--charged' : 'part-icon--spent'} />
                       {part.name}

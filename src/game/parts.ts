@@ -199,11 +199,15 @@ export const PARTS: Part[] = [
   },
   {
     id: 'capacitor',
+    // Was +2 for 5cr, which the Phase shield (+2 always, 5cr) strictly
+    // dominated. Now it is the anti-alpha-strike answer instead: cheaper and
+    // stronger than a Phase shield while it lasts, useless once a fight
+    // grinds past the opening exchange.
     name: 'Shield capacitor',
     type: 'shield',
-    description: '+2 shield during the missile phase and the first cannon round only',
-    cost: 5,
-    capacitorShield: 2,
+    description: '+3 shield during the missile phase and the first cannon round only',
+    cost: 4,
+    capacitorShield: 3,
   },
   {
     id: 'cloak',

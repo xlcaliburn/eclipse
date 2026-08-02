@@ -42,6 +42,9 @@ Rules for working with these files:
 | [11](plans/iteration-11.md) | Tempo & teeth: auto-heal interlude, initiative-as-evasion rework, act-1-late/act-2 difficulty pass tuned via the re-armed balance script | **in progress** (partial in working tree: I8-addendum items landed; evasion + tuning outstanding) |
 | [12](plans/iteration-12.md) | Coordinate layer & decision support: starchart edges/trail, combat-theater fx, hit-chance matrix, forecast restore + delta preview | implemented |
 | [13](plans/iteration-13.md) | Dice on the table: weapons/rolls as dice, shared stat bar, click-to-focus priority targeting, forecast removed, combat declutter, map threat-strip copy | implemented |
+| [14](plans/iteration-14.md) | Events that read the run: multi-option framework, build-gated (shown-locked) choices, chosen costs, defector multi-stage chain, 3 new events | implemented |
+| [15](plans/iteration-15.md) | Routing under pressure: cargo-typed combat nodes, deterministic heat/pursuit track, repair-or-overhaul yards | planned (implement after 14 — shared files, SAVE_VERSION 5) |
+| [16](plans/iteration-16.md) | Mobile shell: Mission/Chart/Fleet bottom tabs, touch polish, installable offline PWA | planned (after 14; rebases with 15 in either order) |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes
