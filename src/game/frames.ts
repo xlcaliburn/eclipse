@@ -34,7 +34,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 2,
     baseHp: 2,
     cost: 6,
-    blurb: 'Fast and fragile. 3 slots, fires early.',
+    blurb: 'Fast and fragile. 3 slots, fires early, and dodges the first hit of each fight.',
   },
   bastion: {
     id: 'bastion',

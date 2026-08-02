@@ -328,10 +328,14 @@ function fireShip(
       // Jink (innate to the Interceptor frame): the first hit that would
       // land on this ship misses instead, once per combat — consumed
       // before reactive armor gets a chance to negate it.
+      //
+      // Deliberately gated on `hit`, and checked only after shields, chaff
+      // and any fire-control reroll have settled the outcome: a shot that
+      // was going to miss anyway never burns the dodge.
       if (hit && target.jinkAvailable) {
         target.jinkAvailable = false;
         hit = false;
-        log.push({ kind: 'part-effect', text: 'Interceptor jinks aside.' });
+        log.push({ kind: 'part-effect', text: 'Interceptor jinks aside — dodges the first hit of the fight.' });
       }
 
       let damage = hit ? weapon.damage : 0;

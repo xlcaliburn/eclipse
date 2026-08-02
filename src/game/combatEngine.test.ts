@@ -789,6 +789,40 @@ describe('Jink (iteration 8, addendum A.1: innate to the Interceptor frame)', ()
     expect(state.playerShips[0].damage).toBe(0); // both hits negated, by two different defenses
   });
 
+  it('is not spent by shots that were going to miss anyway', () => {
+    // Against shield 6 with computer 0, only a natural 6 can land. So the
+    // dodge must fire if and only if a natural 6 was rolled — never on the
+    // ordinary misses in between. (A jinked shot logs as a miss, so the raw
+    // die is what distinguishes "would have hit" from "missed".)
+    const fleet = [{ stats: blankStats({ hp: 20, jink: true, shield: 6 }), initialDamage: 0 }];
+    const foe = enemy({ count: 3 }, { initiative: 5, computer: 0, hp: 5, cannons: [{ diceCount: 2, damage: 5 }] });
+    let state = initCombat(fleet, foe, 11);
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1
+    state = advanceRound(state); // cannon round 2
+
+    const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(enemyRolls.length).toBeGreaterThan(4); // they really did shoot, a lot
+    const anyWouldHaveLanded = enemyRolls.some((e) => e.kind === 'roll' && e.raw === 6);
+    const jinked = state.log.some((e) => e.kind === 'part-effect' && e.text.includes('jinks'));
+
+    expect(jinked).toBe(anyWouldHaveLanded);
+    expect(state.playerShips[0].jinkAvailable).toBe(!anyWouldHaveLanded);
+  });
+
+  it('survives a shield-blocked shot and still fires on the first shot that beats the shield', () => {
+    // Shields are applied before the dodge is considered, so a shot stopped
+    // by armor is a miss for jink's purposes, not a trigger.
+    const fleet = [{ stats: blankStats({ hp: 20, jink: true, shield: 2 }), initialDamage: 0 }];
+    const foe = enemy({ count: 2 }, { initiative: 5, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 5 }] });
+    let state = initCombat(fleet, foe, 2);
+    state = advanceRound(state);
+    state = advanceRound(state);
+
+    const jinks = state.log.filter((e) => e.kind === 'part-effect' && e.text.includes('jinks'));
+    expect(jinks).toHaveLength(1); // spent exactly once, on a shot that would have landed
+  });
+
   it('does not replenish between fights it was not consumed in, but does reset in a fresh combat', () => {
     const fleet = [{ stats: blankStats({ hp: 20, jink: true }), initialDamage: 0 }];
     const foe = enemy({}, { initiative: 5, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 5 }] });
