@@ -104,15 +104,40 @@ export const GAUNTLET: EnemyDef[] = [
   {
     id: 'ancient-guardian',
     name: 'Ancient guardian',
-    blurb: 'A balanced check of everything.',
-    groups: solo('guardian', 1, {
-      initiative: 2,
-      hp: 4,
-      computer: 2,
-      shield: 2,
-      cannons: [{ diceCount: 3, damage: 1 }],
-      missiles: [],
-    }),
+    // Nerfed 2026-08-02: was computer 2 / shield 2 solo, which made it a
+    // stat wall with nothing to focus fire onto. Softened to 1/1 and given
+    // a pair of missile frigates (the exact roster enemy's own stats) as
+    // escorts, so a screen exists to punch through instead.
+    blurb: 'Its defenses are lighter than they look — the two frigates screening it are the real threat.',
+    groups: [
+      {
+        label: 'guardian',
+        count: 1,
+        stats: {
+          initiative: 2,
+          hp: 4,
+          computer: 1,
+          shield: 1,
+          cannons: [{ diceCount: 3, damage: 1 }],
+          missiles: [],
+        },
+      },
+      {
+        // Same stats as the standalone Missile frigate enemy (id
+        // 'missile-frigate') — an escort should be recognizably that ship,
+        // not a bespoke reskin.
+        label: 'frigate',
+        count: 2,
+        stats: {
+          initiative: 1,
+          hp: 2,
+          computer: 1,
+          shield: 0,
+          cannons: [{ diceCount: 1, damage: 1 }],
+          missiles: [{ diceCount: 2, damage: 1 }],
+        },
+      },
+    ],
   },
   {
     id: 'gcds',

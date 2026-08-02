@@ -67,7 +67,9 @@ export function FleetPanel({
                   className="shop-button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onScuttle(shipIndex);
+                    if (window.confirm(`Scuttle ${playerShipLabel(fleet, shipIndex)}? This cannot be undone.`)) {
+                      onScuttle(shipIndex);
+                    }
                   }}
                 >
                   Scuttle
@@ -136,7 +138,14 @@ export function FleetPanel({
                 disabled={!selectedHasRoom}
               />
               {onSellPart && (
-                <button type="button" className="shop-button" onClick={() => onSellPart(partId)}>
+                <button
+                  type="button"
+                  className="shop-button"
+                  onClick={() => {
+                    const price = Math.floor(getPart(partId).cost / 2);
+                    if (window.confirm(`Sell ${getPart(partId).name} for ${price} credits?`)) onSellPart(partId);
+                  }}
+                >
                   Sell ({Math.floor(getPart(partId).cost / 2)} cr)
                 </button>
               )}

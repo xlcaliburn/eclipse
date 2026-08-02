@@ -26,10 +26,14 @@ import { usePrefersReducedMotion } from './components/useReducedMotion';
 function App() {
   // The lazy initializer runs once at mount: resume the saved run if one
   // exists (mid-combat, hand, used actives — all of it), otherwise start
-  // fresh. If a save exists, the landing screen gates showing it, but the
-  // state itself is already loaded either way (iteration 9.2).
+  // fresh. The state itself is already loaded either way (iteration 9.2);
+  // the intro screen below gates *showing* it, every boot, whether or not
+  // there's a save — a first-time player used to land straight on commander
+  // pick with zero context, so `hasSave` now only decides which buttons the
+  // intro offers, not whether it appears at all.
   const [state, dispatch] = useReducer(runReducer, undefined, () => loadRun() ?? initialRunState());
-  const [awaitingBootChoice, setAwaitingBootChoice] = useState(() => loadRun() !== null);
+  const [hasSave] = useState(() => loadRun() !== null);
+  const [awaitingBootChoice, setAwaitingBootChoice] = useState(true);
   const [savingUnavailable, setSavingUnavailable] = useState(false);
 
   // Pure view state — no gameplay effect, so it lives outside the reducer.
@@ -76,7 +80,8 @@ function App() {
   }, [state.phase, reducedMotion]);
 
   function handleNewRun() {
-    if (!window.confirm('Start a new run? This abandons your saved run.')) return;
+    // Nothing to confirm away when there was never a save to lose.
+    if (hasSave && !window.confirm('Start a new run? This abandons your saved run.')) return;
     clearRun();
     dispatch({ type: 'NEW_RUN' });
     setAwaitingBootChoice(false);
@@ -93,7 +98,7 @@ function App() {
       <>
         <Starfield />
         <div className="app">
-          <LandingScreen onContinue={() => setAwaitingBootChoice(false)} onNewRun={handleNewRun} />
+          <LandingScreen hasSave={hasSave} onContinue={() => setAwaitingBootChoice(false)} onNewRun={handleNewRun} />
         </div>
       </>
     );

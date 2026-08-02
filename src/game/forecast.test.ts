@@ -36,7 +36,11 @@ describe('forecastWinRate', () => {
   });
 
   it('targeting stance changes the win rate against a screened formation (9.4 — the legibility payoff)', () => {
-    const escortedSniper = HARD_POOL.find((e) => e.groups.length > 1)!;
+    // By id, not "the first multi-group HARD_POOL entry" — ancient-guardian
+    // (2026-08-02) also gained an escort group, so that predicate no longer
+    // uniquely identifies escorted-sniper, the formation this test actually
+    // means to exercise.
+    const escortedSniper = HARD_POOL.find((e) => e.id === 'escorted-sniper')!;
     const fleet = [cruiser(['ion', 'comp1', 'hull1'])];
     const weakest = forecastWinRate(fleet, escortedSniper, 200, 'weakest');
     const strongest = forecastWinRate(fleet, escortedSniper, 200, 'strongest');

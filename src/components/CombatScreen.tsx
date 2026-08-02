@@ -214,6 +214,11 @@ export function CombatScreen({
   const [cardBadges, setCardBadges] = useState<Record<string, CardBadge>>({});
   const badgeKeyRef = useRef(0);
   const prevRevealedRef = useRef(revealedCount);
+  // Which shot number this is within the firing ship's current activation —
+  // a ship with multiple guns (or a multi-die weapon) logs one 'roll' event
+  // per die, and without this every die's fx would spawn at the same point
+  // and visually replace the last one instead of reading as separate shots.
+  const shotSequenceRef = useRef<{ key: string; count: number }>({ key: '', count: 0 });
 
   const registerShipEl = useCallback((side: Side, index: number, el: HTMLElement | null) => {
     const key = `${side}:${index}`;
@@ -268,9 +273,34 @@ export function CombatScreen({
       if (from && to) {
         const lastPhase = [...combat.log.slice(0, revealedCount)].reverse().find((e) => e.kind === 'phase-start');
         const missile = lastPhase?.kind === 'phase-start' && lastPhase.phase === 'missile';
+
+        // A ship with multiple guns (or a multi-die weapon) fires several
+        // dice in one activation — track which one this is so its die lands
+        // beside the others instead of on top of them. Resets whenever the
+        // shooter, round, or phase changes; unaffected by other event kinds
+        // (jink, reactive armor, ...) that can land between this shooter's
+        // own dice.
+        const shotKey = `${event.side}:${event.shooterIndex}:${event.round}:${event.phase}`;
+        const shotIndex = shotSequenceRef.current.key === shotKey ? shotSequenceRef.current.count : 0;
+        shotSequenceRef.current = { key: shotKey, count: shotIndex + 1 };
+        // Fan the dice out left/right/left/... (0, +1, -1, +2, -2, ...) in a
+        // horizontal row — always screen-horizontal, not perpendicular to
+        // the shot, so a ship's dice read as one row regardless of which
+        // side of the theater it's on or where its target sits.
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const fanUnits = shotIndex === 0 ? 0 : (shotIndex % 2 === 1 ? 1 : -1) * Math.ceil(shotIndex / 2);
+        const DIE_SPACING = 30;
+
         // Iteration 13: show the actual die, near the shooter, tinted by outcome.
         push(
-          { kind: 'die', x: from.x + (to.x - from.x) * 0.18, y: from.y + (to.y - from.y) * 0.18 - 26, raw: event.raw, hit: event.hit },
+          {
+            kind: 'die',
+            x: from.x + dx * 0.18 + fanUnits * DIE_SPACING,
+            y: from.y + dy * 0.18 - 26,
+            raw: event.raw,
+            hit: event.hit,
+          },
           1900,
         );
         const targetSide: Side = event.side === 'player' ? 'enemy' : 'player';
@@ -415,26 +445,8 @@ export function CombatScreen({
         </p>
       )}
 
-      {/* Open by default — the log is the fight, not an appendix. React only
-          patches `open` when the prop itself changes, so collapsing it by
-          hand survives the re-render on every revealed event. */}
-      <details className="combat-log" open>
-        <summary>Play-by-play</summary>
-        <ol className="combat-log__list" ref={logRef}>
-          {visibleLog.map((event, i) => {
-            const text = describeEvent(event, enemy, playerLabels);
-            if (!text) return null;
-            return (
-              <li key={i} className={eventClassName(event)}>
-                {text}
-              </li>
-            );
-          })}
-        </ol>
-      </details>
-
-      <div className="combat-command-bar">
-      {/* Actions first — most critical tap target on mobile */}
+      {/* Round controls sit above the log — the most critical tap target
+          shouldn't require scrolling past a growing play-by-play to reach. */}
       <div className="combat-screen__actions">
         {!finished && (
           <>
@@ -464,6 +476,28 @@ export function CombatScreen({
         )}
       </div>
 
+      {/* Open by default — the log is the fight, not an appendix. React only
+          patches `open` when the prop itself changes, so collapsing it by
+          hand survives the re-render on every revealed event. */}
+      <details className="combat-log" open>
+        <summary>Play-by-play</summary>
+        <ol className="combat-log__list" ref={logRef}>
+          {visibleLog.map((event, i) => {
+            const text = describeEvent(event, enemy, playerLabels);
+            if (!text) return null;
+            return (
+              <li key={i} className={eventClassName(event)}>
+                {text}
+              </li>
+            );
+          })}
+        </ol>
+      </details>
+
+      {/* Iteration: pinned to the bottom of the viewport on mobile (see
+          .combat-command-bar's ≤720px rule) so the hand/actives stay
+          reachable without scrolling past the log. */}
+      <div className="combat-command-bar">
       {!finished && (
         <div className="combat-hand">
           <h3>Your hand</h3>

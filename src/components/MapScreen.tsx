@@ -58,6 +58,10 @@ const CARGO_GLYPH: Record<CargoTag, string> = {
   command: '♦',
 };
 
+// Common-to-rare, matching map.ts's CARGO_WEIGHTS order — the legend reads
+// as "what you'll see most" first.
+const CARGO_TAGS: CargoTag[] = ['patrol', 'convoy', 'wreck', 'command'];
+
 function isVisited(visited: MapPosition[], col: number, row: number): boolean {
   return visited.some((p) => p.col === col && p.row === row);
 }
@@ -181,6 +185,26 @@ export function MapScreen({
             ? "Pick your next stop. Only nearby columns, repair yards, and the boss are known up front — the rest is fog until you scout it or get there."
             : 'Viewing the map — switch tabs to get back to what you were doing.'}
       </p>
+
+      {/* The cargo glyphs are the one marker on the chart with no visible
+          label (node types already print their own name under the icon) —
+          a hover title alone doesn't reach touch/mobile, so this is the
+          reachable explanation. Collapsed by default: it's a reference,
+          not something read every visit, matching the combat-ship
+          stats/weapons disclosure elsewhere. */}
+      <details className="map-legend">
+        <summary className="map-legend__toggle">Chart legend</summary>
+        <div className="map-legend__items">
+          {CARGO_TAGS.map((tag) => (
+            <span key={tag} className="map-legend__item">
+              <span className={`map-legend__glyph map-legend__glyph--${tag}`}>{CARGO_GLYPH[tag]}</span>
+              <span>
+                <strong>{CARGO_LABEL[tag]}</strong> — {CARGO_DESCRIPTION[tag]}
+              </span>
+            </span>
+          ))}
+        </div>
+      </details>
 
       {/* Iteration 13: legible copy, 1-indexed columns everywhere (players
           count columns from 1; the quest badge already did). "From column
