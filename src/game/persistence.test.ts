@@ -114,6 +114,50 @@ describe('save / load roundtrip (iteration 9.2)', () => {
     expect(loadRun(storage)).toBeNull();
   });
 
+  it('a save mid-repair-choice (before either branch is picked) roundtrips instead of blanking (iteration 15.3, v5)', () => {
+    // The exact regression the plan calls out: the repair phase now has a
+    // *choosing* sub-state (repairUpgradeOptions drawn, repairSummary not
+    // yet set) that exists before the old "repair always means resolved"
+    // shape did. A save taken here must still load, not blank the screen.
+    const storage = fakeStorage();
+    const midChoice: RunState = {
+      ...initialRunState(),
+      phase: 'repair',
+      repairUpgradeOptions: ['spine', 'reactor', 'lattice'],
+    };
+    expect(saveRun(midChoice, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(midChoice);
+  });
+
+  it('a save mid-repair-choice after the overhaul branch resolves also roundtrips', () => {
+    const storage = fakeStorage();
+    const resolved: RunState = {
+      ...initialRunState(),
+      phase: 'repair',
+      repairUpgradeOptions: ['spine', 'reactor', 'lattice'],
+      repairSummary: 'Overhaul complete — Reinforced spine fitted to the Flagship. No repairs made.',
+    };
+    expect(saveRun(resolved, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(resolved);
+  });
+
+  it('loadRun discards a repair-phase save missing repairUpgradeOptions (the pre-15.3 shape)', () => {
+    // Mirrors the 'combat' case above, one field over: a repair-phase save
+    // from before the choosing sub-state existed (or simply malformed)
+    // must not load as if it were valid.
+    const storage = fakeStorage();
+    const state: RunState = { ...initialRunState(), phase: 'repair' }; // no repairUpgradeOptions
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state }));
+    expect(loadRun(storage)).toBeNull();
+  });
+
+  it('loadRun discards a same-version save missing `heat` (added in v5, always required)', () => {
+    const storage = fakeStorage();
+    const { heat: _drop, ...withoutHeat } = initialRunState();
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state: withoutHeat }));
+    expect(loadRun(storage)).toBeNull();
+  });
+
   it('loadRun discards silently on corrupt JSON', () => {
     const storage = fakeStorage();
     storage.setItem('eclipse.save.v1', '{not valid json');

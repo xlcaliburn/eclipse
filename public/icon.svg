@@ -1,0 +1,23 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Iteration 16.3: PWA icon source. Code-authored, matching the design
+       system's tokens (tokens.css: bg, accent, accent glow) with a nebula
+       backdrop behind the Flagship silhouette, the same hexagon plus wings
+       shape used for the cruiser frame in ShipSilhouette.tsx (FRAME_SHAPES
+       .cruiser), rescaled from its 0-100 viewBox. The ship sits well
+       inside the safe zone (roughly the inner 80% circle) so this one
+       file rasterizes cleanly for both the plain "any" icons and the
+       maskable icon; no separate maskable source needed. -->
+  <defs>
+    <radialGradient id="nebula" cx="72%" cy="24%" r="75%">
+      <stop offset="0%" stop-color="#35d9d4" stop-opacity="0.35" />
+      <stop offset="70%" stop-color="#05070d" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="#05070d" />
+  <rect width="512" height="512" fill="url(#nebula)" />
+  <g transform="translate(256 256) scale(2.9) translate(-50 -50)" fill="#35d9d4">
+    <polygon points="50,5 65,25 65,75 50,95 35,75 35,25" />
+    <polygon points="35,40 10,55 35,65" />
+    <polygon points="65,40 90,55 65,65" />
+  </g>
+</svg>

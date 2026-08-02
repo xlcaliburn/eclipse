@@ -23,14 +23,16 @@ import {
   eliteEnemyForColumn,
   getBoss,
   getFinalBoss,
+  hunterKillerForAmbush,
   OPENER,
 } from './enemies';
 import { drawEscalationSchedule } from './escalations';
 import { drawEvent, getEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
 import type { EventId } from './events';
 import { getFrame, MAX_FLEET_SIZE } from './frames';
+import { addHeat, MAX_HEAT } from './heat';
 import { actColumns, BOSS_COLUMN, generateMap, getNode, globalColumn, LANE_COLUMNS, reachableNodes } from './map';
-import type { GameMap, MapNode, MapPosition } from './map';
+import type { CargoTag, GameMap, MapNode, MapPosition } from './map';
 export { globalColumn } from './map';
 import { CARGO_POD_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
 import { generateQuestOffer } from './quests';
@@ -47,7 +49,7 @@ import {
   hasWeapon,
   playerShipLabel,
 } from './ship';
-import { randomUpgradeIds } from './upgrades';
+import { getUpgrade, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
 import type { EnemyDef, PartId, PlayerShipState, RewardSummary, RunState } from './types';
 
@@ -82,6 +84,11 @@ export type RunAction =
   | { type: 'LEAVE_REPAIR' }
   | { type: 'EVENT_CHOOSE'; choiceIndex: number; shipIndex?: number; cardId?: CardId }
   | { type: 'EVENT_CONTINUE' }
+  // Iteration 15.3: either branch of the repair-yard choice. `choice: 'full'`
+  // needs nothing else; `choice: 'overhaul'` carries the ship + upgrade the
+  // player picked from `RunState.repairUpgradeOptions` (drawn on arrival).
+  | { type: 'REPAIR_CHOOSE'; choice: 'full' }
+  | { type: 'REPAIR_CHOOSE'; choice: 'overhaul'; shipIndex: number; upgradeId: UpgradeId }
   | { type: 'NEW_RUN' };
 
 export const SHOP_OFFER_COUNT = 6;
@@ -187,6 +194,7 @@ export function initialRunState(): RunState {
     visionCol: 0,
     revealedNodes: [],
     commanderChoices,
+    heat: 0,
   };
 }
 
@@ -332,6 +340,27 @@ function pickFromPool(pool: EnemyDef[], rng: () => number): EnemyDef {
   return pool[Math.floor(rng() * pool.length)];
 }
 
+// --- Cargo (iteration 15.1) --------------------------------------------
+// Same 5-credit tier the shop draws its mid parts from — a wreck field's
+// find is exactly "a part you'd otherwise find in a shop," not a
+// bespoke loot table.
+const WRECK_FIELD_PART_POOL: PartId[] = PARTS.filter((p) => p.cost === 5).map((p) => p.id);
+
+function randomWreckPart(rng: RngFn): PartId {
+  return WRECK_FIELD_PART_POOL[Math.floor(rng() * WRECK_FIELD_PART_POOL.length)];
+}
+
+// Applies the cargo table's credit adjustment to an already-computed base
+// reward. Patrol/command/untagged pass through unchanged — command's bonus
+// is the card (wired separately in CONTINUE), not a credit change. Exported
+// for a direct unit test of the wreck-field floor (winReward's own minimum
+// of 4 can never actually reach the floor in an integration test).
+export function applyCargoReward(tag: CargoTag | undefined, base: number): number {
+  if (tag === 'convoy') return base + 4;
+  if (tag === 'wreck') return Math.max(1, base - 2);
+  return base;
+}
+
 function repairFleet(fleet: PlayerShipState[]): { fleet: PlayerShipState[]; totalRepaired: number } {
   let totalRepaired = 0;
   const repaired = fleet.map((ship) => {
@@ -347,11 +376,19 @@ function repairSummaryText(totalRepaired: number, shipCount: number): string {
 }
 
 // Addendum A.4: a ship holds at most 1 permanent upgrade — a second
-// acquisition (elite reward or the interlude's Field promotion) replaces
-// the old one rather than stacking. The old one is simply gone (destroyed),
-// same as any upgrade lost with its ship.
+// acquisition (elite reward, the interlude's Field promotion, or now a
+// repair-yard overhaul) replaces the old one rather than stacking. The old
+// one is simply gone (destroyed), same as any upgrade lost with its ship.
 function withUpgrade(ship: PlayerShipState, upgradeId: UpgradeId): PlayerShipState {
   return { ...ship, upgrades: [upgradeId] };
+}
+
+// Iteration 15.3: overhaul is locked out once every ship already carries a
+// (permanent, at-most-1) upgrade — swapping a player's own earned pick for
+// a random one is never the better choice, so the option is withheld
+// rather than offered as a trap.
+function everyShipAtUpgradeCap(fleet: PlayerShipState[]): boolean {
+  return fleet.length > 0 && fleet.every((s) => s.upgrades.length >= 1);
 }
 
 function samePosition(a: MapPosition, b: MapPosition): boolean {
@@ -390,12 +427,16 @@ function revertedPosition(state: RunState): MapPosition | null {
 // retreat once "itself" is excluded below — no special case needed. Ambush
 // fights (the player's position is still the event node they were jumped
 // from) are excluded explicitly: you were jumped, there is nothing to
-// retreat to.
+// retreat to. A heat-4 interception is the one exception to that
+// exclusion (15.2): it can land on an event node too, but it "follows
+// normal retreat rules" per spec — the player walked in on their own feet,
+// they just got jumped once inside — so it falls through to the ordinary
+// reachability check below instead.
 export function hasLineOfRetreat(state: RunState): boolean {
   if (!state.position) return false;
   const columns = actColumns(state.map, state.act);
   const node = getNode(columns, state.position);
-  if (node.type === 'event') return false;
+  if (node.type === 'event' && !state.interceptionActive) return false;
   const candidates = reachableNodes(columns, revertedPosition(state));
   return candidates.some(
     (n) =>
@@ -549,22 +590,46 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           rngCounter: nextCounter(),
         };
       }
+      // shop / repair / event — the three "dock" node types (15.2): each
+      // costs +1 heat to enter, unless heat is already armed at 4
+      // ("Hunted"), in which case the dock is never reached at all — a
+      // hunter-killer squad replaces the node's content outright, paying a
+      // normal winReward(col) on top of the map's usual prep/combat flow.
+      // Combat/elite/boss/opener entries are never intercepted (they're
+      // already a fight).
+      if (state.heat >= MAX_HEAT) {
+        const enemy = hunterKillerForAmbush(state.act, node.col);
+        return {
+          ...base,
+          phase: 'prep',
+          currentEnemy: enemy,
+          currentCombatSeed: drawCombatSeed(rng),
+          interceptionActive: true,
+          rngCounter: nextCounter(),
+        };
+      }
+      const heat = addHeat(state.heat, 1);
+
       if (node.type === 'shop') {
         return {
           ...base,
           phase: 'shop',
           shopOffers: drawShopOffers(rng),
           shopQuestOffer: generateQuestOffer(columns, node, rng) ?? undefined,
+          heat,
           rngCounter: nextCounter(),
         };
       }
       if (node.type === 'repair') {
-        const { fleet, totalRepaired } = repairFleet(state.fleet);
+        // 15.3: no auto-heal on arrival any more — the player chooses full
+        // repair vs. overhaul next (REPAIR_CHOOSE). The 3 overhaul options
+        // are drawn now regardless of which way they'll go, so a single
+        // later dispatch can carry the pick without a second rng step.
         return {
           ...base,
           phase: 'repair',
-          fleet,
-          repairSummary: repairSummaryText(totalRepaired, state.fleet.length),
+          repairUpgradeOptions: randomUpgradeIds(3, rng),
+          heat,
           rngCounter: nextCounter(),
         };
       }
@@ -580,6 +645,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         currentEvent: { eventId },
         lastEventId: eventId,
         pendingEventId: undefined,
+        heat,
         rngCounter: nextCounter(),
       };
     }
@@ -703,6 +769,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const col = state.position?.col ?? 0;
       const globalCol = globalColumn(state.act, col);
       const isBoss = state.position?.col === BOSS_COLUMN;
+      // 15.2: any won fight vents heat — winning leaves no one to report
+      // your position. An interception win is the one exception: heat
+      // resets to 0 outright rather than just stepping down by 1 (they
+      // found you either way; the track restarts clean).
+      const heatAfterWin = state.interceptionActive ? 0 : addHeat(state.heat, -1);
+
       if (isBoss && state.act === 2) {
         return {
           ...state,
@@ -712,6 +784,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           combat: undefined,
           activeQuest: activeQuestAfterFight,
           pendingAmbushBonus: undefined,
+          heat: heatAfterWin,
+          interceptionActive: undefined,
           rngCounter: nextCounter(),
         };
       }
@@ -732,6 +806,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           currentEnemy: undefined,
           activeQuest: activeQuestAfterFight,
           pendingAmbushBonus: undefined,
+          heat: heatAfterWin, // moot — INTERLUDE_CHOOSE resets to 0 regardless, kept for consistency
+          interceptionActive: undefined,
           rngCounter: nextCounter(),
         };
       }
@@ -743,18 +819,33 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         samePosition(state.activeQuest.target, state.position)
       );
       const isElite = state.currentEnemy?.id.endsWith('-elite') ?? false;
-      const baseReward = isElite ? eliteReward(globalCol) : winReward(globalCol);
+      // Cargo tags (15.1) only ever land on plain 'combat' nodes — elites,
+      // the boss, the opener, and a heat-4 interception's stand-in fight
+      // are all excluded here, though only the first two are structurally
+      // possible (the others' positions never carry a `.cargo` anyway).
+      const columns = actColumns(state.map, state.act);
+      const node = state.position ? getNode(columns, state.position) : undefined;
+      const cargoTag: CargoTag | undefined = !isElite && !state.interceptionActive ? node?.cargo : undefined;
+      const baseReward = applyCargoReward(cargoTag, isElite ? eliteReward(globalCol) : winReward(globalCol));
       let hand = [...state.hand, ...returnedCards];
       let cardGained: CardId | undefined;
       let cardInsteadCredits: number | undefined;
 
-      if (isElite) {
+      // A command-ship cargo tag grants a reaction card exactly like an
+      // elite kill does (same hand-full -> +4cr fallback).
+      if (isElite || cargoTag === 'command') {
         if (hand.length < MAX_HAND_SIZE) {
           cardGained = drawRandomCard(rng);
           hand = [...hand, cardGained];
         } else {
           cardInsteadCredits = 4;
         }
+      }
+
+      // A wreck-field cargo tag also drops a random 5-credit-tier part
+      // straight into inventory, on top of its (reduced) credit payout.
+      if (cargoTag === 'wreck') {
+        inventory = [...inventory, randomWreckPart(rng)];
       }
 
       // 'regen' heals damage after a win; 'salvage' pays extra credits per
@@ -805,6 +896,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         pendingReward,
         pendingAmbushBonus: undefined,
         activeQuest: isBounty ? undefined : activeQuestAfterFight,
+        heat: heatAfterWin,
+        interceptionActive: undefined,
         rngCounter: nextCounter(),
       };
     }
@@ -851,6 +944,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       );
       const activeQuest = isBountyHere || carrierDestroyed ? undefined : state.activeQuest;
 
+      // 15.2: withdrawing costs heat too (they watched you run) — except an
+      // interception, which always resets to 0 regardless of outcome: they
+      // found you either way, so the track restarts clean rather than
+      // stepping up from an already-armed 4.
+      const heat = state.interceptionActive ? 0 : addHeat(state.heat, 1);
+
       return {
         ...state,
         phase: 'map',
@@ -863,6 +962,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         position,
         visited,
         activeQuest,
+        heat,
+        interceptionActive: undefined,
         pendingAmbushBonus: undefined, // withdrawing from an event ambush forfeits any win-conditional bonus
       };
     }
@@ -924,6 +1025,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         bossRevealed: false,
         activeQuest: undefined,
         shopQuestOffer: undefined,
+        heat: 0, // 15.2: crossing the sector border shakes pursuit, same as the fog reset
         rngCounter: nextCounter(),
       };
     }
@@ -1069,9 +1171,37 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       };
     }
 
+    case 'REPAIR_CHOOSE': {
+      // The choosing sub-state: arrived (repairUpgradeOptions drawn), not
+      // yet resolved (repairSummary still undefined). A second dispatch
+      // once resolved is a no-op — same "no double-dispatch" rule as
+      // EVENT_CHOOSE below.
+      if (state.phase !== 'repair' || state.repairSummary !== undefined) return state;
+
+      if (action.choice === 'full') {
+        const { fleet, totalRepaired } = repairFleet(state.fleet);
+        return { ...state, fleet, repairSummary: repairSummaryText(totalRepaired, state.fleet.length) };
+      }
+
+      // Overhaul: no healing — attach one of the 3 pre-drawn upgrades to a
+      // chosen ship instead. Locked out once every ship already carries a
+      // (permanent, at-most-1) upgrade.
+      if (!state.repairUpgradeOptions?.includes(action.upgradeId)) return state;
+      if (everyShipAtUpgradeCap(state.fleet)) return state;
+      const ship = state.fleet[action.shipIndex];
+      if (!ship) return state;
+      const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, action.upgradeId) : s));
+      const label = playerShipLabel(state.fleet, action.shipIndex);
+      return {
+        ...state,
+        fleet,
+        repairSummary: `Overhaul complete — ${getUpgrade(action.upgradeId).name} fitted to ${label}. No repairs made.`,
+      };
+    }
+
     case 'LEAVE_REPAIR': {
-      if (state.phase !== 'repair') return state;
-      return { ...state, phase: 'map', repairSummary: undefined };
+      if (state.phase !== 'repair' || state.repairSummary === undefined) return state;
+      return { ...state, phase: 'map', repairSummary: undefined, repairUpgradeOptions: undefined };
     }
 
     case 'EVENT_CHOOSE': {

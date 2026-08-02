@@ -19,7 +19,13 @@ import type { RunState } from './types';
 // multi-stage chain (`pendingEventId`), and win-conditional ambush bonuses
 // (`pendingAmbushBonus`) — `CurrentEventState` also dropped the unused
 // `offeredPartId` field. A v3 save's event shape doesn't match; discard it.
-export const SAVE_VERSION = 4;
+// v5 (iteration 15): `RunState.heat` is a new always-required field (any
+// pre-v5 save loads with it `undefined`); `MapNode.cargo` is new but
+// optional so it doesn't need its own guard; the repair phase gained a
+// *choosing* sub-state (`repairUpgradeOptions` drawn on arrival,
+// `repairSummary` only once resolved) that replaces the old "repair always
+// means already-resolved" assumption baked into `isValidRunState` below.
+export const SAVE_VERSION = 5;
 const SAVE_KEY = 'eclipse.save.v1';
 
 interface SaveEnvelope {
@@ -73,6 +79,7 @@ function isValidRunState(state: RunState): boolean {
   if (state.targetingStance !== 'weakest' && state.targetingStance !== 'strongest') return false;
   if (state.act !== 1 && state.act !== 2) return false;
   if (!Array.isArray(state.fleet)) return false;
+  if (typeof state.heat !== 'number') return false;
   switch (state.phase) {
     case 'combat':
       return !!state.combat && !!state.currentEnemy;
@@ -80,8 +87,15 @@ function isValidRunState(state: RunState): boolean {
       return !!state.pendingReward;
     case 'shop':
       return !!state.shopOffers;
+    // 15.3: a repair-phase save is valid in *either* sub-state — still
+    // choosing (repairUpgradeOptions set, repairSummary not yet) or already
+    // resolved (repairSummary set too) — as long as the options that were
+    // drawn on arrival are present. Requiring only `repairSummary` here (the
+    // pre-15.3 check) would reject a legitimate mid-choice save and blank
+    // the screen on reload — the exact bug class this function exists to
+    // catch.
     case 'repair':
-      return !!state.repairSummary;
+      return Array.isArray(state.repairUpgradeOptions);
     case 'event':
       return !!state.currentEvent;
     default:

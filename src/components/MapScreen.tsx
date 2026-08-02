@@ -3,8 +3,8 @@ import { getEscalation } from '../game/escalations';
 import type { ScheduledEscalation } from '../game/escalations';
 import { getBoss, getFinalBoss } from '../game/enemies';
 import { visibleNodeType } from '../game/fog';
-import { actColumns, reachableNodes } from '../game/map';
-import type { GameMap, MapNode, MapPosition, NodeType } from '../game/map';
+import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, reachableNodes } from '../game/map';
+import type { CargoTag, GameMap, MapNode, MapPosition, NodeType } from '../game/map';
 import type { ActiveQuest } from '../game/quests';
 import { sectorName } from '../game/sectorName';
 import { NodeGlyph } from './NodeGlyph';
@@ -25,6 +25,12 @@ interface MapScreenProps {
   onClose?: () => void; // set when this is a read-only peek from a shop/event, not the live map phase
   onAbandon?: () => void; // iteration 9.2 — live map only, never on the peek overlay
   onPickNode: (row: number) => void;
+  // Iteration 16.1: defaults true (desktop peek + the live map phase are
+  // unchanged). The mobile Chart tab passes false outside the map phase —
+  // the reducer's phase guard already makes a stray PICK_NODE a no-op, this
+  // just hides the pick affordances (reachable highlighting, hover, click)
+  // so a read-only tab doesn't look actionable.
+  interactive?: boolean;
 }
 
 const QUEST_MARKER_LABEL: Record<ActiveQuest['archetype'], string> = {
@@ -41,6 +47,15 @@ const NODE_LABEL: Record<NodeType, string> = {
   repair: 'Repair',
   event: 'Event',
   boss: 'Boss',
+};
+
+// Iteration 15.1: a small cargo-glyph badge on every visible combat node,
+// following the exact same fog rule as the node's type itself.
+const CARGO_GLYPH: Record<CargoTag, string> = {
+  patrol: '·',
+  convoy: '$',
+  wreck: '⚙',
+  command: '♦',
 };
 
 function isVisited(visited: MapPosition[], col: number, row: number): boolean {
@@ -105,6 +120,7 @@ export function MapScreen({
   onClose,
   onAbandon,
   onPickNode,
+  interactive = true,
 }: MapScreenProps) {
   const columns = actColumns(map, act);
   const reachable = reachableNodes(columns, position);
@@ -161,7 +177,9 @@ export function MapScreen({
       <p className="hint">
         {onClose
           ? 'Viewing the map — close it to get back to what you were doing.'
-          : "Pick your next stop. Only nearby columns, repair yards, and the boss are known up front — the rest is fog until you scout it or get there."}
+          : interactive
+            ? "Pick your next stop. Only nearby columns, repair yards, and the boss are known up front — the rest is fog until you scout it or get there."
+            : 'Viewing the map — switch tabs to get back to what you were doing.'}
       </p>
 
       {/* Iteration 13: legible copy, 1-indexed columns everywhere (players
@@ -192,7 +210,10 @@ export function MapScreen({
         const size = chartSize(columns);
         const edges = chartEdges(columns);
         const canPickAt = (p: MapPosition) =>
-          !isFled(p.col, p.row) && p.col === (position === null ? 0 : position.col + 1) && reachableRows.has(p.row);
+          interactive &&
+          !isFled(p.col, p.row) &&
+          p.col === (position === null ? 0 : position.col + 1) &&
+          reachableRows.has(p.row);
         const trail = visited.map((p) => nodeCenter(columns, p.col, p.row));
         return (
           <div className="starchart" ref={scrollRef}>
@@ -246,6 +267,10 @@ export function MapScreen({
                   const label = type === 'boss' ? bossLabel : type ? NODE_LABEL[type] : '?';
                   const center = nodeCenter(columns, node.col, node.row);
                   const nodeSize = type === 'boss' ? 92 : 76;
+                  // 15.1: the cargo glyph follows the exact same fog rule as
+                  // the node's type — `type` is already null wherever the
+                  // node is hidden, so gating on it here is enough.
+                  const cargo = type === 'combat' ? node.cargo : undefined;
                   return (
                     <button
                       key={`${node.col}-${node.row}`}
@@ -264,6 +289,14 @@ export function MapScreen({
                       <span className="map-node__label">
                         {fledHere ? `${label} (fled)` : isQuestHere ? `${label} ★` : label}
                       </span>
+                      {cargo && (
+                        <span
+                          className={`map-node__cargo map-node__cargo--${cargo}`}
+                          title={`${CARGO_LABEL[cargo]} — ${CARGO_DESCRIPTION[cargo]}`}
+                        >
+                          {CARGO_GLYPH[cargo]}
+                        </span>
+                      )}
                     </button>
                   );
                 }),

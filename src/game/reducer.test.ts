@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { initCombat, runToEnd } from './combatEngine';
 import { GAUNTLET, OPENER } from './enemies';
+import { MAX_HEAT } from './heat';
 import { BOSS_COLUMN } from './map';
-import type { GameMap, NodeType } from './map';
+import type { CargoTag, GameMap, NodeType } from './map';
 import { getPart } from './parts';
-import { globalColumn, hasLineOfRetreat, initialRunState, runReducer, SHOP_OFFER_COUNT, winReward } from './reducer';
+import { getUpgrade } from './upgrades';
+import {
+  applyCargoReward,
+  eliteReward,
+  globalColumn,
+  hasLineOfRetreat,
+  initialRunState,
+  runReducer,
+  SHOP_OFFER_COUNT,
+  winReward,
+} from './reducer';
 import type { PartId, PlayerShipState, RunState } from './types';
 
 function freshCombat(seed = 1, enemy = GAUNTLET[0]) {
@@ -31,11 +42,22 @@ function stateWithMap(type: 'combat' | 'elite' | 'shop' | 'repair' | 'event', ov
   return { ...initialRunState(), phase: 'map', map: mapWithFirstColumn(type), ...overrides };
 }
 
-function forceNodeType(map: GameMap, col: number, row: number, type: NodeType, act: 1 | 2 = 1): GameMap {
+// `cargo` defaults to (and always explicitly sets) undefined — without that,
+// a node forced to 'combat' at a position the real random map already had
+// as 'combat' would silently keep whatever cargo tag that map happened to
+// roll, making reward-math tests seed-dependent (iteration 15.1).
+function forceNodeType(
+  map: GameMap,
+  col: number,
+  row: number,
+  type: NodeType,
+  act: 1 | 2 = 1,
+  cargo?: CargoTag,
+): GameMap {
   const key = act === 1 ? 'act1Columns' : 'act2Columns';
   return {
     ...map,
-    [key]: map[key].map((c, i) => (i === col ? c.map((n) => (n.row === row ? { ...n, type } : n)) : c)),
+    [key]: map[key].map((c, i) => (i === col ? c.map((n) => (n.row === row ? { ...n, type, cargo } : n)) : c)),
   };
 }
 
@@ -172,15 +194,68 @@ describe('PICK_NODE — map flow', () => {
     expect(state.shopOffers).toBeUndefined();
   });
 
-  it('map -> repair applies a full heal immediately, and LEAVE_REPAIR returns to map', () => {
+  it('map -> repair arrives in the choosing sub-state — no auto-heal, no repairSummary yet (15.3)', () => {
+    const damaged: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 2, upgrades: [] }];
+    const state = runReducer(stateWithMap('repair', { fleet: damaged }), { type: 'PICK_NODE', row: 0 });
+    expect(state.phase).toBe('repair');
+    expect(state.fleet[0].damage).toBe(2); // unchanged — no heal until a choice is made
+    expect(state.repairSummary).toBeUndefined();
+    expect(state.repairUpgradeOptions).toHaveLength(3); // drawn on arrival either way
+
+    // LEAVE_REPAIR refuses to fire before the choice is resolved.
+    expect(runReducer(state, { type: 'LEAVE_REPAIR' }).phase).toBe('repair');
+  });
+
+  it('REPAIR_CHOOSE full heals the fleet and resolves the choice; LEAVE_REPAIR then returns to map', () => {
     const damaged: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 2, upgrades: [] }];
     let state = runReducer(stateWithMap('repair', { fleet: damaged }), { type: 'PICK_NODE', row: 0 });
-    expect(state.phase).toBe('repair');
+    state = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'full' });
     expect(state.fleet[0].damage).toBe(0);
     expect(state.repairSummary).toContain('Repaired');
 
     state = runReducer(state, { type: 'LEAVE_REPAIR' });
     expect(state.phase).toBe('map');
+    expect(state.repairSummary).toBeUndefined();
+    expect(state.repairUpgradeOptions).toBeUndefined();
+  });
+
+  it('REPAIR_CHOOSE overhaul attaches the chosen upgrade and leaves the fleet undamaged', () => {
+    const damaged: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 2, upgrades: [] }];
+    let state = runReducer(stateWithMap('repair', { fleet: damaged }), { type: 'PICK_NODE', row: 0 });
+    const upgradeId = state.repairUpgradeOptions![0];
+    state = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'overhaul', shipIndex: 0, upgradeId });
+    expect(state.fleet[0].damage).toBe(2); // no healing on this branch
+    expect(state.fleet[0].upgrades).toEqual([upgradeId]);
+    expect(state.repairSummary).toContain(getUpgrade(upgradeId).name);
+
+    state = runReducer(state, { type: 'LEAVE_REPAIR' });
+    expect(state.phase).toBe('map');
+  });
+
+  it('REPAIR_CHOOSE overhaul is refused (locked) once every ship already carries an upgrade', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: ['spine'] }];
+    let state = runReducer(stateWithMap('repair', { fleet }), { type: 'PICK_NODE', row: 0 });
+    const upgradeId = state.repairUpgradeOptions![0];
+    const result = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'overhaul', shipIndex: 0, upgradeId });
+    expect(result.repairSummary).toBeUndefined(); // no-op — still choosing
+    expect(result.fleet[0].upgrades).toEqual(['spine']); // unchanged
+  });
+
+  it('REPAIR_CHOOSE overhaul refuses an upgradeId not among the drawn options', () => {
+    const state = runReducer(stateWithMap('repair'), { type: 'PICK_NODE', row: 0 });
+    const notOffered = (['spine', 'reactor', 'lattice', 'drives', 'optics', 'autoloader', 'regen', 'salvage', 'bay'] as const).find(
+      (id) => !state.repairUpgradeOptions!.includes(id),
+    )!;
+    const result = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'overhaul', shipIndex: 0, upgradeId: notOffered });
+    expect(result.repairSummary).toBeUndefined();
+  });
+
+  it('REPAIR_CHOOSE refuses a second dispatch once already resolved', () => {
+    let state = runReducer(stateWithMap('repair'), { type: 'PICK_NODE', row: 0 });
+    state = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'full' });
+    const summary = state.repairSummary;
+    const result = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'full' });
+    expect(result.repairSummary).toBe(summary); // unchanged, not double-applied
   });
 
   it('map -> event, and EVENT_CONTINUE returns to map', () => {
@@ -723,8 +798,14 @@ describe('ambush events (ancient-cache)', () => {
       1,
     );
     const wonCombat = { ...combat, winner: 'player' as const };
+    const base = stateWithMap('event');
     const state: RunState = {
-      ...stateWithMap('event'),
+      ...base,
+      // The event node's own column — forced (not just left to the random
+      // map) so this reward isn't accidentally cargo-adjusted (15.1: cargo
+      // only ever lands on 'combat' nodes anyway, but forcing it keeps this
+      // test's expectation seed-independent).
+      map: forceNodeType(base.map, 1, 0, 'event', base.act),
       phase: 'combat',
       position: { col: 1, row: 0 }, // the event node's own column
       fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
@@ -873,8 +954,10 @@ describe('ambush win bonus (14.2/14.3)', () => {
       1,
     );
     const wonCombat = { ...combat, winner: 'player' as const };
+    const base = stateWithMap('event');
     const state: RunState = {
-      ...stateWithMap('event'),
+      ...base,
+      map: forceNodeType(base.map, 1, 0, 'event', base.act), // cargo-neutral (15.1) — see the identical fix above
       phase: 'combat',
       position: { col: 1, row: 0 },
       fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
@@ -1617,8 +1700,12 @@ describe('iteration 8: global column economy across the act boundary', () => {
       GAUNTLET[0],
       1,
     );
+    const base = initialRunState();
     const state: RunState = {
-      ...initialRunState(),
+      ...base,
+      // Forced cargo-neutral (15.1) — this test is about the column-offset
+      // math, not the cargo table.
+      map: forceNodeType(base.map, 0, 0, 'combat', 2),
       phase: 'combat',
       act: 2,
       position: { col: 0, row: 0 },
@@ -1703,5 +1790,228 @@ describe('iteration 9.4: targeting doctrine', () => {
 
     const engaged = runReducer(withStance, { type: 'ENGAGE' });
     expect(engaged.combat?.targetingStance).toBe('strongest');
+  });
+});
+
+// --- Cargo rewards (iteration 15.1) -------------------------------------
+describe('cargo reward payouts', () => {
+  // A won combat at act-1 col 1 (winReward(1) = 5), with the node's cargo
+  // tag forced explicitly rather than left to the random map.
+  function wonCargoState(cargo: CargoTag | undefined, overrides: Partial<RunState> = {}): RunState {
+    const enemy = GAUNTLET[0];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      enemy,
+      1,
+    );
+    const base = initialRunState();
+    return {
+      ...base,
+      map: forceNodeType(base.map, 1, 0, 'combat', 1, cargo),
+      phase: 'combat',
+      position: { col: 1, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      currentEnemy: enemy,
+      combat: { ...combat, winner: 'player' as const },
+      ...overrides,
+    };
+  }
+
+  it('patrol pays exactly winReward(col), unchanged from today', () => {
+    const result = runReducer(wonCargoState('patrol'), { type: 'CONTINUE' });
+    expect(result.pendingReward?.credits).toBe(winReward(1));
+  });
+
+  it('an untagged node (cargo undefined) also pays the plain winReward — same as patrol', () => {
+    const result = runReducer(wonCargoState(undefined), { type: 'CONTINUE' });
+    expect(result.pendingReward?.credits).toBe(winReward(1));
+  });
+
+  it('convoy pays winReward(col) + 4', () => {
+    const result = runReducer(wonCargoState('convoy'), { type: 'CONTINUE' });
+    expect(result.pendingReward?.credits).toBe(winReward(1) + 4);
+  });
+
+  it('wreck field pays winReward(col) - 2 and drops a part into inventory', () => {
+    const result = runReducer(wonCargoState('wreck'), { type: 'CONTINUE' });
+    expect(result.pendingReward?.credits).toBe(winReward(1) - 2);
+    expect(result.inventory).toHaveLength(1);
+  });
+
+  it('wreck field floors at 1 credit (unit-level — winReward(col) itself never gets this low)', () => {
+    expect(applyCargoReward('wreck', 2)).toBe(1); // 2 - 2 = 0, floored
+    expect(applyCargoReward('wreck', 1)).toBe(1); // 1 - 2 = -1, floored
+    expect(applyCargoReward('wreck', 10)).toBe(8); // above the floor, unaffected
+  });
+
+  it('command ship grants a reaction card on top of the normal reward', () => {
+    const result = runReducer(wonCargoState('command', { hand: [] }), { type: 'CONTINUE' });
+    expect(result.pendingReward?.credits).toBe(winReward(1));
+    expect(result.pendingReward?.cardGained).toBeDefined();
+    expect(result.pendingReward?.cardInsteadCredits).toBeUndefined();
+    expect(result.hand).toHaveLength(1);
+  });
+
+  it('command ship pays +4cr instead of a card when the hand is already full (mirrors the elite fallback)', () => {
+    const fullHand = new Array(5).fill('bulkheads') as RunState['hand'];
+    const result = runReducer(wonCargoState('command', { hand: fullHand }), { type: 'CONTINUE' });
+    expect(result.pendingReward?.credits).toBe(winReward(1) + 4);
+    expect(result.pendingReward?.cardGained).toBeUndefined();
+    expect(result.pendingReward?.cardInsteadCredits).toBe(4);
+  });
+
+  it('an elite kill is never cargo-adjusted, even if its node happens to carry a tag', () => {
+    const eliteEnemy = { ...GAUNTLET[0], id: `${GAUNTLET[0].id}-elite` };
+    const state = wonCargoState('convoy', { currentEnemy: eliteEnemy });
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.pendingReward?.credits).toBe(eliteReward(1)); // not +4
+  });
+});
+
+// --- Heat track (iteration 15.2) ----------------------------------------
+describe('heat track', () => {
+  it('a new run starts at 0 heat (Cold)', () => {
+    expect(initialRunState().heat).toBe(0);
+  });
+
+  it('entering a shop costs +1 heat', () => {
+    const state = runReducer(stateWithMap('shop'), { type: 'PICK_NODE', row: 0 });
+    expect(state.heat).toBe(1);
+  });
+
+  it('entering a repair yard costs +1 heat', () => {
+    const state = runReducer(stateWithMap('repair'), { type: 'PICK_NODE', row: 0 });
+    expect(state.heat).toBe(1);
+  });
+
+  it('entering an event costs +1 heat', () => {
+    const state = runReducer(stateWithMap('event'), { type: 'PICK_NODE', row: 0 });
+    expect(state.heat).toBe(1);
+  });
+
+  it('entering a combat/elite/opener/boss node does not cost heat', () => {
+    const state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
+    expect(state.heat).toBe(0);
+  });
+
+  it('winning a combat vents 1 heat (floored at 0)', () => {
+    const enemy = GAUNTLET[0];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      enemy,
+      1,
+    );
+    const base = initialRunState();
+    const state: RunState = {
+      ...base,
+      map: forceNodeType(base.map, 1, 0, 'combat', 1),
+      phase: 'combat',
+      position: { col: 1, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      currentEnemy: enemy,
+      combat: { ...combat, winner: 'player' as const },
+      heat: 2,
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.heat).toBe(1);
+
+    const alreadyCold = { ...state, heat: 0 };
+    expect(runReducer(alreadyCold, { type: 'CONTINUE' }).heat).toBe(0); // floor 0
+  });
+
+  it('heat caps at 4 — repeated dock entries never exceed it', () => {
+    let state = stateWithMap('shop', { heat: 3 });
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(state.heat).toBe(4);
+  });
+
+  it('withdrawing costs +1 heat', () => {
+    // Column 0 forced to 3 combat nodes (stateWithMap) — picking row 0 from
+    // the start (position null) leaves rows 1/2 as a line of retreat.
+    let state = runReducer(stateWithMap('combat', { heat: 1 }), { type: 'PICK_NODE', row: 0 });
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 20, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      state.currentEnemy!,
+      1,
+    );
+    state = { ...state, phase: 'combat', combat: { ...combat, round: 1 } };
+    expect(hasLineOfRetreat(state)).toBe(true);
+    const result = runReducer(state, { type: 'WITHDRAW' });
+    expect(result.heat).toBe(2);
+  });
+
+  it('the interlude resets heat to 0', () => {
+    const state: RunState = { ...initialRunState(), phase: 'interlude', heat: 3 };
+    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', index: 1 });
+    expect(result.heat).toBe(0);
+  });
+});
+
+// --- Heat-4 interception (iteration 15.2) -------------------------------
+describe('interception at heat 4 ("Hunted")', () => {
+  it('arriving at a shop/repair/event node while armed replaces its content with a hunter-killer prep fight', () => {
+    let state = stateWithMap('shop', { heat: MAX_HEAT });
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(state.phase).toBe('prep');
+    expect(state.interceptionActive).toBe(true);
+    expect(state.currentEnemy).toBeDefined();
+    expect(state.shopOffers).toBeUndefined(); // the shop's own content never fired
+  });
+
+  it('an event node while armed is intercepted the same way — repairUpgradeOptions/currentEvent never populate', () => {
+    let state = stateWithMap('event', { heat: MAX_HEAT });
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(state.phase).toBe('prep');
+    expect(state.interceptionActive).toBe(true);
+    expect(state.currentEvent).toBeUndefined();
+  });
+
+  it('a repair node while armed is intercepted — repairUpgradeOptions never drawn', () => {
+    let state = stateWithMap('repair', { heat: MAX_HEAT });
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(state.phase).toBe('prep');
+    expect(state.interceptionActive).toBe(true);
+    expect(state.repairUpgradeOptions).toBeUndefined();
+  });
+
+  it('combat/elite/boss/opener entries are never intercepted even at heat 4', () => {
+    const state = runReducer(stateWithMap('combat', { heat: MAX_HEAT }), { type: 'PICK_NODE', row: 0 });
+    expect(state.interceptionActive).toBeUndefined();
+    expect(state.phase).toBe('prep');
+  });
+
+  it('winning the interception resets heat to 0 (not just -1) and pays a normal winReward', () => {
+    let state = stateWithMap('shop', { heat: MAX_HEAT });
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    const col = state.position!.col;
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      state.currentEnemy!,
+      1,
+    );
+    state = { ...state, phase: 'combat', combat: { ...combat, winner: 'player' as const } };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('reward');
+    expect(result.heat).toBe(0);
+    expect(result.interceptionActive).toBeUndefined();
+    expect(result.pendingReward?.credits).toBe(winReward(globalColumn(1, col)));
+  });
+
+  it('withdrawing from the interception also resets heat to 0', () => {
+    // Column 0 forced to 3 shop nodes (stateWithMap) — picking row 0 from
+    // the start (position null, heat armed) triggers interception there,
+    // and rows 1/2 remain as a line of retreat.
+    let state = runReducer(stateWithMap('shop', { heat: MAX_HEAT }), { type: 'PICK_NODE', row: 0 });
+    expect(state.interceptionActive).toBe(true);
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 20, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      state.currentEnemy!,
+      1,
+    );
+    state = { ...state, phase: 'combat', combat: { ...combat, round: 1 } };
+    expect(hasLineOfRetreat(state)).toBe(true); // "follows normal retreat rules" even though the node is shop-typed
+    const result = runReducer(state, { type: 'WITHDRAW' });
+    expect(result.heat).toBe(0);
+    expect(result.interceptionActive).toBeUndefined();
   });
 });

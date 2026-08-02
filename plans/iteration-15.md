@@ -1,3 +1,92 @@
+# Iteration 15 — complete
+
+> **Status:** implemented and browser-verified 2026-08-02. All three
+> milestones (cargo, heat, repair choice + save v5) landed in one pass —
+> the three systems share almost no code, so there was no benefit to
+> re-verifying the suite between them. `npx vitest run` 372/372 (43 new
+> tests over the pre-iteration baseline of 329: cargo-tag generation and
+> determinism in `map.test.ts`, `heat.test.ts` for the tier/arithmetic
+> unit, and reducer suites for cargo reward payouts, heat arithmetic,
+> heat-4 interception, and the repair-choice flow including the
+> save/reload regression), `npx tsc -b` clean, `npx vite build` clean.
+> `SAVE_VERSION` is now 5.
+>
+> Fixing 4 pre-existing reward-math tests that broke as a side effect of
+> 15.1 turned up a latent test-hygiene issue worth flagging: several
+> `reducer.test.ts` fixtures read a node's reward straight off a
+> *non-overridden* position in a randomly-seeded map (`initialRunState()`
+> draws a real `Math.random()` seed, never mocked in these tests). Before
+> cargo, a node's type/position never affected reward math, so this was
+> harmless; now it can silently roll a cargo tag into the expected value.
+> Fixed by extending the existing `forceNodeType` test helper to also
+> accept (and always explicitly set, defaulting to `undefined`) a cargo
+> override, and using it at every position a reward assertion reads from.
+>
+> Live-browser-verified via the localStorage-injection technique (a real
+> generated map + fleet from an actual New run, commander = Merchant,
+> then patching `heat`/`position`/`visited` directly before reload,
+> mirroring the save envelope): cargo glyphs (`·`/`$`/`⚙`/`♦`) rendered on
+> the starchart exactly where the node's type was already fog-visible,
+> with the matching label/description tooltip, and the prep screen stated
+> the tag plainly ("Patrol — Standard payout."); the HUD heat track
+> showed 4 empty pips at "Cold", ticked to 1 filled pip on a repair-node
+> entry (tooltip "Heat: Watched"), and dropped back on a combat win;
+> forcing `heat: 4` and walking into an event node produced "Hunted — the
+> next stop you make, they find you." on the HUD and, on arrival, replaced
+> the event entirely with a `prep` screen against "Hunter-killer squad
+> (Missile frigate)" (flavor: "They tracked your heat signature across the
+> sector and finally ran you down.") — the event's own options never
+> rendered; winning it paid `winReward(2) + the Merchant's +2` (8 credits)
+> and reset heat to 0 (pips confirmed empty, tier back to "Cold"). The
+> repair yard's choice screen rendered both branches ("Full repair" /
+> "Overhaul" with its 3 upgrade tiles); overhaul attached the chosen
+> upgrade with no healing and set `repairSummary`; a full reload
+> mid-choice (`repairUpgradeOptions` set, `repairSummary` still undefined)
+> came back to the exact same choosing screen rather than blanking — the
+> regression the plan called out by name; a second repair visit with the
+> fleet's only ship already carrying an upgrade rendered "Locked — every
+> ship already carries an upgrade." instead of the picker, and "Full
+> repair" there still worked normally.
+>
+> Deviations from the letter of the spec, all judgment calls made to keep
+> the smallest reasonable footprint on the existing engine:
+> - **`REPAIR_CHOOSE`'s exact shape** differs from the spec's illustrative
+>   `{ overhaul: { shipIndex, upgradeId } }` (explicitly implementer's
+>   latitude): it's `{ choice: 'full' } | { choice: 'overhaul'; shipIndex;
+>   upgradeId }`, a discriminated union on one `choice` field rather than
+>   an optional nested object.
+> - **The overhaul's 3 upgrade options are drawn once, at arrival**
+>   (`PICK_NODE`), not lazily when "Overhaul" is clicked — regardless of
+>   which branch the player ends up taking. This is what makes a single
+>   `REPAIR_CHOOSE` dispatch enough for the overhaul branch (no second rng
+>   step needed mid-choice) and is also what the choosing sub-state's
+>   `repairUpgradeOptions` field persists across a save/reload. Costs one
+>   harmless unused rng draw on the "Full repair" branch.
+> - **"Every ship at the upgrade cap"** (15.3's overhaul lock condition)
+>   is read as "every ship already carries a (permanent, at-most-1)
+>   upgrade" — addendum A.4's existing cap, not a new concept. The spec
+>   didn't define the phrase itself.
+> - **`hasLineOfRetreat`** gained one bypass: an interception is exempted
+>   from the pre-existing "no retreat once jumped from an event" rule,
+>   since an interception can land on an event-typed node too but (unlike
+>   an in-event ambush choice) must "follow normal retreat rules" per
+>   15.2. Gated on the new `RunState.interceptionActive` flag.
+> - **Cargo tags are not excluded from bounty-target fights.** The spec's
+>   exclusion list is "elites, bosses, the opener"; a bounty node is a
+>   plain 'combat' node with a renamed enemy (id suffix `-bounty`, not
+>   `-elite`), so it was never structurally excluded from the `isElite`
+>   guard either. Cargo and the bounty bonus can now both apply to the
+>   same fight; not explicitly discussed in planning, called the
+>   permissive way as the smaller diff.
+> - **The wreck-field part pool** is `PARTS.filter(p => p.cost === 5)`
+>   rather than a bespoke list — this happens to be exactly the same 5
+>   ids as `events.ts`'s private `FIVE_CREDIT_PARTS`, derived instead of
+>   duplicated so it can't drift from `parts.ts`.
+> - **Cargo glyphs**: patrol (the baseline, no-op tag) still gets a glyph
+>   (`·`) and tooltip rather than no badge at all, on the reading that
+>   "wherever the node's type is visible, its cargo glyph... [is] too"
+>   applies uniformly across all 4 tags, patrol included.
+
 # Iteration 15 (planned) — Routing under pressure
 
 **Thesis.** Playtesting shows the run's routing policy has collapsed to a

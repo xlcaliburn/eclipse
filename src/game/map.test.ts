@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BOSS_IDS, FINAL_BOSS_IDS } from './enemies';
 import { mulberry32 } from './rng';
 import { actColumns, BOSS_COLUMN, generateMap, getNode, LANE_COLUMNS, nodesConnect, reachableNodes } from './map';
+import type { CargoTag } from './map';
 
 const ACT1_QUOTAS = [
   ['opener'],
@@ -89,6 +90,54 @@ describe('generateMap', () => {
     expect(FINAL_BOSS_IDS).toContain(mapA.act2BossId);
     expect(mapB.act1BossId).toBe(mapA.act1BossId);
     expect(mapB.act2BossId).toBe(mapA.act2BossId);
+  });
+});
+
+// --- Cargo tags (iteration 15.1) ---------------------------------------
+describe('cargo tags', () => {
+  const VALID_TAGS: CargoTag[] = ['patrol', 'convoy', 'wreck', 'command'];
+
+  function allNodes(map: ReturnType<typeof generateMap>) {
+    return [...map.act1Columns.flat(), ...map.act2Columns.flat()];
+  }
+
+  it('every plain combat node gets one of the 4 valid tags', () => {
+    const map = generateMap(11, mulberry32(11));
+    for (const node of allNodes(map)) {
+      if (node.type === 'combat') {
+        expect(node.cargo).toBeDefined();
+        expect(VALID_TAGS).toContain(node.cargo);
+      }
+    }
+  });
+
+  it('elites, the boss, and the opener are never tagged', () => {
+    const map = generateMap(11, mulberry32(11));
+    for (const node of allNodes(map)) {
+      if (node.type !== 'combat') {
+        expect(node.cargo).toBeUndefined();
+      }
+    }
+    expect(map.act1Columns[0][0].type).toBe('opener');
+    expect(map.act1Columns[0][0].cargo).toBeUndefined();
+  });
+
+  it('the same seed produces the same cargo map (determinism)', () => {
+    const mapA = generateMap(456, mulberry32(456));
+    const mapB = generateMap(456, mulberry32(456));
+    expect(JSON.stringify(mapA)).toBe(JSON.stringify(mapB));
+    const combatCargoA = mapA.act1Columns.flat().filter((n) => n.type === 'combat').map((n) => n.cargo);
+    expect(combatCargoA.length).toBeGreaterThan(0);
+  });
+
+  it('over many combat nodes, all 4 tags appear (weighted draw is actually drawing from the full table)', () => {
+    const map = generateMap(999, mulberry32(999));
+    const tags = new Set(allNodes(map).filter((n) => n.type === 'combat').map((n) => n.cargo));
+    // 20 columns' worth of combat nodes across both acts is comfortably
+    // enough for all 4 weighted outcomes to show up at least once.
+    for (const tag of VALID_TAGS) {
+      expect(tags.has(tag)).toBe(true);
+    }
   });
 });
 

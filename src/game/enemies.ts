@@ -393,6 +393,22 @@ export function hardestEnemyForAmbush(act: 1 | 2, col: number): EnemyDef {
   return hardestInPool(combatEnemyPool(2, col));
 }
 
+// Iteration 15.2: the fight that replaces a shop/repair/event node's content
+// when heat is armed (4, "Hunted") — same difficulty as `hardestEnemyForAmbush`
+// at this spot, reflavored as the pursuit finally catching up. The id suffix
+// is deliberately not '-elite' (no elite reward pipeline here) and not
+// '-bounty' (no bounty bonus) — just a normal winReward(col) fight wearing a
+// different face.
+export function hunterKillerForAmbush(act: 1 | 2, col: number): EnemyDef {
+  const base = hardestEnemyForAmbush(act, col);
+  return {
+    ...base,
+    id: `${base.id}-hunter`,
+    name: `Hunter-killer squad (${base.name})`,
+    blurb: 'They tracked your heat signature across the sector and finally ran you down.',
+  };
+}
+
 // --- Veterancy (iteration 8) -------------------------------------------------
 // A per-column HP modifier applied at PICK_NODE, on top of any escalations —
 // difficulty climbs every few columns instead of only in three pool-band

@@ -3,11 +3,53 @@ import type { BossId, FinalBossId } from './enemies';
 
 export type NodeType = 'combat' | 'elite' | 'shop' | 'repair' | 'event' | 'boss' | 'opener';
 
+// Iteration 15.1: every plain 'combat' node gets a typed reward tag, seeded
+// at map generation — the fight itself is unchanged, only what winning it
+// pays out. Elites, the boss, and the opener are never tagged (see
+// `generateActColumns`).
+export type CargoTag = 'patrol' | 'convoy' | 'wreck' | 'command';
+
 export interface MapNode {
   col: number;
   row: number; // 0-2 for the 3-lane columns; single-node columns (the opener, the boss) use row 0
   type: NodeType;
+  cargo?: CargoTag; // only ever set when type === 'combat'
 }
+
+// Weighted draw table for 15.1 — patrol is the plain baseline (most common),
+// command ship the rarest. Total weight 8.
+const CARGO_WEIGHTS: [CargoTag, number][] = [
+  ['patrol', 3],
+  ['convoy', 2],
+  ['wreck', 2],
+  ['command', 1],
+];
+const CARGO_TOTAL_WEIGHT = CARGO_WEIGHTS.reduce((sum, [, weight]) => sum + weight, 0);
+
+function drawCargoTag(rng: () => number): CargoTag {
+  let roll = rng() * CARGO_TOTAL_WEIGHT;
+  for (const [tag, weight] of CARGO_WEIGHTS) {
+    if (roll < weight) return tag;
+    roll -= weight;
+  }
+  return CARGO_WEIGHTS[CARGO_WEIGHTS.length - 1][0]; // unreachable in practice; defensive only
+}
+
+// UI copy shared between the starchart (tooltip) and the prep screen (plain
+// statement of what this fight pays) — one source so the two never drift.
+export const CARGO_LABEL: Record<CargoTag, string> = {
+  patrol: 'Patrol',
+  convoy: 'Convoy',
+  wreck: 'Wreck field',
+  command: 'Command ship',
+};
+
+export const CARGO_DESCRIPTION: Record<CargoTag, string> = {
+  patrol: 'Standard payout.',
+  convoy: 'Pays +4 credits on top of the normal reward.',
+  wreck: 'Pays 2 credits less (never below 1), but drops a salvaged part.',
+  command: 'Pays a reaction card on top of the normal reward (+4 credits instead if your hand is full).',
+};
 
 // Iteration 8: the run is two acts, each an 11-column trellis (0-9 lanes +
 // col 10 boss), generated together from one continued rng stream so a
@@ -69,11 +111,19 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
 
 function generateActColumns(quotas: NodeType[][], rng: () => number): MapNode[][] {
   const columns: MapNode[][] = quotas.map((quota, col) => {
-    if (quota.length === 1) return [{ col, row: 0, type: quota[0] }]; // the opener — fixed, not shuffled
+    if (quota.length === 1) return [{ col, row: 0, type: quota[0] }]; // the opener — fixed, not shuffled, never tagged
     const shuffled = shuffle(quota, rng);
-    return shuffled.map((type, row) => ({ col, row, type }));
+    // Cargo is drawn immediately after each node's type is fixed, in row
+    // order — keeps the whole map generation one deterministic pass over a
+    // single continued rng stream.
+    return shuffled.map((type, row) => ({
+      col,
+      row,
+      type,
+      ...(type === 'combat' ? { cargo: drawCargoTag(rng) } : {}),
+    }));
   });
-  columns.push([{ col: BOSS_COLUMN, row: 0, type: 'boss' }]);
+  columns.push([{ col: BOSS_COLUMN, row: 0, type: 'boss' }]); // the boss — never tagged
   return columns;
 }
 

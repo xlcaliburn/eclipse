@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { deriveFleetStats, fleetHasOnlyMissiles, fleetHasWeapon } from '../game/ship';
+import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, getNode } from '../game/map';
 import { BOUNTY_BONUS_CREDITS, hasLineOfRetreat } from '../game/reducer';
 import type { RunAction } from '../game/reducer';
 import type { RunState } from '../game/types';
@@ -26,6 +27,10 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
     !!state.position &&
     state.activeQuest.target.col === state.position.col &&
     state.activeQuest.target.row === state.position.row;
+  // 15.1: state it plainly — the same fog rule that lets the starchart show
+  // the glyph already means the player is standing on the node, so there's
+  // nothing left to hide here.
+  const cargo = state.position ? getNode(actColumns(state.map, state.act), state.position).cargo : undefined;
 
   if (!enemy) return null;
 
@@ -57,6 +62,11 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
         {isBountyFight && (
           <p className="hint">
             Bounty target — win for +{BOUNTY_BONUS_CREDITS} credits and an upgrade pick, on top of the usual reward.
+          </p>
+        )}
+        {cargo && (
+          <p className="hint">
+            {CARGO_LABEL[cargo]} — {CARGO_DESCRIPTION[cargo]}
           </p>
         )}
         <p className={retreatable ? 'hint' : 'warning'}>

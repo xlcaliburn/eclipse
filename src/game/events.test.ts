@@ -35,6 +35,7 @@ function baseState(overrides: Partial<RunState> = {}): RunState {
     visionCol: 0,
     revealedNodes: [],
     commanderChoices: [],
+    heat: 0,
     ...overrides,
   };
 }

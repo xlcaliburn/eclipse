@@ -280,5 +280,21 @@ export interface RunState {
   // win-conditional bonus (see `AmbushBonus`); consumed and cleared by
   // CONTINUE once that combat resolves, win or lose.
   pendingAmbushBonus?: AmbushBonus;
-  repairSummary?: string; // flavor text shown after a repair-yard visit
+  // Repair yard (iteration 15.3): arriving draws 3 overhaul upgrade options
+  // (always, whether or not they end up used) and enters a *choosing*
+  // sub-state — neither `repairSummary` nor a fleet heal exist yet.
+  // `repairSummary` being set is what marks the choice as resolved (either
+  // branch sets it); both fields clear together on LEAVE_REPAIR.
+  repairUpgradeOptions?: UpgradeId[];
+  repairSummary?: string; // flavor text shown once the repair choice is resolved
+  // Iteration 15.2: the pursuit track. 0-4, deterministic counter arithmetic
+  // only (see `heat.ts`) — never touched by an rng draw.
+  heat: number;
+  // True only while the current prep/combat is a heat-4 interception (a
+  // hunter-killer squad that replaced a shop/repair/event node's real
+  // content) — lets CONTINUE/WITHDRAW reset heat to 0 instead of applying
+  // the normal win/withdraw delta, and lets `hasLineOfRetreat` use the
+  // node's real reachability instead of the "no retreat" rule that applies
+  // to an event's own in-screen ambush choice.
+  interceptionActive?: boolean;
 }
