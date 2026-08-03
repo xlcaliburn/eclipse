@@ -3,6 +3,18 @@
    committed dark theme; there is no light-mode variant (a sunlit starfield
    console doesn't make sense, and the spec describes one direction only). */
 
+/* html itself had no background — only body did. Mobile rubber-band/
+   elastic overscroll (made easier to trigger by the pinned combat dock's
+   extra reserved padding-bottom) reveals *html*'s background, not body's,
+   so an unset html background showed through as the browser's default
+   light canvas instead of the dark theme. */
+html {
+  background: var(--bg);
+  /* The actual root scroller in standards mode — overscroll-behavior on
+     body alone doesn't reliably suppress bounce here in every engine. */
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -553,6 +565,41 @@ h1, h2, h3 {
 
 .combat-ship__priority-mark {
   color: var(--danger);
+}
+
+/* Outspeed (iteration 17): a sticky badge (not transient, unlike
+   combat-ship__badge) while a ship qualifies for its bonus activation.
+   Player-side glows accent (a build paying off); enemy-side glows warning
+   (a threat to plan around) — deliberately a different hue from the
+   priority-target ring (--danger) so the two states read distinctly when
+   an enemy is simultaneously both prioritized and outspeeding. */
+.combat-ship--outspeeding-player {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow), 0 0 10px var(--accent-glow);
+}
+
+.combat-ship--outspeeding-enemy {
+  border-color: var(--warning);
+  box-shadow: 0 0 0 1px var(--warning-glow), 0 0 10px var(--warning-glow);
+}
+
+/* Default (and the FleetPanel prep-screen badge, which has no --enemy
+   ancestor to key off): accent, since outside a live fight "outspeeds" only
+   ever describes one of YOUR ships. Scoped to --enemy below for the one
+   place it needs to mean the opposite. */
+.combat-ship__outspeed-mark {
+  font-size: 12px;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+}
+
+.combat-ship--outspeeding-enemy .combat-ship__outspeed-mark {
+  color: var(--warning);
+}
+
+.ship-card--outspeeding {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow), 0 0 8px var(--accent-glow);
 }
 
 .map-screen__escalations-title {
@@ -1808,9 +1855,24 @@ h1, h2, h3 {
     z-index: 39;
     margin: 0;
     padding: 6px 12px;
-    max-height: 30vh;
+    /* Safety net only, not the primary scroll mechanism — see
+       .combat-hand__cards below, which scrolls sideways per-row so a full
+       hand + full active-ability list never has to grow past this. Fixed
+       px, not vh: the two rows' height is set by their fixed-size font/
+       padding, not the viewport, so a vh-based cap that fit on a tall
+       phone was still cutting cards off mid-row on a shorter one. 300px
+       comfortably covers both sections (hand + ship actives) at one row
+       each, with headroom to spare; this only engages for something
+       unexpectedly tall, like a wrapped card name. */
+    max-height: 300px;
     overflow-y: auto;
-    background: color-mix(in srgb, var(--panel) 96%, transparent);
+    -webkit-overflow-scrolling: touch;
+    /* Fully opaque, not color-mixed — this overlays the in-flow log and
+       ship cards scrolled beneath it, and even a few percent of
+       transparency there was enough for their text to ghost through
+       legibly (read as "cut off/garbled content" rather than transparency). */
+    background: var(--panel);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
     border-bottom: none;
   }
   .combat-command-bar .combat-hand {
@@ -1820,7 +1882,21 @@ h1, h2, h3 {
     font-size: 12px;
     margin: 0 0 4px;
   }
+  /* Each row (hand cards, ship actives) scrolls sideways as a single line
+     instead of wrapping to more rows — a full 5-card hand plus several
+     active parts was wrapping to 3+ rows and blowing past the dock's
+     30vh cap, hard-clipping mid-card. One row per section keeps the dock's
+     height constant regardless of how many cards are in it. */
+  .combat-command-bar .combat-hand__cards {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    margin-bottom: -4px;
+  }
   .combat-command-bar .card-tile {
+    flex: 0 0 auto;
     width: 128px;
     min-height: 0;
     padding: 6px 8px;
@@ -1949,7 +2025,21 @@ h1, h2, h3 {
    reset by that rule's padding shorthand. */
 @media (max-width: 720px) {
   .combat-screen {
-    padding-bottom: calc(30vh + 24px);
+    padding-bottom: calc(300px + 24px);
+    /* Drops the shared panel-chrome corner notch (see the .map-screen …
+       .fleet-screen group rule) for this one panel at this one breakpoint.
+       clip-path clips every descendant *including* position: fixed ones,
+       and the hand/actives dock is a DOM child of this panel that becomes
+       fixed at ≤720px to pin above the tab bar. With the notch applied the
+       dock was being sliced to this panel's box — cut off at its bottom
+       edge and along its left, since the dock spans the full viewport
+       while the panel is inset. Layout metrics can't see this: clip-path
+       is paint-time, so getBoundingClientRect still reports the full
+       unclipped box. Cheaper than restructuring the dock out of the panel,
+       which would cost the desktop layout its in-panel placement; the
+       notch is a 16px decorative corner and this panel is near full-bleed
+       at this width anyway. */
+    clip-path: none;
   }
 }
 
