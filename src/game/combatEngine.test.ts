@@ -6,6 +6,7 @@ import {
   canUseActive,
   combatOutcome,
   hasMissilePhase,
+  incomingFirePreview,
   initCombat,
   openingTargetIndex,
   OUTSPEED_GAP,
@@ -1404,5 +1405,106 @@ describe('Outspeed (iteration 17)', () => {
     // Confirm this scenario actually exercised the new rule — an
     // equivalence test that never triggers outspeed wouldn't prove much.
     expect(oneShot.log.some((e) => e.kind === 'outspeed')).toBe(true);
+  });
+});
+
+describe('telegraphs — incomingFirePreview (iteration 19)', () => {
+  // The core promise: the preview's opening target for each enemy ship is
+  // the SAME target its actual first die logs when the round is played.
+  function firstEnemyRollTarget(stateAfterRound: ReturnType<typeof advanceRound>, shooterIndex: number): number | null {
+    const roll = stateAfterRound.log.find(
+      (e) => e.kind === 'roll' && e.side === 'enemy' && e.shooterIndex === shooterIndex,
+    );
+    return roll && roll.kind === 'roll' ? roll.targetIndex : null;
+  }
+
+  it('matches the actual first-die target: plain greedy picks the lowest-HP player ship', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 8 }), initialDamage: 0 },
+      { stats: blankStats({ hp: 3 }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { initiative: 3, hp: 20, cannons: [{ diceCount: 2, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile no-op → next round is cannon
+    const preview = incomingFirePreview(state);
+    expect(preview.phase).toBe('cannon');
+    expect(preview.entries).toHaveLength(1);
+    expect(preview.entries[0].targetIndex).toBe(1); // the 3-HP ship
+    expect(preview.entries[0].diceCount).toBe(2);
+    expect(preview.entries[0].maxDamage).toBe(2);
+    const played = advanceRound(state);
+    expect(firstEnemyRollTarget(played, 0)).toBe(1);
+  });
+
+  it('matches the actual first-die target under taunt and under an armed evade', () => {
+    // Taunt: the 10-HP taunter draws fire off the 2-HP ship.
+    const tauntFleet = [
+      { stats: blankStats({ hp: 2 }), initialDamage: 0 },
+      { stats: blankStats({ hp: 10, taunt: true }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { initiative: 3, hp: 20, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(tauntFleet, foe, 1);
+    state = advanceRound(state);
+    expect(incomingFirePreview(state).entries[0].targetIndex).toBe(1);
+    expect(firstEnemyRollTarget(advanceRound(state), 0)).toBe(1);
+
+    // Evade: arming thrusters removes the otherwise-lowest ship from the
+    // pool, and the telegraph shifts BEFORE the round is played.
+    const evadeFleet = [
+      { stats: blankStats({ hp: 2, actives: ['thrusters'] }), initialDamage: 0 },
+      { stats: blankStats({ hp: 10 }), initialDamage: 0 },
+    ];
+    let evadeState = initCombat(evadeFleet, foe, 1);
+    evadeState = advanceRound(evadeState);
+    expect(incomingFirePreview(evadeState).entries[0].targetIndex).toBe(0); // before arming
+    evadeState = useActive(evadeState, 0, 0);
+    expect(incomingFirePreview(evadeState).entries[0].targetIndex).toBe(1); // shifted
+    expect(firstEnemyRollTarget(advanceRound(evadeState), 0)).toBe(1);
+  });
+
+  it('previews missiles at round 0 and cannons afterward, with per-phase weapon sets', () => {
+    const fleet = [{ stats: blankStats({ hp: 10, flak: 2 }), initialDamage: 0 }];
+    const foe = enemy(
+      { count: 2 },
+      { initiative: 1, hp: 5, cannons: [{ diceCount: 1, damage: 2 }], missiles: [{ diceCount: 2, damage: 1 }] },
+    );
+    const state = initCombat(fleet, foe, 1);
+
+    const missilePreview = incomingFirePreview(state);
+    expect(missilePreview.phase).toBe('missile');
+    expect(missilePreview.entries).toHaveLength(2);
+    expect(missilePreview.entries[0].diceCount).toBe(2); // missile dice only
+    expect(missilePreview.flakCancels).toBe(2); // the fleet's flak total
+
+    const afterMissiles = advanceRound(state);
+    const cannonPreview = incomingFirePreview(afterMissiles);
+    expect(cannonPreview.phase).toBe('cannon');
+    expect(cannonPreview.entries[0]?.diceCount).toBe(1); // cannon dice only
+    expect(cannonPreview.flakCancels).toBe(0); // flak is a missile-phase concept
+  });
+
+  it('doubles previewed cannon dice for enemies that currently qualify for Outspeed, and flags them', () => {
+    const fleet = [{ stats: blankStats({ hp: 30, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }]; // init 0
+    const foe = enemy({}, { initiative: 4, hp: 30, cannons: [{ diceCount: 2, damage: 1 }] }); // gap 4 — outspeeds
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile no-op
+    expect(outspeedingShipIndices(state).enemy).toEqual([0]); // sanity: the live badge agrees
+    const preview = incomingFirePreview(state);
+    expect(preview.entries[0].outspeed).toBe(true);
+    expect(preview.entries[0].diceCount).toBe(4); // 2 dice × 2 activations
+    expect(preview.entries[0].maxDamage).toBe(4);
+  });
+
+  it('is pure: consumes no rng and leaves the state deep-equal', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { initiative: 1, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state);
+    const before = JSON.stringify(state);
+    incomingFirePreview(state);
+    expect(JSON.stringify(state)).toBe(before);
+    // Determinism cross-check: playing the round after previewing equals
+    // playing it without ever previewing.
+    expect(JSON.stringify(advanceRound(state))).toBe(JSON.stringify(advanceRound(JSON.parse(before))));
   });
 });

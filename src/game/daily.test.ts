@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { dailySeed, dailyShareText, emptyRunStats } from './daily';
 import { initialRunState } from './reducer';
-import { shipName } from './shipNames';
+import { baseShipName, shipName } from './shipNames';
 import type { RunState } from './types';
 
 describe('dailySeed (iteration 18)', () => {
@@ -25,13 +25,28 @@ describe('dailySeed (iteration 18)', () => {
 });
 
 describe('shipName (iteration 18)', () => {
-  it('is deterministic and ISV-prefixed', () => {
-    expect(shipName(12345, 0)).toBe(shipName(12345, 0));
-    expect(shipName(12345, 0).startsWith('ISV ')).toBe(true);
+  it('is deterministic, and the Flagship wears the bare fleet prefix', () => {
+    expect(shipName(12345, 0, 'cruiser')).toBe(shipName(12345, 0, 'cruiser'));
+    expect(shipName(12345, 0, 'cruiser').startsWith('ISV ')).toBe(true);
+  });
+
+  it('gives escorts a hull code and commission number instead', () => {
+    // The number is the commission counter, so it never renumbers when a
+    // ship ahead of it is lost.
+    expect(shipName(12345, 1, 'dreadnought')).toMatch(/^DRD-02 /);
+    expect(shipName(12345, 2, 'light-cruiser')).toMatch(/^CRU-03 /);
+    expect(shipName(12345, 3, 'interceptor')).toMatch(/^INT-04 /);
+    expect(shipName(12345, 4, 'bastion')).toMatch(/^BAS-05 /);
+    expect(shipName(12345, 1, 'dreadnought').startsWith('ISV')).toBe(false);
+  });
+
+  it('gives the same underlying name regardless of frame', () => {
+    expect(baseShipName(12345, 1)).toBe(shipName(12345, 1, 'cruiser').replace('ISV ', ''));
+    expect(shipName(12345, 1, 'bastion')).toContain(baseShipName(12345, 1));
   });
 
   it('produces 48 distinct names for 48 consecutive commissions', () => {
-    const names = new Set(Array.from({ length: 48 }, (_, i) => shipName(987654321, i)));
+    const names = new Set(Array.from({ length: 48 }, (_, i) => shipName(987654321, i, 'cruiser')));
     expect(names.size).toBe(48);
   });
 });
@@ -63,7 +78,7 @@ describe('daily run construction (iteration 18)', () => {
     expect(a.mode).toBe('daily');
     expect(a.dailyDate).toBe('2026-08-03');
     expect(a.map.seed).toBe(42);
-    expect(a.fleet[0].name).toBe(shipName(42, 0));
+    expect(a.fleet[0].name).toBe(shipName(42, 0, 'cruiser'));
     expect(a.runStats).toEqual(emptyRunStats());
     expect(a.shipsCommissioned).toBe(1);
   });

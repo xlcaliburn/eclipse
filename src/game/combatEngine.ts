@@ -683,6 +683,61 @@ export function outspeedingShipIndices(state: CombatState): { player: number[]; 
   };
 }
 
+// --- Telegraphs (iteration 19) ---------------------------------------------
+// Enemy targeting is deterministic given board state, so next round's
+// OPENING fire is computable before the round is played. Each entry is one
+// enemy ship's first-die pick, made with the exact functions `fireShip`
+// uses (`legalDefenders` + `pickTarget`, against the LIVE roundModifiers —
+// so arming an evade visibly shifts the telegraph before the player
+// commits). Honest limitation for the UI copy: dice retarget
+// mid-activation after kills, so this is the opening picture, not a
+// contract. Pure and read-only: consumes no rng, mutates nothing.
+
+export interface IncomingFire {
+  shooterIndex: number; // enemy-side flattened index
+  targetIndex: number; // player-side index its first die opens on
+  diceCount: number; // dice it will fire in the previewed phase (outspeed-doubled for cannons)
+  maxDamage: number; // sum of those dice's damage — an upper bound, before any roll
+  outspeed: boolean; // cannon preview only: this ship currently qualifies for a bonus activation
+}
+
+export interface FirePreview {
+  phase: 'missile' | 'cannon'; // the phase the next `advanceRound` will resolve
+  entries: IncomingFire[];
+  flakCancels: number; // missile phase only: the fleet's flak downs this many dice first
+}
+
+export function incomingFirePreview(state: CombatState): FirePreview {
+  const phase: 'missile' | 'cannon' = state.round === 0 ? 'missile' : 'cannon';
+  const outspeedingEnemies =
+    phase === 'cannon'
+      ? new Set(
+          computeOutspeedShips(state.playerShips, state.enemyShips, state.roundModifiers.initiativeBonus)
+            .filter((s) => s.side === 'enemy')
+            .map((s) => s.index),
+        )
+      : new Set<number>();
+
+  const entries: IncomingFire[] = [];
+  for (const ship of state.enemyShips) {
+    if (!isAlive(ship)) continue;
+    const weapons = phase === 'missile' ? ship.stats.missiles : ship.stats.cannons;
+    if (weapons.length === 0) continue;
+    const target = pickTarget(legalDefenders(state.playerShips, state.roundModifiers), !!weapons[0]?.targetHighest);
+    if (!target) continue;
+    const outspeed = outspeedingEnemies.has(ship.index);
+    const multiplier = outspeed ? 2 : 1;
+    const diceCount = weapons.reduce((n, w) => n + w.diceCount, 0) * multiplier;
+    const maxDamage = weapons.reduce((n, w) => n + w.diceCount * w.damage, 0) * multiplier;
+    entries.push({ shooterIndex: ship.index, targetIndex: target.index, diceCount, maxDamage, outspeed });
+  }
+
+  const flakCancels =
+    phase === 'missile' ? state.playerShips.filter(isAlive).reduce((sum, s) => sum + (s.stats.flak ?? 0), 0) : 0;
+
+  return { phase, entries, flakCancels };
+}
+
 // Iteration 13: set (or clear, with null) the manual priority target.
 // Only an alive enemy ship is accepted; anything else clears instead —
 // clicking a wreck should never leave a stale lock.

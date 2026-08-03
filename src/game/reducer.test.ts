@@ -2037,7 +2037,7 @@ describe('the fleet remembers (iteration 18)', () => {
 
   it('names the starting Flagship deterministically from the run seed', () => {
     const state = initialRunState({ seed: 7 });
-    expect(state.fleet[0].name).toBe(shipName(7, 0));
+    expect(state.fleet[0].name).toBe(shipName(7, 0, 'cruiser'));
     expect(state.fleet[0].name!.startsWith('ISV ')).toBe(true);
   });
 
@@ -2047,7 +2047,7 @@ describe('the fleet remembers (iteration 18)', () => {
     state = { ...state, commanderChoices: ['warlord', ...state.commanderChoices.slice(1)] };
     const after = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'warlord' });
     expect(after.fleet).toHaveLength(2);
-    expect(after.fleet[1].name).toBe(shipName(7, 1));
+    expect(after.fleet[1].name).toBe(shipName(7, 1, 'interceptor'));
     expect(after.shipsCommissioned).toBe(2);
   });
 

@@ -1,6 +1,8 @@
-import { openingTargetIndex, OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
+import { incomingFirePreview, initCombat, openingTargetIndex, OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
+import type { FirePreview } from '../game/combatEngine';
+import { getEnemyLore } from '../game/enemyLore';
 import { getEscalation } from '../game/escalations';
-import { playerShipLabel } from '../game/ship';
+import { deriveFleetForCombat, playerShipLabel } from '../game/ship';
 import type { EnemyDef, EnemyGroup, PlayerShipState, ShipStats } from '../game/types';
 import { classifyArchetype, EnemySilhouette } from './ShipSilhouette';
 import { StatBar } from './StatBar';
@@ -88,10 +90,38 @@ export function EnemyPanel({ enemy, fleetStats, fleet }: EnemyPanelProps) {
   const targetIndex = openingTargetIndex(enemy);
   const groupStarts = groupStartIndices(enemy.groups);
   const totalShips = enemy.groups.reduce((n, g) => n + g.count, 0);
+  const lore = getEnemyLore(enemy.id);
+
+  // Iteration 19 (telegraphs): the mirror of "where your fire opens" — the
+  // enemy's own opening volley, computed by building the real initCombat
+  // state from the current fleet and running the same preview the combat
+  // theater uses. Re-derives on every fleet edit, so re-equipping a lure
+  // beacon visibly drags the telegraphed fire onto the taunter before
+  // engaging.
+  function volleySummary(preview: FirePreview | null) {
+    if (!preview || preview.entries.length === 0 || !fleet) return null;
+    const dice = preview.entries.reduce((n, e) => n + e.diceCount, 0);
+    const damage = preview.entries.reduce((n, e) => n + e.maxDamage, 0);
+    const targetNames = [...new Set(preview.entries.map((e) => e.targetIndex))].map((i) => playerShipLabel(fleet, i));
+    return { dice, damage, targetNames, flak: preview.flakCancels, outspeed: preview.entries.some((e) => e.outspeed) };
+  }
+  const previewState = fleet && fleet.length > 0 ? initCombat(deriveFleetForCombat(fleet), enemy, 1) : null;
+  const missileVolley = volleySummary(previewState ? incomingFirePreview(previewState) : null);
+  const cannonVolley = volleySummary(previewState ? incomingFirePreview({ ...previewState, round: 1 }) : null);
+
+  // Outspeed only earns its space when it's live in *this* fight: someone
+  // already qualifies either way, or the player is one point of initiative
+  // off it — which is actionable here, since parts can still be swapped on
+  // this screen. Otherwise the numbers are noise against a fight they'll
+  // never apply to.
+  const nearlyOutspeeds = playerFastest !== undefined && playerFastest === outspeedThreshold - 1;
+  const outspeedRelevant =
+    qualifyingPlayerShips.length > 0 || enemyGroupsThatOutspeedPlayer.length > 0 || nearlyOutspeeds;
 
   return (
     <section className="enemy-panel">
-      <h2 className="enemy-panel__name">{enemy.name}</h2>
+      <h2 className="panel-title">{enemy.name}</h2>
+      {lore && <p className="enemy-panel__lore">{lore}</p>}
       <p className="enemy-panel__blurb">{enemy.blurb}</p>
 
       {enemy.groups.map((group, i) => (
@@ -113,9 +143,9 @@ export function EnemyPanel({ enemy, fleetStats, fleet }: EnemyPanelProps) {
             })}
           </div>
           {enemy.groups.length > 1 && <h3 className="enemy-panel__group-label">{group.label}</h3>}
-          <div className="enemy-panel__count">
-            {group.count} ship{group.count > 1 ? 's' : ''} per side
-          </div>
+          {/* The old "N ships per side" line is gone — "per side" described
+              nothing the player could act on, and the row of silhouettes
+              above already states the count by being that many icons. */}
           {/* Iteration 13: identical stat presentation to the player's side. */}
           <StatBar stats={group.stats} />
         </div>
@@ -123,6 +153,23 @@ export function EnemyPanel({ enemy, fleetStats, fleet }: EnemyPanelProps) {
 
       {totalShips > 1 && targetIndex >= 0 && (
         <p className="hint">Highlighted — where your fire opens: the weakest hull first.</p>
+      )}
+
+      {/* Iteration 19 (telegraphs): their side of the same story. */}
+      {missileVolley && (
+        <p className="hint enemy-panel__volley">
+          Their alpha strike: <strong>{missileVolley.dice}</strong> missile {missileVolley.dice === 1 ? 'die' : 'dice'},
+          up to <strong>{missileVolley.damage}</strong> dmg — opening on {missileVolley.targetNames.join(', ')}.
+          {missileVolley.flak > 0 &&
+            ` Your flak downs the first ${missileVolley.flak} ${missileVolley.flak === 1 ? 'die' : 'dice'}.`}
+        </p>
+      )}
+      {cannonVolley && (
+        <p className="hint enemy-panel__volley">
+          Their cannons: <strong>{cannonVolley.dice}</strong> {cannonVolley.dice === 1 ? 'die' : 'dice'}/round, up to{' '}
+          <strong>{cannonVolley.damage}</strong> dmg — opening on {cannonVolley.targetNames.join(', ')}.
+          {cannonVolley.outspeed && ' Includes an Outspeed double strike.'}
+        </p>
       )}
 
       {enemyShield > 0 && (
@@ -135,12 +182,18 @@ export function EnemyPanel({ enemy, fleetStats, fleet }: EnemyPanelProps) {
 
       {/* Iteration 17 ("Outspeed"): both directions, so the enemy panel
           answers "is a drives build worth it here" before the fight, not
-          after. */}
-      <p className="hint">
-        Their fastest ship: init {enemyFastest}. Your ships at init <strong>{outspeedThreshold}+</strong> strike
-        twice each round.
-        {qualifyingPlayerShips.length > 0 && ` ${qualifyingPlayerShips.join(', ')} already outspeed them.`}
-      </p>
+          after. Gated on outspeedRelevant — see above. */}
+      {outspeedRelevant && (
+        <p className="hint">
+          Their fastest ship: init {enemyFastest}. Your ships at init <strong>{outspeedThreshold}+</strong> strike
+          twice each round.
+          {qualifyingPlayerShips.length > 0
+            ? ` ${qualifyingPlayerShips.join(', ')} already outspeed them.`
+            : nearlyOutspeeds
+              ? ' One more point of initiative gets you there.'
+              : ''}
+        </p>
+      )}
       {enemyGroupsThatOutspeedPlayer.map((group) => (
         <p key={group.label} className="warning">
           Their {group.label} (init {group.stats.initiative}) outspeeds your fleet — expect double strikes. Any

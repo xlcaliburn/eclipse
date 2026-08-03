@@ -30,14 +30,15 @@
   reference fleets (add a taunt-turtle build), re-derive target bands per
   boss, and reinstate the script as a milestone gate.
 
-- **Combat-interaction bundle (pitched 2026-07-27, user passed):** enemy
-  intent telegraphs, click-targeted actives (disruptor pulse / tractor
-  snare / painter), cooldown-or-charge active economy, per-fight
-  battle-plan drafts, and interaction-hooked weapons (ramp laser,
-  suppressor, disruptor beam, ammo-limited heavy driver). The user chose
-  the iteration-17 Outspeed initiative rework instead — don't re-pitch
-  this bundle wholesale, though individual weapons may return with a
-  future arsenal pass.
+- **Combat-interaction bundle (pitched 2026-07-27, user passed):**
+  click-targeted actives (disruptor pulse / tractor snare / painter),
+  cooldown-or-charge active economy, per-fight battle-plan drafts, and
+  interaction-hooked weapons (ramp laser, suppressor, disruptor beam,
+  ammo-limited heavy driver). The user chose the iteration-17 Outspeed
+  initiative rework instead — don't re-pitch this bundle wholesale,
+  though individual weapons may return with a future arsenal pass.
+  *Enemy intent telegraphs were revived by the user on 2026-08-03 and
+  shipped as iteration 19.*
 
 ### New-dimension candidates (discussed 2026-07-26, unscheduled)
 

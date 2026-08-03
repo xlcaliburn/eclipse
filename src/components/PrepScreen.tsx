@@ -57,6 +57,7 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
           }
           onMoveCargoPod={(toShipIndex) => dispatch({ type: 'MOVE_CARGO_POD', toShipIndex })}
           outspeedFastestEnemyInitiative={enemyFastestInitiative}
+          collapsibleParts
         />
       </div>
 

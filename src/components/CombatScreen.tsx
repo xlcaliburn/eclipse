@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { canPlayCard, canUseActive, outspeedingShipIndices } from '../game/combatEngine';
+import { canPlayCard, canUseActive, incomingFirePreview, outspeedingShipIndices } from '../game/combatEngine';
 import type { CombatState } from '../game/combatEngine';
 import { getCard } from '../game/cards';
 import type { CardId } from '../game/cards';
@@ -13,6 +13,7 @@ import { CombatFleetView } from './CombatFleetView';
 import { TheaterFxLayer } from './TheaterFx';
 import type { FxItem, FxSpawn } from './TheaterFx';
 import { usePrefersReducedMotion } from './useReducedMotion';
+import { countRevealSteps, revealStepEnd } from './replaySteps';
 
 // ~1.5s replay budget per round (10.5) — spread evenly across however many
 // events landed this round, clamped so a single-event round doesn't linger
@@ -162,6 +163,25 @@ export function CombatScreen({
   // instant an active gets armed or an opposing fast ship dies.
   const outspeeding = outspeedingShipIndices(combat);
 
+  // Iteration 19 (telegraphs): next round's opening fire, recomputed from
+  // live state every render — arming an evade or a lure-swap visibly moves
+  // the telegraph before the round is committed.
+  const firePreview = !finished ? incomingFirePreview(combat) : null;
+  const incomingByTarget = new Map<
+    number,
+    { dice: number; maxDamage: number; outspeed: boolean; shooters: string[] }
+  >();
+  if (firePreview) {
+    for (const entry of firePreview.entries) {
+      const agg = incomingByTarget.get(entry.targetIndex) ?? { dice: 0, maxDamage: 0, outspeed: false, shooters: [] };
+      agg.dice += entry.diceCount;
+      agg.maxDamage += entry.maxDamage;
+      agg.outspeed = agg.outspeed || entry.outspeed;
+      agg.shooters.push(shipLabel('enemy', entry.shooterIndex, enemy, playerLabels));
+      incomingByTarget.set(entry.targetIndex, agg);
+    }
+  }
+
   // Every active part any player ship carries, identified by (shipIndex,
   // abilityIndex) — the same pair `canUseActive`/`onUseActive` key off of.
   const activeAbilities = combat.playerShips.flatMap((ship, shipIndex) =>
@@ -203,17 +223,22 @@ export function CombatScreen({
       return;
     }
 
-    const newEntries = newLength - prevLength;
-    const perTickMs = Math.max(MIN_TICK_MS, Math.min(MAX_TICK_MS, ROUND_REPLAY_BUDGET_MS / newEntries));
+    // Budget is spread over reveal *steps*, not log entries — a ship's dice
+    // now land together as one step, so pacing off raw entry count would rush
+    // a round of multi-gun volleys through in a fraction of the budget.
+    const steps = countRevealSteps(combat.log, prevLength, newLength);
+    const perTickMs = Math.max(MIN_TICK_MS, Math.min(MAX_TICK_MS, ROUND_REPLAY_BUDGET_MS / steps));
     setRevealedCount(prevLength);
     let count = prevLength;
     const tick = () => {
-      count++;
+      const from = count;
+      count = revealStepEnd(combat.log, from);
+      replayStepRef.current = { from, to: count };
       setRevealedCount(count);
       tickTimerRef.current = count < newLength ? window.setTimeout(tick, perTickMs) : null;
     };
     tickTimerRef.current = window.setTimeout(tick, perTickMs);
-  }, [combat.log.length, reducedMotion]);
+  }, [combat.log, reducedMotion]);
 
   // Iteration 12.2: transient fx spawned per revealed event, drawn between
   // the *measured* centers of the ship cards involved. Cards register their
@@ -227,11 +252,10 @@ export function CombatScreen({
   const [cardBadges, setCardBadges] = useState<Record<string, CardBadge>>({});
   const badgeKeyRef = useRef(0);
   const prevRevealedRef = useRef(revealedCount);
-  // Which shot number this is within the firing ship's current activation —
-  // a ship with multiple guns (or a multi-die weapon) logs one 'roll' event
-  // per die, and without this every die's fx would spawn at the same point
-  // and visually replace the last one instead of reading as separate shots.
-  const shotSequenceRef = useRef<{ key: string; count: number }>({ key: '', count: 0 });
+  // The range the replay ticker just revealed. Fx spawn only for a range that
+  // matches this exactly, which is what keeps fresh mounts, fast-forwards, and
+  // auto-resolve jumps silent now that a step can cover more than one entry.
+  const replayStepRef = useRef<{ from: number; to: number } | null>(null);
 
   const registerShipEl = useCallback((side: Side, index: number, el: HTMLElement | null) => {
     const key = `${side}:${index}`;
@@ -248,14 +272,65 @@ export function CombatScreen({
     return { x: r.left + r.width / 2 - cRect.left, y: r.top + r.height / 2 - cRect.top };
   }, []);
 
+  // The shooter's card box, in the same theater-relative space as centerOf —
+  // dice are laid out inside this rather than drifting toward the target, so
+  // a volley always reads as belonging to the ship that fired it.
+  const boundsOf = useCallback(
+    (side: Side, index: number): { left: number; top: number; width: number; height: number } | null => {
+      const container = theaterRef.current;
+      const el = shipElsRef.current.get(`${side}:${index}`);
+      if (!container || !el) return null;
+      const cRect = container.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return { left: r.left - cRect.left, top: r.top - cRect.top, width: r.width, height: r.height };
+    },
+    [],
+  );
+
+  // Iteration 19 (telegraphs): persistent threat lines from each firing
+  // enemy card to its opening target, measured from real card positions
+  // after layout. Hidden while a round replays (the transient fx own the
+  // stage) and once the fight ends; re-measured on state change and resize.
+  const [threatLines, setThreatLines] = useState<
+    { key: string; x1: number; y1: number; x2: number; y2: number }[]
+  >([]);
+  const isReplayingNow = revealedCount < combat.log.length;
+  const showTelegraph = !finished && !isReplayingNow;
+  useEffect(() => {
+    if (!showTelegraph) {
+      setThreatLines([]);
+      return;
+    }
+    const measure = () => {
+      const preview = incomingFirePreview(combat);
+      const lines: { key: string; x1: number; y1: number; x2: number; y2: number }[] = [];
+      for (const entry of preview.entries) {
+        const from = centerOf('enemy', entry.shooterIndex);
+        const to = centerOf('player', entry.targetIndex);
+        if (from && to) {
+          lines.push({ key: `${entry.shooterIndex}-${entry.targetIndex}`, x1: from.x, y1: from.y, x2: to.x, y2: to.y });
+        }
+      }
+      setThreatLines(lines);
+    };
+    // Measured synchronously: by effect time the ship cards' ref callbacks
+    // have run and layout is committed. (Not requestAnimationFrame — RAF
+    // never fires in a hidden/background tab, which would leave the lines
+    // blank until the next resize.)
+    measure();
+    window.addEventListener('resize', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+    };
+  }, [combat, showTelegraph, centerOf]);
+
   useEffect(() => {
     const prev = prevRevealedRef.current;
     prevRevealedRef.current = revealedCount;
-    // Only single-step reveals (the replay ticking) spawn fx — fresh mounts,
+    // Only the replay ticker's own steps spawn fx — fresh mounts,
     // fast-forwards, and auto-resolve jumps stay visually silent.
-    if (reducedMotion || revealedCount - prev !== 1) return;
-    const event = combat.log[revealedCount - 1];
-    if (!event) return;
+    const step = replayStepRef.current;
+    if (reducedMotion || !step || step.from !== prev || step.to !== revealedCount) return;
 
     const spawned: FxItem[] = [];
     const push = (item: FxSpawn, ttlMs: number) => {
@@ -280,46 +355,62 @@ export function CombatScreen({
       }, TRACER_TRAVEL_MS);
     };
 
+    // The step's roll entries, up front: the whole volley reveals as one
+    // step, so its size is known before placing any single die — which is
+    // what lets the row be sized to fit the shooter's card.
+    const rollIndices: number[] = [];
+    for (let i = step.from; i < step.to; i++) {
+      if (combat.log[i]?.kind === 'roll') rollIndices.push(i);
+    }
+    const volleySize = rollIndices.length;
+
+    // Every entry the step revealed, so a ship's dice all spawn on this same
+    // frame and read as one volley.
+    for (let idx = step.from; idx < step.to; idx++) {
+    const event = combat.log[idx];
+    if (!event) continue;
+
     if (event.kind === 'roll') {
       const from = centerOf(event.side, event.shooterIndex);
       const to = centerOf(event.side === 'player' ? 'enemy' : 'player', event.targetIndex);
       if (from && to) {
-        const lastPhase = [...combat.log.slice(0, revealedCount)].reverse().find((e) => e.kind === 'phase-start');
+        const lastPhase = [...combat.log.slice(0, idx + 1)].reverse().find((e) => e.kind === 'phase-start');
         const missile = lastPhase?.kind === 'phase-start' && lastPhase.phase === 'missile';
 
         // A ship with multiple guns (or a multi-die weapon) fires several
-        // dice in one activation — track which one this is so its die lands
-        // beside the others instead of on top of them. Resets whenever the
-        // shooter, round, or phase changes; unaffected by other event kinds
-        // (jink, reactive armor, ...) that can land between this shooter's
-        // own dice.
-        const shotKey = `${event.side}:${event.shooterIndex}:${event.round}:${event.phase}`;
-        const shotIndex = shotSequenceRef.current.key === shotKey ? shotSequenceRef.current.count : 0;
-        shotSequenceRef.current = { key: shotKey, count: shotIndex + 1 };
-        // Fan the dice out left/right/left/... (0, +1, -1, +2, -2, ...) in a
-        // horizontal row — always screen-horizontal, not perpendicular to
-        // the shot, so a ship's dice read as one row regardless of which
-        // side of the theater it's on or where its target sits.
-        const dx = to.x - from.x;
-        const dy = to.y - from.y;
-        const fanUnits = shotIndex === 0 ? 0 : (shotIndex % 2 === 1 ? 1 : -1) * Math.ceil(shotIndex / 2);
-        const DIE_SPACING = 30;
+        // dice in one activation. They lay out as a horizontal row centered
+        // in the shooter's own card — always screen-horizontal, so a ship's
+        // dice read as one row regardless of which side of the theater it's
+        // on or where its target sits.
+        //
+        // Dice used to be offset toward the target and fanned at a fixed
+        // 30px, which drifted them outside the card — worse once a whole
+        // volley appeared at once instead of one die at a time. Spacing now
+        // shrinks to whatever the card can hold and every die is clamped
+        // inside it, so a volley can never wander off its own ship.
+        const shotIndex = rollIndices.indexOf(idx);
+        const box = boundsOf(event.side, event.shooterIndex);
+        const DIE_SIZE = 26;
+        const DIE_PAD = 3;
+        const MAX_DIE_SPACING = 30;
+        let dieX = from.x;
+        let dieY = from.y;
+        if (box) {
+          const half = DIE_SIZE / 2 + DIE_PAD;
+          const usable = Math.max(0, box.width - DIE_SIZE - DIE_PAD * 2);
+          const spacing = volleySize > 1 ? Math.min(MAX_DIE_SPACING, usable / (volleySize - 1)) : 0;
+          const offset = (shotIndex - (volleySize - 1) / 2) * spacing;
+          const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+          dieX = clamp(box.left + box.width / 2 + offset, box.left + half, box.left + box.width - half);
+          dieY = clamp(box.top + box.height / 2, box.top + half, box.top + box.height - half);
+        }
 
-        // Iteration 13: show the actual die, near the shooter, tinted by outcome.
-        push(
-          {
-            kind: 'die',
-            x: from.x + dx * 0.18 + fanUnits * DIE_SPACING,
-            y: from.y + dy * 0.18 - 26,
-            raw: event.raw,
-            hit: event.hit,
-          },
-          1900,
-        );
+        // Iteration 13: show the actual die, on the shooter, tinted by outcome.
+        push({ kind: 'die', x: dieX, y: dieY, raw: event.raw, hit: event.hit }, 1900);
         const targetSide: Side = event.side === 'player' ? 'enemy' : 'player';
         // A jink logs its part-effect immediately *before* the roll it
         // negates, so a miss preceded by that entry is a dodge, not a whiff.
-        const previous = combat.log[revealedCount - 2];
+        const previous = combat.log[idx - 1];
         const dodged =
           !event.hit && previous?.kind === 'part-effect' && previous.text.includes('jinks');
 
@@ -365,9 +456,10 @@ export function CombatScreen({
       const text = describeEvent(event, enemy, playerLabels);
       if (text) push({ kind: 'banner', text }, 1600);
     }
+    }
 
     if (spawned.length > 0) setFx((all) => [...all, ...spawned]);
-  }, [revealedCount, reducedMotion, combat.log, centerOf]);
+  }, [revealedCount, reducedMotion, combat.log, centerOf, enemy, playerLabels]);
 
   function fastForwardReplay() {
     if (tickTimerRef.current !== null) {
@@ -442,6 +534,13 @@ export function CombatScreen({
         onClick={isReplaying ? fastForwardReplay : undefined}
         title={isReplaying ? 'Click to skip ahead' : undefined}
       >
+        {showTelegraph && threatLines.length > 0 && (
+          <svg className="threat-lines" aria-hidden="true">
+            {threatLines.map((l) => (
+              <line key={l.key} className="threat-line" x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} />
+            ))}
+          </svg>
+        )}
         <TheaterFxLayer fx={fx} />
         <CombatFleetView
           playerShips={combat.playerShips}
@@ -464,6 +563,12 @@ export function CombatScreen({
           onSelectEnemy={!finished && !isReplaying ? onSelectEnemy : undefined}
           priorityTargetIndex={effectivePriority}
           outspeedingIndices={outspeeding}
+          incomingFire={showTelegraph ? incomingByTarget : undefined}
+          incomingFlakNote={
+            showTelegraph && firePreview?.phase === 'missile' && firePreview.flakCancels > 0
+              ? `Your flak downs the first ${firePreview.flakCancels} missile ${firePreview.flakCancels === 1 ? 'die' : 'dice'}.`
+              : undefined
+          }
         />
       </div>
       {!finished && (

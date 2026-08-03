@@ -47,6 +47,7 @@ Rules for working with these files:
 | [16](plans/iteration-16.md) | Mobile shell: Mission/Chart/Fleet bottom tabs, touch polish, installable offline PWA | implemented |
 | [17](plans/iteration-17.md) | Outspeed: a ≥4 initiative gap over the enemy's fastest survivor grants one extra cannon activation — initiative becomes a build-around (supersedes iteration 11's unbuilt evasion) | implemented |
 | [18](plans/iteration-18.md) | The daily run (seeded one-attempt challenge + share text) & the fleet remembers (named ships, kill records, run summary) | implemented |
+| [19](plans/iteration-19.md) | Telegraphs: enemy opening fire previewed before each round (engine `incomingFirePreview`, combat chips + threat lines, prep-screen volley readout) | implemented |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes

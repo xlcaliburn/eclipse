@@ -1,14 +1,23 @@
+import { getCommander } from '../game/commanders';
+import type { CommanderId } from '../game/commanders';
 import { heatTier, MAX_HEAT } from '../game/heat';
-import { setMotionSetting } from '../motionPreference';
-import { useMotionSetting } from './useReducedMotion';
+import { CommanderCrest } from './CommanderCrest';
 
 interface HudBarProps {
   credits: number;
   heat: number;
+  // The commander is picked once and then never shown again — the crest here
+  // is the only persistent reminder of which run-wide perk is active.
+  // Optional because it's unset until the 'commander' phase resolves.
+  commanderId?: CommanderId;
   daily?: boolean; // iteration 18: this run is today's one-attempt daily
   // Omitted wherever a map peek makes no sense (on the map itself, or once
   // the run is over) — the button simply isn't rendered.
   onViewMap?: () => void;
+  // Desktop only. Mobile reaches settings through the tab bar, so it omits
+  // this and the gear isn't rendered — same optional-prop pattern as
+  // onViewMap above.
+  onOpenSettings?: () => void;
 }
 
 // Iteration 10.6: a persistent top-bar HUD readout, always visible once a
@@ -17,11 +26,10 @@ interface HudBarProps {
 // Iteration 15.2: joined by the heat track — kept quiet by design (a bare
 // 4-pip gauge, no number), with the tier word and "Hunted" warning only
 // surfacing in the tooltip/pip tint.
-export function HudBar({ credits, heat, daily, onViewMap }: HudBarProps) {
-  const motion = useMotionSetting();
-  const reduced = motion === 'reduced';
+export function HudBar({ credits, heat, commanderId, daily, onViewMap, onOpenSettings }: HudBarProps) {
   const tier = heatTier(heat);
   const armed = heat >= MAX_HEAT;
+  const commander = commanderId ? getCommander(commanderId) : null;
 
   return (
     <div className="hud-bar">
@@ -35,19 +43,30 @@ export function HudBar({ credits, heat, daily, onViewMap }: HudBarProps) {
           DAILY
         </span>
       )}
-      <button
-        type="button"
-        className="hud-bar__motion-button"
-        onClick={() => setMotionSetting(reduced ? 'full' : 'reduced')}
-        aria-pressed={!reduced}
-        title={
-          reduced
-            ? 'Animations are off (following your system setting unless you change it here). Click to turn them on.'
-            : 'Animations are on. Click to turn them off.'
-        }
-      >
-        Motion: {reduced ? 'off' : 'on'}
-      </button>
+      {commander && (
+        // The perk itself is passive and run-long, so this is a readout, not
+        // a control — the name is carried for screen readers and the tooltip
+        // spells out what the perk actually does, since the pick screen is
+        // long gone by the time anyone wonders.
+        <span
+          className="hud-bar__commander"
+          title={`${commander.name} — ${commander.description}`}
+        >
+          <CommanderCrest commanderId={commander.id} size={18} />
+          <span className="hud-bar__commander-name">{commander.name}</span>
+        </span>
+      )}
+      {onOpenSettings && (
+        <button
+          type="button"
+          className="hud-bar__settings-button"
+          onClick={onOpenSettings}
+          title="Settings"
+          aria-label="Settings"
+        >
+          ⚙
+        </button>
+      )}
       <div
         className={`hud-bar__heat${armed ? ' hud-bar__heat--hunted' : ''}`}
         title={`Heat: ${tier}${armed ? ' — the next stop you make, they find you.' : ''}`}

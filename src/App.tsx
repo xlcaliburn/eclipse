@@ -19,6 +19,7 @@ import { ShipSetupScreen } from './components/ShipSetupScreen';
 import { ShopScreen } from './components/ShopScreen';
 import { Starfield } from './components/Starfield';
 import { HudBar } from './components/HudBar';
+import { SettingsOverlay, SettingsScreen } from './components/SettingsScreen';
 import { TabBar } from './components/TabBar';
 import type { Surface } from './components/TabBar';
 import { useIsCompact } from './components/useIsCompact';
@@ -228,8 +229,10 @@ function App() {
         <HudBar
           credits={state.credits}
           heat={state.heat}
+          commanderId={state.commanderId}
           daily={state.mode === 'daily'}
           onViewMap={canPeekMap ? () => setSurface('chart') : undefined}
+          onOpenSettings={isCompact ? undefined : () => setSurface('settings')}
         />
       )}
       {savingUnavailable && <p className="warning">Saving unavailable — this run won't be saved if you close the tab.</p>}
@@ -380,6 +383,10 @@ function App() {
           onClose={() => setSurface('mission')}
         />
       )}
+
+      {isCompact && surface === 'settings' && <SettingsScreen />}
+
+      {!isCompact && surface === 'settings' && <SettingsOverlay onClose={() => setSurface('mission')} />}
     </div>
     {isCompact && showHud && <TabBar surface={surface} onSelect={setSurface} />}
     </>

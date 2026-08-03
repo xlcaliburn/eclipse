@@ -25,6 +25,11 @@ interface FleetPanelProps {
   // starts. Undefined in contexts with no committed enemy (the shop) — no
   // badges render there, since there's nothing to compare against.
   outspeedFastestEnemyInitiative?: number;
+  // Prep only. The pre-fight screen is a scanning screen — you're comparing
+  // two fleets, not shopping — so parts start folded away and the panel
+  // stays short enough to read against the enemy beside it. The shop leaves
+  // this off: browsing parts is the entire point there.
+  collapsibleParts?: boolean;
 }
 
 export { playerShipLabel };
@@ -42,19 +47,27 @@ export function FleetPanel({
   onScuttle,
   onPartHover,
   outspeedFastestEnemyInitiative,
+  collapsibleParts,
 }: FleetPanelProps) {
   const selectedShip = fleet[selectedShipIndex];
   const selectedHasRoom = selectedShip
     ? selectedShip.equipped.length < effectiveSlots(selectedShip.frameId, selectedShip.upgrades)
     : false;
 
+  const instructions =
+    'Click a ship to select it, click inventory parts to equip them to it, and click an equipped part to remove it.';
+
   return (
     <section className="blueprint-panel">
-      <h2>Your fleet</h2>
-      <p className="hint">
-        Click a ship to select it, click inventory parts to equip them to it, and click an
-        equipped part to remove it.
-      </p>
+      <h2 className="panel-title">
+        Your fleet
+        {/* The instructions are onboarding: essential once, clutter every
+            fight after. Folded into the header so they're still one hover
+            (or tap) away without costing a permanent line. */}
+        <button type="button" className="info-dot" title={instructions} aria-label={instructions}>
+          i
+        </button>
+      </h2>
 
       {fleet.map((ship, shipIndex) => {
         const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades);
@@ -119,22 +132,35 @@ export function FleetPanel({
                 ))}
               </div>
             )}
-            <div className="slot-grid">
-              {ship.equipped.map((partId, i) =>
-                partId === CARGO_POD_PART_ID ? (
-                  <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
-                ) : (
-                  <PartCard
-                    key={`${partId}-${i}`}
-                    part={getPart(partId)}
-                    onClick={() => onUnequip(shipIndex, partId)}
-                  />
-                ),
-              )}
-              {Array.from({ length: emptySlots }).map((_, i) => (
-                <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty hardpoint" />
-              ))}
-            </div>
+            {(() => {
+              const grid = (
+                <div className="slot-grid">
+                  {ship.equipped.map((partId, i) =>
+                    partId === CARGO_POD_PART_ID ? (
+                      <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
+                    ) : (
+                      <PartCard
+                        key={`${partId}-${i}`}
+                        part={getPart(partId)}
+                        onClick={() => onUnequip(shipIndex, partId)}
+                      />
+                    ),
+                  )}
+                  {Array.from({ length: emptySlots }).map((_, i) => (
+                    <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty hardpoint" />
+                  ))}
+                </div>
+              );
+              if (!collapsibleParts) return grid;
+              return (
+                // onClick stops propagation because the whole card is a
+                // select-ship target.
+                <details className="parts-fold" onClick={(e) => e.stopPropagation()}>
+                  <summary className="parts-fold__summary">Items</summary>
+                  {grid}
+                </details>
+              );
+            })()}
             {cargoCarrierIndex === shipIndex && onMoveCargoPod && fleet.length > 1 && (
               <div className="cargo-pod-mover" onClick={(e) => e.stopPropagation()}>
                 <span className="hint">Move cargo pod to:</span>
@@ -152,10 +178,31 @@ export function FleetPanel({
         );
       })}
 
-      <h3>Inventory</h3>
-      {inventory.length === 0 ? (
-        <p className="hint">No spare parts.</p>
+      {/* Folded on the prep screen for the same reason as the ship parts —
+          the count in the summary is enough to tell you whether it's worth
+          opening before a fight. */}
+      {collapsibleParts && inventory.length > 0 ? (
+        <details className="parts-fold parts-fold--inventory">
+          <summary className="parts-fold__summary">
+            Inventory · {inventory.length} spare part{inventory.length === 1 ? '' : 's'}
+          </summary>
+          {inventoryGrid()}
+          {!selectedHasRoom && <p className="hint">Selected ship is full — select another ship or remove a part.</p>}
+        </details>
       ) : (
+        <>
+          <h3 className="panel-subtitle">Inventory</h3>
+          {inventory.length === 0 ? <p className="hint">No spare parts.</p> : inventoryGrid()}
+          {!selectedHasRoom && inventory.length > 0 && (
+            <p className="hint">Selected ship is full — select another ship or remove a part.</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+
+  function inventoryGrid() {
+    return (
         <div className="inventory-grid">
           {inventory.map((partId, i) => (
             <div
@@ -184,10 +231,6 @@ export function FleetPanel({
             </div>
           ))}
         </div>
-      )}
-      {!selectedHasRoom && inventory.length > 0 && (
-        <p className="hint">Selected ship is full — select another ship or remove a part.</p>
-      )}
-    </section>
-  );
+    );
+  }
 }

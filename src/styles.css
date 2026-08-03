@@ -95,12 +95,45 @@ h1, h2, h3 {
   box-shadow: 0 0 8px var(--accent-glow);
 }
 
-/* Quiet by design — a settings affordance, not a game action. */
-.hud-bar__motion-button {
+/* Which commander is running this fleet. Sits left of the counters with the
+   other run-identity chips; a readout, not a control. */
+.hud-bar__commander {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-right: 4px;
-  font-family: var(--font-mono);
+  color: var(--text-dim);
+  font-family: var(--font-display);
   font-size: 11px;
-  padding: 3px 10px;
+  letter-spacing: 0.04em;
+}
+
+/* The crests punch their hollow centers (the cog's hub, the sensor eye's
+   iris) with fill="var(--panel)", which assumes a panel behind them. The HUD
+   bar isn't one, so those holes would show as panel-colored blobs against
+   the bar's own translucent background — repaint them to match it. A
+   presentation attribute, so this rule wins without !important. */
+.hud-bar__commander .commander-crest circle[fill] {
+  fill: var(--bg);
+}
+
+/* The crest alone carries it once space is tight — the tooltip and the
+   aria-readable name still name the commander. */
+@media (max-width: 720px) {
+  .hud-bar__commander-name {
+    display: none;
+  }
+}
+
+/* Quiet by design — a settings affordance, not a game action. Desktop only:
+   mobile reaches settings through the tab bar, so HudBar isn't given the
+   callback there and this never renders. Replaced the old "Motion: on"
+   text button, which spent permanent HUD space on a preference set once. */
+.hud-bar__settings-button {
+  margin-right: 4px;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 8px;
   color: var(--text-dim);
   background: none;
   border: 1px solid var(--border);
@@ -108,7 +141,7 @@ h1, h2, h3 {
   cursor: pointer;
 }
 
-.hud-bar__motion-button:hover {
+.hud-bar__settings-button:hover {
   color: var(--text);
   border-color: var(--border-strong);
 }
@@ -179,7 +212,7 @@ h1, h2, h3 {
      plan — no redesign, desktop untouched. `.shop-button` alone also
      covers its narrower contextual variants (card lane buttons, the cargo
      pod mover) since neither of those overrides height. */
-  .hud-bar__motion-button,
+  .settings-row__toggle,
   .shop-button,
   .continue-button,
   .withdraw-button,
@@ -233,11 +266,55 @@ h1, h2, h3 {
 
 /* The mobile Fleet tab (FleetScreen) — the modal's content promoted to a
    full screen, reusing the same panel chrome as every other screen. */
-.fleet-screen {
+.fleet-screen,
+.settings-screen {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 20px;
+}
+
+/* One settings entry: label + explanation on the left, control on the right.
+   Shared by the mobile Settings tab and the desktop modal. */
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.settings-row__label {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.settings-row__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.settings-row__toggle {
+  flex: 0 0 auto;
+  min-width: 64px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  padding: 6px 16px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Off reads as inert rather than as a second live choice. */
+.settings-row__toggle[aria-pressed='false'] {
+  color: var(--text-dim);
+  background: none;
+  border-color: var(--border);
 }
 
 /* Warp-streak phase transition (iteration 10.6) */
@@ -378,7 +455,8 @@ h1, h2, h3 {
 .reward-screen,
 .interlude-screen,
 .landing-screen,
-.fleet-screen {
+.fleet-screen,
+.settings-screen {
   background: color-mix(in srgb, var(--panel) 90%, transparent);
   border: 1px solid var(--border-strong);
   box-shadow: inset 0 0 20px rgba(53, 217, 212, 0.05);
@@ -1283,8 +1361,34 @@ h1, h2, h3 {
   padding: 16px;
 }
 
-.enemy-panel__name {
-  margin: 0 0 4px;
+/* One header treatment for both prep panels. They sit side by side and are
+   read by comparison, so "Your fleet" and the enemy's name have to share a
+   baseline — they previously used an unstyled h2 on one side and a bespoke
+   rule on the other, which left the two columns starting at different
+   heights. */
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 20px;
+  line-height: 1.3;
+  min-height: 28px;
+}
+
+.panel-subtitle {
+  margin: 12px 0 8px;
+  font-size: 14px;
+}
+
+/* Story text: who this enemy is. Sits above the tactical blurb, in italic so
+   the two never blur together — one is flavor, the other is advice. */
+.enemy-panel__lore {
+  color: var(--text-dim);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.45;
+  margin: 0 0 8px;
 }
 
 .enemy-panel__blurb {
@@ -1293,10 +1397,68 @@ h1, h2, h3 {
   margin: 0 0 12px;
 }
 
-.enemy-panel__count {
-  font-size: 13px;
+/* Onboarding text folded into a header. Kept to a circle rather than a full
+   line so it reads as "there's help here" without competing with the title. */
+.info-dot {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: none;
   color: var(--text-dim);
-  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1;
+  cursor: help;
+}
+
+.info-dot:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Collapsed parts/inventory on the prep screen. The summary carries the
+   counts so folding costs nothing you'd scan for. */
+.parts-fold {
+  margin-top: 6px;
+}
+
+.parts-fold--inventory {
+  margin-top: 12px;
+}
+
+.parts-fold__summary {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 3px 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+}
+
+.parts-fold__summary::-webkit-details-marker {
+  display: none;
+}
+
+.parts-fold__summary::before {
+  content: '▸';
+  font-size: 9px;
+  transition: transform 0.15s ease;
+}
+
+.parts-fold[open] > .parts-fold__summary::before {
+  transform: rotate(90deg);
+}
+
+.parts-fold__summary:hover {
+  color: var(--text);
 }
 
 /* Iteration 9: one card per sub-group, for mixed formations */
@@ -2602,4 +2764,58 @@ h1, h2, h3 {
 
 .end-screen__daily {
   margin: 12px 0;
+}
+
+/* --- Telegraphs (iteration 19) -------------------------------------------- */
+
+/* Persistent threat lines beneath the transient fx layer: enemy card →
+   its opening target. Static by design; a slow dash drift is the only
+   motion, and it dies with prefers-reduced-motion. */
+.threat-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4; /* under .theater-fx (6) — telegraphs are context, fx are events */
+  overflow: visible;
+}
+
+.threat-line {
+  stroke: var(--danger);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 7;
+  opacity: 0.4;
+  animation: threat-drift 2.2s linear infinite;
+}
+
+@keyframes threat-drift {
+  to { stroke-dashoffset: -11; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .threat-line {
+    animation: none;
+  }
+}
+
+:root[data-motion='reduced'] .threat-line {
+  animation: none;
+}
+
+/* The per-card incoming-fire chip, between rounds only. */
+.combat-ship__incoming {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
+  border-radius: 3px;
+  padding: 0 6px;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.enemy-panel__volley strong {
+  color: var(--text);
 }

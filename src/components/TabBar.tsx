@@ -1,4 +1,4 @@
-export type Surface = 'mission' | 'chart' | 'fleet';
+export type Surface = 'mission' | 'chart' | 'fleet' | 'settings';
 
 interface TabBarProps {
   surface: Surface;
@@ -42,6 +42,33 @@ function FleetGlyph() {
   );
 }
 
+// Eight spokes on the same 0-100 viewBox — a gear reads as settings at 20px
+// where a more literal one would just be mush.
+function SettingsGlyph() {
+  return (
+    <svg viewBox="0 0 100 100" width={20} height={20} aria-hidden="true">
+      <circle cx="50" cy="50" r="20" fill="none" stroke="currentColor" strokeWidth="9" />
+      {Array.from({ length: 8 }, (_, i) => {
+        const a = (i * Math.PI) / 4;
+        const cos = Math.cos(a);
+        const sin = Math.sin(a);
+        return (
+          <line
+            key={i}
+            x1={50 + cos * 30}
+            y1={50 + sin * 30}
+            x2={50 + cos * 44}
+            y2={50 + sin * 44}
+            stroke="currentColor"
+            strokeWidth="9"
+            strokeLinecap="round"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 export function TabBar({ surface, onSelect }: TabBarProps) {
   function cls(id: Surface): string {
     return `tab-bar__button${surface === id ? ' tab-bar__button--active' : ''}`;
@@ -75,6 +102,15 @@ export function TabBar({ surface, onSelect }: TabBarProps) {
       >
         <FleetGlyph />
         <span className="tab-bar__label">Fleet</span>
+      </button>
+      <button
+        type="button"
+        className={cls('settings')}
+        aria-current={surface === 'settings' ? 'page' : undefined}
+        onClick={() => onSelect('settings')}
+      >
+        <SettingsGlyph />
+        <span className="tab-bar__label">Settings</span>
       </button>
     </nav>
   );
