@@ -122,6 +122,22 @@ export interface PlayerShipState {
   equipped: PartId[];
   damage: number;
   upgrades: UpgradeId[];
+  // Iteration 18 ("the fleet remembers") — all optional with fallbacks at
+  // every read, so pre-18 saves (and the many test fixtures that build
+  // ships literally) stay valid without a SAVE_VERSION bump.
+  name?: string; // seeded at commissioning ("ISV Resolute"); falls back to "Frame #N" in labels
+  kills?: number; // enemy ships this hull has destroyed, across the whole run
+  fightsSurvived?: number; // fights this hull came out of alive (wins and withdrawals)
+}
+
+// Iteration 18: run-wide counters for the end-screen summary and the daily
+// share text. Lives on RunState (optional — see PlayerShipState note).
+export interface RunStats {
+  fightsWon: number;
+  fightsWithdrawn: number;
+  shipsLost: string[]; // names, in the order they were lost
+  damageDealt: number; // summed from roll events; arc/prow/rift side-damage undercounted by design
+  damageTaken: number;
 }
 
 // --- Combat log -------------------------------------------------------
@@ -174,13 +190,25 @@ export interface PartEffectEvent {
   text: string;
 }
 
+// Iteration 17: a ship whose initiative beat the fastest surviving opposing
+// ship's by OUTSPEED_GAP or more gets a second, cannons-only activation this
+// round. Structured (side + shipIndex) like `destroyed`, rather than
+// pre-composed text, so the UI resolves the ship's real label the same way
+// it does for rolls and destructions instead of the engine guessing a name.
+export interface OutspeedEvent {
+  kind: 'outspeed';
+  side: Side;
+  shipIndex: number;
+}
+
 export type CombatEvent =
   | DieRollEvent
   | DestroyedEvent
   | PhaseEvent
   | StalemateEvent
   | CardEvent
-  | PartEffectEvent;
+  | PartEffectEvent
+  | OutspeedEvent;
 
 export interface CombatResult {
   winner: Side;
@@ -297,4 +325,10 @@ export interface RunState {
   // node's real reachability instead of the "no retreat" rule that applies
   // to an event's own in-screen ambush choice.
   interceptionActive?: boolean;
+  // Iteration 18: the daily run. All optional — absence means a standard
+  // run (every pre-18 save), and reads fall back accordingly.
+  mode?: 'standard' | 'daily';
+  dailyDate?: string; // the YYYY-MM-DD this daily was generated for
+  shipsCommissioned?: number; // naming counter — ships ever created this run (not fleet size)
+  runStats?: RunStats;
 }

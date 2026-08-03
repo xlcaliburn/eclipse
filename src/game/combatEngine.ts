@@ -6,6 +6,13 @@ import type { CombatEvent, EnemyDef, PartId, ShipStats, Side } from './types';
 
 const MAX_CANNON_ROUNDS = 30;
 
+// Iteration 17 ("Outspeed"): a ship whose effective initiative beats the
+// fastest surviving opposing ship's by this much or more gets one extra
+// cannons-only activation at the end of the round. Exported so every piece
+// of UI copy (badges, the enemy-panel readout) derives the number from here
+// instead of hardcoding "4" — see `qualifiesForOutspeed`.
+export const OUTSPEED_GAP = 4;
+
 export interface CombatShip {
   side: Side;
   index: number; // index within its own side
@@ -145,15 +152,74 @@ function cloneShips(ships: CombatShip[]): CombatShip[] {
   return ships.map((s) => ({ ...s }));
 }
 
-function computeActivationOrder(playerShips: CombatShip[], enemyShips: CombatShip[], initiativeBonus: number): CombatShip[] {
-  const effInit = (s: CombatShip) => s.stats.initiative + (s.side === 'player' ? initiativeBonus : 0);
-  return [...playerShips, ...enemyShips].sort((a, b) => {
-    const ia = effInit(a);
-    const ib = effInit(b);
+// Only the player side ever carries a round-modifier initiative bonus
+// (`injector`'s active) — enemy initiative is always its raw stat.
+function effectiveInitiative(ship: CombatShip, initiativeBonus: number): number {
+  return ship.stats.initiative + (ship.side === 'player' ? initiativeBonus : 0);
+}
+
+// Shared tie-break for both the normal activation order and the outspeed
+// bonus phase: fastest first, player wins ties, then stable by index.
+function byEffectiveInitiative(initiativeBonus: number) {
+  return (a: CombatShip, b: CombatShip) => {
+    const ia = effectiveInitiative(a, initiativeBonus);
+    const ib = effectiveInitiative(b, initiativeBonus);
     if (ib !== ia) return ib - ia;
     if (a.side !== b.side) return a.side === 'player' ? -1 : 1;
     return a.index - b.index;
-  });
+  };
+}
+
+function computeActivationOrder(playerShips: CombatShip[], enemyShips: CombatShip[], initiativeBonus: number): CombatShip[] {
+  return [...playerShips, ...enemyShips].sort(byEffectiveInitiative(initiativeBonus));
+}
+
+// The highest effective initiative among a side's currently-alive ships, or
+// null if none survive. Evading (thrusters) ships still count — they are
+// alive and fast, merely untargetable this round, so they still deny an
+// opponent's outspeed exactly like any other survivor.
+function fastestAliveInitiative(ships: CombatShip[], initiativeBonus: number): number | null {
+  const alive = ships.filter(isAlive);
+  if (alive.length === 0) return null;
+  return Math.max(...alive.map((s) => effectiveInitiative(s, initiativeBonus)));
+}
+
+// Iteration 17: pure, side-agnostic version of the rule for presentation
+// code that only has static numbers (the prep screen, the enemy panel) —
+// no live CombatShip/CombatState available before a fight starts. The real
+// resolution below (`computeOutspeedShips`) is defined in terms of this
+// same check, so the two can never drift apart.
+export function qualifiesForOutspeed(shipInitiative: number, opponentFastestInitiative: number): boolean {
+  return shipInitiative - opponentFastestInitiative >= OUTSPEED_GAP;
+}
+
+// Every surviving ship (either side) whose effective initiative beats the
+// fastest surviving OPPOSING ship's by OUTSPEED_GAP or more, in the order
+// they'll take their bonus activation (fastest first, player wins ties).
+// Called ONCE, at the moment the bonus phase begins (i.e., after the
+// round's normal activations have already resolved) — this is what gives
+// the rule its best emergent read: killing the enemy's last fast escort
+// during the NORMAL round already changes "fastest surviving opposing
+// ship" by the time this runs, unlocking outspeed that same round. The
+// membership list itself is not recomputed again mid-bonus-phase; a ship
+// already on the list simply skips its turn if something upstream (a rift
+// backfire, an earlier bonus activation) killed it first — see the
+// isAlive guard in advanceRound's bonus-phase loop.
+function computeOutspeedShips(playerShips: CombatShip[], enemyShips: CombatShip[], initiativeBonus: number): CombatShip[] {
+  const fastestPlayer = fastestAliveInitiative(playerShips, initiativeBonus);
+  const fastestEnemy = fastestAliveInitiative(enemyShips, initiativeBonus);
+  const qualifying: CombatShip[] = [];
+  if (fastestEnemy !== null) {
+    for (const s of playerShips) {
+      if (isAlive(s) && qualifiesForOutspeed(effectiveInitiative(s, initiativeBonus), fastestEnemy)) qualifying.push(s);
+    }
+  }
+  if (fastestPlayer !== null) {
+    for (const s of enemyShips) {
+      if (isAlive(s) && qualifiesForOutspeed(effectiveInitiative(s, initiativeBonus), fastestPlayer)) qualifying.push(s);
+    }
+  }
+  return qualifying.sort(byEffectiveInitiative(initiativeBonus));
 }
 
 // Mutable, shared across every ship's activation within one missile-phase
@@ -543,6 +609,43 @@ export function advanceRound(state: CombatState): CombatState {
     if (winner) break;
   }
 
+  // Iteration 17 ("Outspeed"): a ≥OUTSPEED_GAP initiative advantage over the
+  // fastest surviving opponent earns one extra, cannons-only activation —
+  // missile phase never qualifies. Evaluated once, right here, after the
+  // round's normal activations have already resolved: killing the enemy's
+  // last fast screen earlier in THIS round already unlocks it this same
+  // round (see computeOutspeedShips). Runs before the stalemate check so a
+  // bonus activation gets the same chance the normal round did to actually
+  // end the fight on round 30, instead of a stalemate being declared with an
+  // available finishing blow left unfired.
+  if (!winner && !isMissilePhase) {
+    const outspeeders = computeOutspeedShips(playerShips, enemyShips, roundModifiers.initiativeBonus);
+    for (const ship of outspeeders) {
+      // A ship with no cannons has nothing to do with a bonus activation
+      // (missiles don't fire in a cannon round) — skip it silently rather
+      // than announcing a "second activation" that fires no dice. Also
+      // re-check isAlive: an earlier bonus activation this same phase (a
+      // rift backfire, an opposing ship's kill) may have already destroyed it.
+      if (!isAlive(ship) || ship.stats.cannons.length === 0) continue;
+      log.push({ kind: 'outspeed', side: ship.side, shipIndex: ship.index });
+      winner = fireShip(
+        ship,
+        'cannon',
+        roundNumber,
+        rng,
+        log,
+        opponentsOf,
+        roundModifiers,
+        armedEffects,
+        flakState,
+        state.targetingStance,
+        state.priorityTargetIndex,
+        checkWinner,
+      );
+      if (winner) break;
+    }
+  }
+
   if (!winner && !isMissilePhase && roundNumber === MAX_CANNON_ROUNDS) {
     log.push({ kind: 'stalemate' });
     winner = 'enemy';
@@ -561,6 +664,22 @@ export function advanceRound(state: CombatState): CombatState {
     priorityTargetIndex: state.priorityTargetIndex,
     log,
     winner: winner ?? undefined,
+  };
+}
+
+// Iteration 17: which ships currently qualify for an Outspeed bonus
+// activation, given the CURRENT live state (including any round-modifier
+// initiative bonus already armed, e.g. the `injector` active) — the exact
+// same computation `advanceRound`'s bonus phase will use, so the combat
+// theater's badge can never show a ship as outspeeding when the engine
+// wouldn't actually grant it the extra activation. Recomputing from live
+// state on every render is intentional: the badge should react instantly
+// when the enemy's last fast ship dies, or when an active gets armed.
+export function outspeedingShipIndices(state: CombatState): { player: number[]; enemy: number[] } {
+  const qualifying = computeOutspeedShips(state.playerShips, state.enemyShips, state.roundModifiers.initiativeBonus);
+  return {
+    player: qualifying.filter((s) => s.side === 'player').map((s) => s.index),
+    enemy: qualifying.filter((s) => s.side === 'enemy').map((s) => s.index),
   };
 }
 

@@ -1,12 +1,17 @@
-import { openingTargetIndex } from '../game/combatEngine';
+import { openingTargetIndex, OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
 import { getEscalation } from '../game/escalations';
-import type { EnemyDef, EnemyGroup, ShipStats } from '../game/types';
+import { playerShipLabel } from '../game/ship';
+import type { EnemyDef, EnemyGroup, PlayerShipState, ShipStats } from '../game/types';
 import { classifyArchetype, EnemySilhouette } from './ShipSilhouette';
 import { StatBar } from './StatBar';
 
 interface EnemyPanelProps {
   enemy: EnemyDef;
   fleetStats?: ShipStats[];
+  // Iteration 17: only needed to NAME which player ships currently qualify
+  // for Outspeed in the readout below — index-matched to fleetStats
+  // (both are derived from the same fleet, in the same order).
+  fleet?: PlayerShipState[];
 }
 
 // Flattened index of the first ship in each group, matching the per-side
@@ -43,7 +48,15 @@ function highestShield(groups: EnemyGroup[]): number {
   return groups.reduce((best, g) => Math.max(best, g.stats.shield), 0);
 }
 
-export function EnemyPanel({ enemy, fleetStats }: EnemyPanelProps) {
+// Iteration 17: the fastest ship in an enemy composition, in raw initiative
+// — the "fastest surviving opposing ship" the Outspeed rule compares
+// against. Static/pre-fight, so this is every group's base stat with no
+// round-modifier bonuses (those only exist mid-combat).
+function fastestInitiative(groups: EnemyGroup[]): number {
+  return groups.reduce((best, g) => Math.max(best, g.stats.initiative), -Infinity);
+}
+
+export function EnemyPanel({ enemy, fleetStats, fleet }: EnemyPanelProps) {
   const enemyShield = highestShield(enemy.groups);
   const requiredComputer = enemyShield + 1;
   const bestComputer = fleetStats ? bestEffectiveComputer(fleetStats) : undefined;
@@ -52,6 +65,23 @@ export function EnemyPanel({ enemy, fleetStats }: EnemyPanelProps) {
   // Raw computer alone doesn't clear the bar — shield pierce is the other
   // tool that does (optics upgrade, the Gauss lance's per-die pierce).
   const pierceRecommended = rawComputer !== undefined && rawComputer < requiredComputer;
+
+  // Iteration 17 ("Outspeed"): both directions, right next to the
+  // computer/shield readout above — the enemy panel is where the player
+  // decides whether to buy drives, so this is where the number belongs.
+  const enemyFastest = fastestInitiative(enemy.groups);
+  const outspeedThreshold = enemyFastest + OUTSPEED_GAP;
+  const qualifyingPlayerShips =
+    fleetStats && fleet
+      ? fleetStats
+          .map((s, i) => (qualifiesForOutspeed(s.initiative, enemyFastest) ? playerShipLabel(fleet, i) : null))
+          .filter((label): label is string => label !== null)
+      : [];
+  const playerFastest = fleetStats ? fleetStats.reduce((best, s) => Math.max(best, s.initiative), -Infinity) : undefined;
+  const enemyGroupsThatOutspeedPlayer =
+    playerFastest !== undefined
+      ? enemy.groups.filter((g) => qualifiesForOutspeed(g.stats.initiative, playerFastest))
+      : [];
 
   // Where the fleet's opening dice land, so the formation can point at it
   // instead of the player having to work it out from the stat blocks.
@@ -102,6 +132,21 @@ export function EnemyPanel({ enemy, fleetStats }: EnemyPanelProps) {
           {bestComputer !== undefined && ` Your best ship: computer ${bestComputer}.`}
         </p>
       )}
+
+      {/* Iteration 17 ("Outspeed"): both directions, so the enemy panel
+          answers "is a drives build worth it here" before the fight, not
+          after. */}
+      <p className="hint">
+        Their fastest ship: init {enemyFastest}. Your ships at init <strong>{outspeedThreshold}+</strong> strike
+        twice each round.
+        {qualifyingPlayerShips.length > 0 && ` ${qualifyingPlayerShips.join(', ')} already outspeed them.`}
+      </p>
+      {enemyGroupsThatOutspeedPlayer.map((group) => (
+        <p key={group.label} className="warning">
+          Their {group.label} (init {group.stats.initiative}) outspeeds your fleet — expect double strikes. Any
+          ship at init <strong>{group.stats.initiative - OUTSPEED_GAP + 1}+</strong> denies it.
+        </p>
+      ))}
 
       {((enemy.appliedEscalations && enemy.appliedEscalations.length > 0) || !!enemy.veterancyBonus) && (
         <div className="enemy-panel__escalations">

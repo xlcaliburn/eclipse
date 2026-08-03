@@ -109,7 +109,9 @@ export function equippedWeaponCount(equippedPartIds: PartId[]): number {
 export function playerShipLabel(fleet: PlayerShipState[], index: number): string {
   const ship = fleet[index];
   if (!ship) return 'your ship';
-  return `${getFrame(ship.frameId).name} #${index + 1}`;
+  // Iteration 18: named ships ("ISV Resolute"). The frame-#N fallback keeps
+  // pre-18 saves (whose ships have no name) rendering exactly as before.
+  return ship.name ?? `${getFrame(ship.frameId).name} #${index + 1}`;
 }
 
 export function hasWeapon(stats: ShipStats): boolean {

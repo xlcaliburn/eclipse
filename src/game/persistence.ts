@@ -27,6 +27,28 @@ import type { RunState } from './types';
 // means already-resolved" assumption baked into `isValidRunState` below.
 export const SAVE_VERSION = 5;
 const SAVE_KEY = 'eclipse.save.v1';
+// Iteration 18: the daily run gets its own slot so it can coexist with a
+// standard run; a small separate record tracks today's attempt + result.
+// (No SAVE_VERSION bump for 18: every new RunState field is optional with
+// read-site fallbacks — the v2 postmortem's hazard was required-at-render
+// fields, which none of these are.)
+const DAILY_SAVE_KEY = 'eclipse.save.daily.v1';
+const DAILY_RECORD_KEY = 'eclipse.daily.v1';
+
+export type SaveSlot = 'standard' | 'daily';
+
+function slotKey(slot: SaveSlot): string {
+  return slot === 'daily' ? DAILY_SAVE_KEY : SAVE_KEY;
+}
+
+// One attempt per date: written (date only) when the daily is started —
+// starting consumes the attempt — and finalized with outcome + share text
+// when the run ends or is abandoned.
+export interface DailyRecord {
+  date: string; // YYYY-MM-DD
+  outcome?: 'victory' | 'defeat' | 'abandoned';
+  shareText?: string;
+}
 
 interface SaveEnvelope {
   version: number;
@@ -56,11 +78,15 @@ function defaultStorage(): StorageLike | null {
 // mode) means the run simply proceeds save-less. Returns whether the save
 // actually happened, so the caller can show a one-line "saving unavailable"
 // banner the first time it fails.
-export function saveRun(state: RunState, storage: StorageLike | null = defaultStorage()): boolean {
+export function saveRun(
+  state: RunState,
+  storage: StorageLike | null = defaultStorage(),
+  slot: SaveSlot = 'standard',
+): boolean {
   if (!storage) return false;
   try {
     const envelope: SaveEnvelope = { version: SAVE_VERSION, state };
-    storage.setItem(SAVE_KEY, JSON.stringify(envelope));
+    storage.setItem(slotKey(slot), JSON.stringify(envelope));
     return true;
   } catch {
     return false;
@@ -106,10 +132,13 @@ function isValidRunState(state: RunState): boolean {
 // Never throws. Returns null on: no storage, no save, corrupt JSON, a
 // version mismatch, or a structurally invalid state — every one of those
 // cases means "act as if there is no save" (offer only New run).
-export function loadRun(storage: StorageLike | null = defaultStorage()): RunState | null {
+export function loadRun(
+  storage: StorageLike | null = defaultStorage(),
+  slot: SaveSlot = 'standard',
+): RunState | null {
   if (!storage) return null;
   try {
-    const raw = storage.getItem(SAVE_KEY);
+    const raw = storage.getItem(slotKey(slot));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SaveEnvelope>;
     if (parsed.version !== SAVE_VERSION || !parsed.state) return null;
@@ -120,11 +149,36 @@ export function loadRun(storage: StorageLike | null = defaultStorage()): RunStat
   }
 }
 
-export function clearRun(storage: StorageLike | null = defaultStorage()): void {
+export function clearRun(storage: StorageLike | null = defaultStorage(), slot: SaveSlot = 'standard'): void {
   if (!storage) return;
   try {
-    storage.removeItem(SAVE_KEY);
+    storage.removeItem(slotKey(slot));
   } catch {
     // fail soft
+  }
+}
+
+// --- The daily attempt record (iteration 18) -------------------------------
+
+export function saveDailyRecord(record: DailyRecord, storage: StorageLike | null = defaultStorage()): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(DAILY_RECORD_KEY, JSON.stringify(record));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadDailyRecord(storage: StorageLike | null = defaultStorage()): DailyRecord | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(DAILY_RECORD_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<DailyRecord>;
+    if (typeof parsed.date !== 'string') return null;
+    return parsed as DailyRecord;
+  } catch {
+    return null;
   }
 }

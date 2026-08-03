@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { initCombat, runToEnd } from './combatEngine';
 import { GAUNTLET } from './enemies';
 import { initialRunState, runReducer } from './reducer';
-import { clearRun, loadRun, saveRun, SAVE_VERSION } from './persistence';
+import { clearRun, loadDailyRecord, loadRun, saveDailyRecord, saveRun, SAVE_VERSION } from './persistence';
 import type { StorageLike } from './persistence';
 import type { RunState } from './types';
 
@@ -226,5 +226,40 @@ describe('save / load roundtrip (iteration 9.2)', () => {
     const a = runReducer(state, { type: 'AUTO_RESOLVE' });
     const b = runReducer(reloaded, { type: 'AUTO_RESOLVE' });
     expect(a).toEqual(b);
+  });
+});
+
+describe('save slots + the daily record (iteration 18)', () => {
+  it('the daily slot is fully independent of the standard slot', () => {
+    const storage = fakeStorage();
+    const standard = initialRunState({ seed: 1 });
+    const daily = initialRunState({ seed: 2, mode: 'daily', dailyDate: '2026-08-03' });
+
+    expect(saveRun(standard, storage)).toBe(true);
+    expect(saveRun(daily, storage, 'daily')).toBe(true);
+    expect(loadRun(storage)).toEqual(standard);
+    expect(loadRun(storage, 'daily')).toEqual(daily);
+
+    clearRun(storage); // standard only
+    expect(loadRun(storage)).toBeNull();
+    expect(loadRun(storage, 'daily')).toEqual(daily);
+
+    clearRun(storage, 'daily');
+    expect(loadRun(storage, 'daily')).toBeNull();
+  });
+
+  it('the daily record roundtrips, and garbage comes back null', () => {
+    const storage = fakeStorage();
+    expect(loadDailyRecord(storage)).toBeNull();
+    expect(
+      saveDailyRecord({ date: '2026-08-03', outcome: 'defeat', shareText: 'Eclipse Daily — 2026-08-03' }, storage),
+    ).toBe(true);
+    expect(loadDailyRecord(storage)).toEqual({
+      date: '2026-08-03',
+      outcome: 'defeat',
+      shareText: 'Eclipse Daily — 2026-08-03',
+    });
+    storage.setItem('eclipse.daily.v1', '{not json');
+    expect(loadDailyRecord(storage)).toBeNull();
   });
 });

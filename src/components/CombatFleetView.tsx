@@ -42,6 +42,12 @@ interface CombatFleetViewProps {
   // target (click again to clear). Set only during a live fight.
   onSelectEnemy?: (index: number) => void;
   priorityTargetIndex?: number | null;
+  // Iteration 17: ships (by side) currently qualifying for an Outspeed
+  // bonus activation — same computation the engine itself uses, so this
+  // can never show a badge the fight wouldn't actually honor. The exact
+  // numbers live in the enemy panel's readout; the card badge just marks
+  // "this ship gets a second activation this round."
+  outspeedingIndices?: { player: number[]; enemy: number[] };
 }
 
 function shipCard(
@@ -59,6 +65,7 @@ function shipCard(
   pendingDamage = 0,
   destructionPending = false,
   badge?: CardBadge,
+  isOutspeeding = false,
 ) {
   // Show the fight as of the revealed point in the replay, not the end of
   // the round: damage that has not been shown yet is rolled back, and a hull
@@ -77,7 +84,7 @@ function shipCard(
     <div
       key={label}
       ref={onShipEl ? (el) => onShipEl(side, index, el) : undefined}
-      className={`combat-ship${destroyed ? ' combat-ship--destroyed' : ''}${highlight}${clickable ? ' combat-ship--clickable' : ''}${isPriority ? ' combat-ship--priority' : ''}`}
+      className={`combat-ship${destroyed ? ' combat-ship--destroyed' : ''}${highlight}${clickable ? ' combat-ship--clickable' : ''}${isPriority ? ' combat-ship--priority' : ''}${isOutspeeding && !destroyed ? ` combat-ship--outspeeding combat-ship--outspeeding-${side}` : ''}`}
       onClick={clickable ? () => onSelectEnemy!(index) : undefined}
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
@@ -101,6 +108,19 @@ function shipCard(
       <div className="combat-ship__body">
         <div className="combat-ship__name">
           {isPriority && <span className="combat-ship__priority-mark" aria-label="priority target">◎ </span>}
+          {isOutspeeding && !destroyed && (
+            <span
+              className="combat-ship__outspeed-mark"
+              aria-label="outspeeding — second activation this round"
+              title={
+                side === 'player'
+                  ? 'Outspeeds the enemy fleet — fires a second cannon activation this round.'
+                  : 'Outspeeds your fleet — fires a second cannon activation this round.'
+              }
+            >
+              ⚡×2{' '}
+            </span>
+          )}
           {label}
         </div>
         {destroyed ? (
@@ -141,6 +161,7 @@ export function CombatFleetView({
   onShipEl,
   onSelectEnemy,
   priorityTargetIndex,
+  outspeedingIndices,
 }: CombatFleetViewProps) {
   return (
     <div className="combat-fleets">
@@ -161,6 +182,7 @@ export function CombatFleetView({
             pendingDamage?.get(`player:${i}`) ?? 0,
             pendingDestroyed?.has(`player:${i}`) ?? false,
             cardBadges?.[`player:${i}`],
+            outspeedingIndices?.player.includes(i) ?? false,
           ),
         )}
       </div>
@@ -181,6 +203,7 @@ export function CombatFleetView({
             pendingDamage?.get(`enemy:${i}`) ?? 0,
             pendingDestroyed?.has(`enemy:${i}`) ?? false,
             cardBadges?.[`enemy:${i}`],
+            outspeedingIndices?.enemy.includes(i) ?? false,
           ),
         )}
       </div>

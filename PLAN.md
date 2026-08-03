@@ -45,6 +45,8 @@ Rules for working with these files:
 | [14](plans/iteration-14.md) | Events that read the run: multi-option framework, build-gated (shown-locked) choices, chosen costs, defector multi-stage chain, 3 new events | implemented |
 | [15](plans/iteration-15.md) | Routing under pressure: cargo-typed combat nodes, deterministic heat/pursuit track, repair-or-overhaul yards | implemented |
 | [16](plans/iteration-16.md) | Mobile shell: Mission/Chart/Fleet bottom tabs, touch polish, installable offline PWA | implemented |
+| [17](plans/iteration-17.md) | Outspeed: a ≥4 initiative gap over the enemy's fastest survivor grants one extra cannon activation — initiative becomes a build-around (supersedes iteration 11's unbuilt evasion) | implemented |
+| [18](plans/iteration-18.md) | The daily run (seeded one-attempt challenge + share text) & the fleet remembers (named ships, kill records, run summary) | implemented |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes

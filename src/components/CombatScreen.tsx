@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { canPlayCard, canUseActive } from '../game/combatEngine';
+import { canPlayCard, canUseActive, outspeedingShipIndices } from '../game/combatEngine';
 import type { CombatState } from '../game/combatEngine';
 import { getCard } from '../game/cards';
 import type { CardId } from '../game/cards';
@@ -91,6 +91,9 @@ function eventClassName(event: CombatEvent): string {
   if (event.kind === 'card' || event.kind === 'part-effect') {
     return 'combat-log__line combat-log__line--card';
   }
+  if (event.kind === 'outspeed') {
+    return event.side === 'player' ? 'combat-log__line combat-log__line--good' : 'combat-log__line combat-log__line--bad';
+  }
   return 'combat-log__line combat-log__line--bad';
 }
 
@@ -110,6 +113,11 @@ function describeEvent(event: CombatEvent, enemy: EnemyDef, playerLabels: string
     case 'destroyed': {
       const label = shipLabel(event.side, event.shipIndex, enemy, playerLabels);
       return `${label} is destroyed.`;
+    }
+    case 'outspeed': {
+      const label = shipLabel(event.side, event.shipIndex, enemy, playerLabels);
+      const opposing = event.side === 'player' ? 'the enemy fleet' : 'your fleet';
+      return `${label} outspeeds ${opposing} — second activation.`;
     }
     case 'stalemate':
       return 'Combat drags on for 30 rounds with no resolution — the enemy is declared the winner.';
@@ -148,6 +156,11 @@ export function CombatScreen({
     combat.enemyShips.some((s) => s.index === combat.priorityTargetIndex && s.stats.hp - s.damage > 0)
       ? combat.priorityTargetIndex
       : null;
+
+  // Iteration 17: which ships qualify for a bonus activation RIGHT NOW —
+  // recomputed on every render from live state, so the badge reacts the
+  // instant an active gets armed or an opposing fast ship dies.
+  const outspeeding = outspeedingShipIndices(combat);
 
   // Every active part any player ship carries, identified by (shipIndex,
   // abilityIndex) — the same pair `canUseActive`/`onUseActive` key off of.
@@ -345,6 +358,12 @@ export function CombatScreen({
       if (!(event.kind === 'part-effect' && event.text.includes('jinks'))) {
         push({ kind: 'banner', text: event.text }, 1500);
       }
+    } else if (event.kind === 'outspeed') {
+      // Iteration 17: a top banner, same wording as the log line — this is
+      // a whole-fight moment (a ship earning a second activation), not
+      // something that belongs on just one card the way a dodge does.
+      const text = describeEvent(event, enemy, playerLabels);
+      if (text) push({ kind: 'banner', text }, 1600);
     }
 
     if (spawned.length > 0) setFx((all) => [...all, ...spawned]);
@@ -401,8 +420,17 @@ export function CombatScreen({
     if (list) list.scrollTop = list.scrollHeight;
   }, [revealedCount]);
 
+  // Mobile only (the toggle is display:none above the breakpoint): the pinned
+  // dock costs ~300px of a phone screen, which is worth it while you're
+  // choosing a card and dead weight while you're reading the theater.
+  const [handCollapsed, setHandCollapsed] = useState(false);
+  // The dock unmounts entirely once the fight resolves — cards can't be played
+  // against a decided combat. The screen's padding reservation has to follow it
+  // out, or the layout keeps holding ~300px open for a bar that isn't there.
+  const dockState = finished ? 'none' : handCollapsed ? 'collapsed' : 'open';
+
   return (
-    <div className="combat-screen">
+    <div className={`combat-screen${dockState === 'none' ? '' : ` combat-screen--dock-${dockState}`}`}>
       {finished && (
         <h2 className={won ? 'verdict verdict--win' : 'verdict verdict--loss'}>{won ? 'Victory' : 'Defeat'}</h2>
       )}
@@ -435,6 +463,7 @@ export function CombatScreen({
           onShipEl={registerShipEl}
           onSelectEnemy={!finished && !isReplaying ? onSelectEnemy : undefined}
           priorityTargetIndex={effectivePriority}
+          outspeedingIndices={outspeeding}
         />
       </div>
       {!finished && (
@@ -497,8 +526,18 @@ export function CombatScreen({
       {/* Iteration: pinned to the bottom of the viewport on mobile (see
           .combat-command-bar's ≤720px rule) so the hand/actives stay
           reachable without scrolling past the log. */}
-      <div className="combat-command-bar">
       {!finished && (
+      <div className={`combat-command-bar${handCollapsed ? ' combat-command-bar--collapsed' : ''}`}>
+      <button
+        type="button"
+        className="combat-command-bar__toggle"
+        aria-expanded={!handCollapsed}
+        aria-controls="combat-command-bar-body"
+        onClick={() => setHandCollapsed((v) => !v)}
+      >
+        {handCollapsed ? `Show hand (${hand.length + activeAbilities.length})` : 'Hide hand'}
+      </button>
+      <div className="combat-command-bar__body" id="combat-command-bar-body">
         <div className="combat-hand">
           <h3>Your hand</h3>
           {hand.length === 0 ? (
@@ -526,9 +565,7 @@ export function CombatScreen({
             </div>
           )}
         </div>
-      )}
 
-      {!finished && (
         <div className="combat-hand">
           <h3>Ship actives</h3>
           {activeAbilities.length === 0 ? (
@@ -560,8 +597,9 @@ export function CombatScreen({
             </div>
           )}
         </div>
-      )}
       </div>
+      </div>
+      )}
       {!finished && !canWithdraw && (
         <p className="hint">No line of retreat here — this fight must be finished.</p>
       )}

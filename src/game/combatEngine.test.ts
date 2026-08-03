@@ -8,6 +8,9 @@ import {
   hasMissilePhase,
   initCombat,
   openingTargetIndex,
+  OUTSPEED_GAP,
+  outspeedingShipIndices,
+  qualifiesForOutspeed,
   runToEnd,
   setPriorityTarget,
   unconsumedContingentCards,
@@ -97,10 +100,15 @@ describe('cards (iteration 7: pool trimmed to {bulkheads, volley})', () => {
     // A single die per activation (not several), so the very first lethal
     // hit is the only thing that can trigger — and trigger it must, since a
     // computer of 10 hits on anything but a natural 1.
+    // initiative 3 (not more) — enough to guarantee the enemy activates
+    // before the player every round, but under the iteration-17 Outspeed
+    // gap (4) so the enemy doesn't also get a same-round bonus activation
+    // that would land a second, unprotected hit right after bulkheads
+    // saves the ship at 1 HP.
     const fleet = [{ stats: blankStats({ hp: 2 }), initialDamage: 0 }];
     const foe = enemy(
       {},
-      { initiative: 5, hp: 5, computer: 10, cannons: [{ diceCount: 1, damage: 5 }] },
+      { initiative: 3, hp: 5, computer: 10, cannons: [{ diceCount: 1, damage: 5 }] },
     );
     let state = initCombat(fleet, foe, 9);
     state = armBulkheads(state);
@@ -147,8 +155,12 @@ describe('cards (iteration 7: pool trimmed to {bulkheads, volley})', () => {
   });
 
   it('volley doubles every player cannon die for exactly one round', () => {
+    // No initiative gap here (both sides default to 0) — firing order isn't
+    // the point, and iteration 17's Outspeed rule would otherwise grant a
+    // same-round bonus activation on any gap of 4+, doubling the roll count
+    // this test is asserting on.
     const fleet = [
-      { stats: blankStats({ initiative: 5, computer: 10, hp: 5, cannons: [{ diceCount: 2, damage: 1 }] }), initialDamage: 0 },
+      { stats: blankStats({ computer: 10, hp: 5, cannons: [{ diceCount: 2, damage: 1 }] }), initialDamage: 0 },
     ];
     const foe = enemy({}, { hp: 20 });
     let state = initCombat(fleet, foe, 1);
@@ -429,7 +441,10 @@ describe('taunt (iteration 5)', () => {
       { stats: blankStats({ hp: 1, taunt: true }), initialDamage: 0 }, // taunter, dies to first hit
       { stats: blankStats({ hp: 5 }), initialDamage: 0 },
     ];
-    const foe = enemy({}, { initiative: 5, hp: 5, computer: 10, cannons: [{ diceCount: 2, damage: 1 }] });
+    // initiative 3, not more: under the iteration-17 Outspeed gap (4), so
+    // this stays a plain "enemy acts first" setup rather than also granting
+    // a same-round bonus activation that would add extra roll events.
+    const foe = enemy({}, { initiative: 3, hp: 5, computer: 10, cannons: [{ diceCount: 2, damage: 1 }] });
     let state = initCombat(fleet, foe, 1);
     state = advanceRound(state); // missile
     state = advanceRound(state); // cannon round 1
@@ -445,8 +460,10 @@ describe('reactive armor (iteration 5)', () => {
   it('negates the first hit per round; a second hit in the same round lands normally', () => {
     const fleet = [{ stats: blankStats({ hp: 10, reactiveArmor: 1 }), initialDamage: 0 }];
     // Two enemy ships, each with 1 die — both activate within the same
-    // cannon round, giving exactly 2 hit attempts in round 1.
-    const foe = enemy({ count: 2 }, { initiative: 5, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 2 }] });
+    // cannon round, giving exactly 2 hit attempts in round 1. initiative 3
+    // (under the iteration-17 Outspeed gap of 4) so the enemy doesn't also
+    // earn a same-round bonus activation on top of its two normal dice.
+    const foe = enemy({ count: 2 }, { initiative: 3, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 2 }] });
     let state = initCombat(fleet, foe, 2); // seed chosen so both enemy dice land (comp 10 can still miss on a nat 1)
     state = advanceRound(state); // missile
     state = advanceRound(state); // cannon round 1
@@ -458,7 +475,8 @@ describe('reactive armor (iteration 5)', () => {
 
   it('stacks: N armors negate the first N hits per round', () => {
     const fleet = [{ stats: blankStats({ hp: 10, reactiveArmor: 2 }), initialDamage: 0 }];
-    const foe = enemy({ count: 3 }, { initiative: 5, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 2 }] });
+    // initiative 3 — see the note in the test above.
+    const foe = enemy({ count: 3 }, { initiative: 3, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 2 }] });
     let state = initCombat(fleet, foe, 2);
     state = advanceRound(state);
     state = advanceRound(state);
@@ -767,7 +785,9 @@ describe('enemy-side flak, lance, and rift (iteration 8: act-2 roster tech, symm
 describe('Jink (iteration 8, addendum A.1: innate to the Interceptor frame)', () => {
   it('the first hit against a jink-enabled ship misses instead, once per combat', () => {
     const fleet = [{ stats: blankStats({ hp: 20, jink: true }), initialDamage: 0 }];
-    const foe = enemy({ count: 2 }, { initiative: 5, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 5 }] });
+    // initiative 3 (under the iteration-17 Outspeed gap of 4) — the enemy
+    // just needs to act before the player, not also earn a bonus activation.
+    const foe = enemy({ count: 2 }, { initiative: 3, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 5 }] });
     let state = initCombat(fleet, foe, 2); // seed chosen so both enemy dice land
     state = advanceRound(state); // missile
     state = advanceRound(state); // cannon round 1 — 2 hit attempts this round
@@ -779,7 +799,8 @@ describe('Jink (iteration 8, addendum A.1: innate to the Interceptor frame)', ()
 
   it('is consumed before reactive armor gets a chance', () => {
     const fleet = [{ stats: blankStats({ hp: 20, jink: true, reactiveArmor: 1 }), initialDamage: 0 }];
-    const foe = enemy({ count: 2 }, { initiative: 5, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 5 }] });
+    // initiative 3 — see the note in the test above.
+    const foe = enemy({ count: 2 }, { initiative: 3, computer: 10, hp: 5, cannons: [{ diceCount: 1, damage: 5 }] });
     let state = initCombat(fleet, foe, 2);
     state = advanceRound(state); // missile
     state = advanceRound(state); // cannon round 1 — 2 hit attempts: jink eats #1, reactive armor eats #2
@@ -915,9 +936,13 @@ describe('openingTargetIndex', () => {
 describe('mixed enemy formations (iteration 9.3)', () => {
   it('each sub-group activates at its own initiative, via the existing activation machinery', () => {
     const fleet = [{ stats: blankStats({ initiative: -1, hp: 20 }), initialDamage: 0 }]; // never fires first
+    // "fast" at initiative 2, not more: still fires before "slow" (0) and the
+    // player (-1), but the fast-vs-player gap (3) stays under the
+    // iteration-17 Outspeed threshold (4) so this stays a plain
+    // activation-order test, not an accidental bonus-activation one.
     const foe = enemy({
       groups: [
-        { label: 'fast', count: 1, stats: blankStats({ initiative: 5, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] }) },
+        { label: 'fast', count: 1, stats: blankStats({ initiative: 2, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] }) },
         { label: 'slow', count: 1, stats: blankStats({ initiative: 0, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] }) },
       ],
     });
@@ -1088,5 +1113,296 @@ describe('targeting doctrine (iteration 9.4)', () => {
     });
     const state = initCombat(fleet, foe, 1);
     expect(state.targetingStance).toBe('weakest');
+  });
+});
+
+describe('Outspeed (iteration 17)', () => {
+  it('qualifiesForOutspeed: exactly the gap-4 threshold, not one under', () => {
+    expect(qualifiesForOutspeed(4, 0)).toBe(true);
+    expect(qualifiesForOutspeed(3, 0)).toBe(false);
+    expect(qualifiesForOutspeed(0 + OUTSPEED_GAP, 0)).toBe(true);
+  });
+
+  it('a gap of exactly 4 grants exactly one extra cannon activation; gap 3 grants none; gap 99 still grants exactly one', () => {
+    const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }); // initiative 0
+
+    // Gap 3 — no bonus activation.
+    const fleetGap3 = [{ stats: blankStats({ initiative: 3, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    let stateGap3 = initCombat(fleetGap3, foe, 1);
+    stateGap3 = advanceRound(stateGap3); // missile (no-op)
+    stateGap3 = advanceRound(stateGap3); // cannon round 1
+    const rollsGap3 = stateGap3.log.filter((e) => e.kind === 'roll' && e.side === 'player');
+    expect(rollsGap3).toHaveLength(1);
+    expect(stateGap3.log.some((e) => e.kind === 'outspeed')).toBe(false);
+
+    // Gap 4 — exactly one bonus activation (2 total rolls).
+    const fleetGap4 = [{ stats: blankStats({ initiative: 4, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    let stateGap4 = initCombat(fleetGap4, foe, 1);
+    stateGap4 = advanceRound(stateGap4);
+    stateGap4 = advanceRound(stateGap4);
+    const rollsGap4 = stateGap4.log.filter((e) => e.kind === 'roll' && e.side === 'player');
+    expect(rollsGap4).toHaveLength(2);
+    expect(stateGap4.log.filter((e) => e.kind === 'outspeed')).toHaveLength(1);
+
+    // Gap 99 — still capped at exactly one bonus activation, not more.
+    const fleetGap99 = [{ stats: blankStats({ initiative: 99, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    let stateGap99 = initCombat(fleetGap99, foe, 1);
+    stateGap99 = advanceRound(stateGap99);
+    stateGap99 = advanceRound(stateGap99);
+    const rollsGap99 = stateGap99.log.filter((e) => e.kind === 'roll' && e.side === 'player');
+    expect(rollsGap99).toHaveLength(2);
+    expect(stateGap99.log.filter((e) => e.kind === 'outspeed')).toHaveLength(1);
+  });
+
+  it('the missile phase never grants a bonus activation, even at gap 99', () => {
+    const fleet = [
+      {
+        stats: blankStats({
+          initiative: 99,
+          hp: 50,
+          missiles: [{ diceCount: 1, damage: 1 }],
+          cannons: [{ diceCount: 1, damage: 1 }],
+        }),
+        initialDamage: 0,
+      },
+    ];
+    const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }); // initiative 0
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile phase (round 0)
+
+    const missileRolls = state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile' && e.side === 'player');
+    expect(missileRolls).toHaveLength(1); // not doubled
+    expect(state.log.some((e) => e.kind === 'outspeed')).toBe(false);
+
+    state = advanceRound(state); // cannon round 1 — the same gap DOES apply here
+    const cannonRolls = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 1 && e.side === 'player');
+    expect(cannonRolls).toHaveLength(2);
+    expect(state.log.some((e) => e.kind === 'outspeed')).toBe(true);
+  });
+
+  it('mid-round unlock: killing the enemy\'s only fast ship during a round grants outspeed that same round', () => {
+    const fleet = [
+      { stats: blankStats({ initiative: 4, hp: 20, computer: 10, cannons: [{ diceCount: 3, damage: 5 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({
+      groups: [
+        // Alive, this "fast" escort's initiative (3) keeps the player's gap
+        // at 1 — no outspeed. It dies to a single hit (hp 1), and the
+        // player's 3 dice (comp 10, greedy-lowest-HP) reliably kill it in
+        // its own first activation.
+        { label: 'fast', count: 1, stats: blankStats({ initiative: 3, hp: 1 }) },
+        // Once "fast" is the only casualty, "slow" (init 0) becomes the
+        // fastest surviving enemy — gap 4, exactly the threshold.
+        { label: 'slow', count: 1, stats: blankStats({ initiative: 0, hp: 20 }) },
+      ],
+    });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile (no-op, no missiles either side)
+
+    let sawSameRoundUnlock = false;
+    let guard = 0;
+    while (!state.winner && guard < 30) {
+      const before = state.log.length;
+      state = advanceRound(state);
+      const roundLog = state.log.slice(before);
+      const fastDied = roundLog.some((e) => e.kind === 'destroyed' && e.side === 'enemy' && e.shipIndex === 0);
+      if (fastDied) {
+        sawSameRoundUnlock = roundLog.some((e) => e.kind === 'outspeed' && e.side === 'player');
+        break;
+      }
+      guard++;
+    }
+    expect(sawSameRoundUnlock).toBe(true);
+  });
+
+  it('an evading ship still counts toward "fastest alive" and denies the opposing side outspeed', () => {
+    // If evading ships did NOT count, "fastest player alive" would drop to
+    // ship0's initiative (1) once ship1 evades, and the enemy's gap (5-1=4)
+    // would newly qualify. Evading ships DO count, so the enemy's gap stays
+    // 5-3=2 — denied, exactly as the design requires.
+    const fleet = [
+      { stats: blankStats({ initiative: 1, hp: 10, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+      { stats: blankStats({ initiative: 3, hp: 10, actives: ['thrusters'] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { initiative: 5, hp: 50, computer: 10, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile (no-op)
+    state = useActive(state, 1, 0); // arm thrusters for ship1 — evades cannon round 1
+    state = advanceRound(state); // cannon round 1
+
+    expect(state.log.some((e) => e.kind === 'outspeed' && e.side === 'enemy')).toBe(false);
+  });
+
+  it('the injector active grants outspeed for exactly the round it is armed', () => {
+    const fleet = [
+      {
+        stats: blankStats({ hp: 20, cannons: [{ diceCount: 1, damage: 1 }], actives: ['injector'] }),
+        initialDamage: 0,
+      },
+    ];
+    const foe = enemy({}, { hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }); // both sides initiative 0
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile (no-op)
+    state = useActive(state, 0, 0); // arm injector for the next round
+
+    const beforeRound1 = state.log.length;
+    state = advanceRound(state); // cannon round 1 — +99 initiative active this round only
+    expect(state.log.slice(beforeRound1).some((e) => e.kind === 'outspeed' && e.side === 'player')).toBe(true);
+
+    const beforeRound2 = state.log.length;
+    state = advanceRound(state); // cannon round 2 — injector already spent, roundModifiers reset
+    expect(state.log.slice(beforeRound2).some((e) => e.kind === 'outspeed')).toBe(false);
+  });
+
+  it('symmetric: an init-4 enemy outspeeds an all-init-0 player fleet; one init-1 player ship denies it', () => {
+    const foe = enemy({}, { initiative: 4, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] });
+
+    const fleetAllSlow = [{ stats: blankStats({ hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    let stateA = initCombat(fleetAllSlow, foe, 1);
+    stateA = advanceRound(stateA); // missile
+    stateA = advanceRound(stateA); // cannon round 1
+    expect(stateA.log.some((e) => e.kind === 'outspeed' && e.side === 'enemy')).toBe(true);
+
+    const fleetWithFastEscort = [
+      { stats: blankStats({ hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+      { stats: blankStats({ initiative: 1, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    let stateB = initCombat(fleetWithFastEscort, foe, 1);
+    stateB = advanceRound(stateB);
+    stateB = advanceRound(stateB);
+    expect(stateB.log.some((e) => e.kind === 'outspeed' && e.side === 'enemy')).toBe(false);
+  });
+
+  it('bonus-phase order: multiple qualifying ships fire fastest-first', () => {
+    // Two player ships both clear the gap against a slow (init 0) enemy —
+    // ship1 (init 6) should take its bonus activation before ship0 (init 5).
+    // (A genuine cross-side tie in this list is mathematically unreachable:
+    // whichever ship sets its own side's "fastest alive" cannot itself gap
+    // that same value by 4+ against the other side, so "player wins ties"
+    // — inherited from the shared `computeActivationOrder` comparator — is
+    // only exercisable for the normal activation order, not this list.)
+    const fleet = [
+      { stats: blankStats({ initiative: 5, hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+      { stats: blankStats({ initiative: 6, hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }); // initiative 0
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1
+
+    const outspeedEvents = state.log.filter((e) => e.kind === 'outspeed') as { side: string; shipIndex: number }[];
+    expect(outspeedEvents.map((e) => e.shipIndex)).toEqual([1, 0]);
+  });
+
+  it('volley also doubles a bonus activation\'s cannon dice', () => {
+    const fleet = [{ stats: blankStats({ initiative: 10, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }); // initiative 0, gap 10 qualifies
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile
+    state = applyVolley(state);
+    state = advanceRound(state); // cannon round 1: (1 die x2 volley) normal + (1 die x2 volley) bonus = 4
+
+    const playerRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'cannon' && e.round === 1);
+    expect(playerRolls).toHaveLength(4);
+  });
+
+  it('a rift-cannon backfire during the bonus activation can destroy the firer', () => {
+    // No brute-forced single seed here (the outcome only needs SOME seed
+    // where the backfire lands on the bonus, not the normal, activation) —
+    // sweep a range and stop at the first match. The player's gap (10) is
+    // fixed every round it survives, so the bonus phase fires every round.
+    let found = false;
+    for (let seed = 1; seed <= 50 && !found; seed++) {
+      const fleet = [
+        {
+          stats: blankStats({
+            initiative: 10,
+            hp: 1,
+            cannons: [{ diceCount: 1, damage: 3, selfDamageOnNatOne: 5 }],
+          }),
+          initialDamage: 0,
+        },
+      ];
+      // Harmless enemy cannon (0 damage) — the player can only die to its
+      // own rift backfire, never to enemy fire, keeping the "was it the
+      // bonus activation" check unambiguous.
+      const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 0 }] });
+      let state = initCombat(fleet, foe, seed);
+      state = advanceRound(state); // missile
+      let guard = 0;
+      while (!state.winner && guard < 30) {
+        const before = state.log.length;
+        state = advanceRound(state);
+        const roundLog = state.log.slice(before);
+        const outspeedIdx = roundLog.findIndex((e) => e.kind === 'outspeed');
+        const destroyedIdx = roundLog.findIndex((e) => e.kind === 'destroyed' && e.side === 'player');
+        if (outspeedIdx !== -1 && destroyedIdx !== -1 && destroyedIdx > outspeedIdx) {
+          found = true;
+          break;
+        }
+        guard++;
+      }
+    }
+    expect(found).toBe(true);
+  });
+
+  it('priority target applies to the bonus activation the same as a normal one', () => {
+    const fleet = [{ stats: blankStats({ initiative: 10, hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({
+      groups: [
+        { label: 'tough', count: 1, stats: blankStats({ hp: 5 }) },
+        { label: 'fragile', count: 1, stats: blankStats({ hp: 1 }) },
+      ],
+    }); // both initiative 0, gap 10 qualifies
+    let state = initCombat(fleet, foe, 1, 'weakest'); // stance alone would pick 'fragile' (index 1)
+    state = setPriorityTarget(state, 0); // force 'tough' (index 0) instead
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1: normal + bonus, both should honor priority
+
+    const playerRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player') as { targetIndex: number }[];
+    expect(playerRolls.length).toBeGreaterThanOrEqual(2);
+    expect(playerRolls.every((r) => r.targetIndex === 0)).toBe(true);
+  });
+
+  it('outspeedingShipIndices matches what advanceRound actually grants, live (incl. after injector arms)', () => {
+    const fleet = [
+      {
+        stats: blankStats({ hp: 20, cannons: [{ diceCount: 1, damage: 1 }], actives: ['injector'] }),
+        initialDamage: 0,
+      },
+    ];
+    const foe = enemy({}, { hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }); // initiative 0
+    let state = initCombat(fleet, foe, 1);
+    expect(outspeedingShipIndices(state)).toEqual({ player: [], enemy: [] });
+
+    state = useActive(state, 0, 0); // arm injector — badge should react immediately, before the round even resolves
+    expect(outspeedingShipIndices(state)).toEqual({ player: [0], enemy: [] });
+  });
+
+  it('stepping round-by-round through an outspeed-heavy fight is bit-identical to running it to completion', () => {
+    const fleet = [
+      { stats: blankStats({ initiative: 8, hp: 12, computer: 2, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+      { stats: blankStats({ initiative: 1, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 1 },
+    ];
+    const foe = enemy(
+      { count: 2 },
+      { initiative: 0, hp: 4, computer: 1, cannons: [{ diceCount: 1, damage: 1 }] },
+    );
+
+    const seed = 17;
+    const oneShot = runToEnd(initCombat(fleet, foe, seed));
+
+    let stepped = initCombat(fleet, foe, seed);
+    let guard = 0;
+    while (!stepped.winner && guard < 100) {
+      stepped = advanceRound(stepped);
+      guard++;
+    }
+
+    expect(stepped.winner).toBe(oneShot.winner);
+    expect(JSON.stringify(stepped.log)).toBe(JSON.stringify(oneShot.log));
+    // Confirm this scenario actually exercised the new rule — an
+    // equivalence test that never triggers outspeed wouldn't prove much.
+    expect(oneShot.log.some((e) => e.kind === 'outspeed')).toBe(true);
   });
 });

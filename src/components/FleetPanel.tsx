@@ -1,3 +1,5 @@
+import { qualifiesForOutspeed } from '../game/combatEngine';
+import { getFrame } from '../game/frames';
 import { CARGO_POD_PART_ID, getPart } from '../game/parts';
 import { deriveStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
@@ -18,6 +20,11 @@ interface FleetPanelProps {
   onMoveCargoPod?: (toShipIndex: number) => void;
   onScuttle?: (shipIndex: number) => void; // shop only — decommissions a non-Flagship ship (iteration 8)
   onPartHover?: (partId: PartId | null) => void; // prep only — feeds the forecast delta preview (iteration 12.3)
+  // Iteration 17: the CURRENT enemy's fastest raw initiative, so each ship
+  // card can show a static "would outspeed them" badge before the fight
+  // starts. Undefined in contexts with no committed enemy (the shop) — no
+  // badges render there, since there's nothing to compare against.
+  outspeedFastestEnemyInitiative?: number;
 }
 
 export { playerShipLabel };
@@ -34,6 +41,7 @@ export function FleetPanel({
   onMoveCargoPod,
   onScuttle,
   onPartHover,
+  outspeedFastestEnemyInitiative,
 }: FleetPanelProps) {
   const selectedShip = fleet[selectedShipIndex];
   const selectedHasRoom = selectedShip
@@ -52,15 +60,39 @@ export function FleetPanel({
         const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades);
         const selected = shipIndex === selectedShipIndex;
         const emptySlots = effectiveSlots(ship.frameId, ship.upgrades) - ship.equipped.length;
+        const outspeeding =
+          outspeedFastestEnemyInitiative !== undefined &&
+          qualifiesForOutspeed(stats.initiative, outspeedFastestEnemyInitiative);
         return (
           <div
             key={shipIndex}
-            className={`ship-card${selected ? ' ship-card--selected' : ''}`}
+            className={`ship-card${selected ? ' ship-card--selected' : ''}${outspeeding ? ' ship-card--outspeeding' : ''}`}
             onClick={() => onSelectShip(shipIndex)}
           >
             <div className="ship-card__header">
               <FrameSilhouette frameId={ship.frameId} size={36} />
-              <span className="ship-card__name">{playerShipLabel(fleet, shipIndex)}</span>
+              <span className="ship-card__name">
+                {outspeeding && (
+                  <span
+                    className="combat-ship__outspeed-mark"
+                    aria-label="outspeeds the current enemy"
+                    title={`Outspeeds this enemy — init ${stats.initiative} vs their fastest ${outspeedFastestEnemyInitiative}. Strikes twice each round.`}
+                  >
+                    ⚡×2{' '}
+                  </span>
+                )}
+                {playerShipLabel(fleet, shipIndex)}
+                {/* Iteration 18: named ships need the frame stated somewhere. */}
+                <span className="ship-card__frame">{getFrame(ship.frameId).name}</span>
+                {(ship.kills ?? 0) > 0 && (
+                  <span
+                    className="ship-card__kills"
+                    title={`${ship.kills} kill${ship.kills === 1 ? '' : 's'} · survived ${ship.fightsSurvived ?? 0} fight${(ship.fightsSurvived ?? 0) === 1 ? '' : 's'}`}
+                  >
+                    ☠ {ship.kills}
+                  </span>
+                )}
+              </span>
               {onScuttle && ship.frameId !== 'cruiser' && (
                 <button
                   type="button"

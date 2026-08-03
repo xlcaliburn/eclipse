@@ -51,7 +51,9 @@ import {
 } from './ship';
 import { getUpgrade, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
-import type { EnemyDef, PartId, PlayerShipState, RewardSummary, RunState } from './types';
+import { emptyRunStats } from './daily';
+import { shipName } from './shipNames';
+import type { CombatEvent, EnemyDef, PartId, PlayerShipState, RewardSummary, RunState, RunStats } from './types';
 
 export type RunAction =
   | { type: 'CHOOSE_COMMANDER'; commanderId: CommanderId }
@@ -89,7 +91,11 @@ export type RunAction =
   // player picked from `RunState.repairUpgradeOptions` (drawn on arrival).
   | { type: 'REPAIR_CHOOSE'; choice: 'full' }
   | { type: 'REPAIR_CHOOSE'; choice: 'overhaul'; shipIndex: number; upgradeId: UpgradeId }
-  | { type: 'NEW_RUN' };
+  // Iteration 18: NEW_RUN can carry a fixed seed (the daily run) and a
+  // mode tag; LOAD_STATE is pure state replacement so the landing screen
+  // can choose between the standard and daily save slots.
+  | { type: 'NEW_RUN'; seed?: number; mode?: 'daily'; dailyDate?: string }
+  | { type: 'LOAD_STATE'; state: RunState };
 
 export const SHOP_OFFER_COUNT = 6;
 export const REROLL_COST = 2;
@@ -166,8 +172,8 @@ function drawCombatSeed(rng: RngFn): number {
   return Math.floor(rng() * 0xffffffff);
 }
 
-export function initialRunState(): RunState {
-  const seed = randomSeed();
+export function initialRunState(options?: { seed?: number; mode?: 'daily'; dailyDate?: string }): RunState {
+  const seed = options?.seed ?? randomSeed();
   // One rng stream seeds the whole run: the map first, then the escalation
   // schedule, then the commander draw, then (iteration 9) every later
   // in-run draw continues the exact same sequence via `rngCounter` — the
@@ -187,7 +193,17 @@ export function initialRunState(): RunState {
     fled: [],
     credits: 0,
     inventory: [],
-    fleet: [{ frameId: 'cruiser', equipped: [...STARTING_LOADOUT], damage: 0, upgrades: [] }],
+    fleet: [
+      {
+        frameId: 'cruiser',
+        equipped: [...STARTING_LOADOUT],
+        damage: 0,
+        upgrades: [],
+        name: shipName(seed, 0),
+        kills: 0,
+        fightsSurvived: 0,
+      },
+    ],
     hand: ['bulkheads', 'volley'], // iteration 7: cards are found, never bought — start with one of each
     escalations,
     bossRevealed: false,
@@ -195,7 +211,42 @@ export function initialRunState(): RunState {
     revealedNodes: [],
     commanderChoices,
     heat: 0,
+    mode: options?.mode ?? 'standard',
+    dailyDate: options?.dailyDate,
+    shipsCommissioned: 1,
+    runStats: emptyRunStats(),
   };
+}
+
+// Iteration 18: fight-end stat attribution, from the fight's complete log.
+// Damage is summed from roll events (arc/prow/rift side-damage flows
+// through amount-less part-effect events — undercounted by design). A kill
+// is credited to the last player hit-roll whose target matches the
+// destroyed ship; prow/arc chains that don't match fall back to
+// unattributed rather than misattributed.
+function attributeFightStats(
+  log: CombatEvent[],
+  fleetSize: number,
+): { kills: number[]; damageDealt: number; damageTaken: number } {
+  const kills = Array.from({ length: fleetSize }, () => 0);
+  let damageDealt = 0;
+  let damageTaken = 0;
+  let lastPlayerHit: { shooterIndex: number; targetIndex: number } | null = null;
+  for (const event of log) {
+    if (event.kind === 'roll') {
+      if (event.side === 'player') {
+        damageDealt += event.damage;
+        if (event.hit) lastPlayerHit = { shooterIndex: event.shooterIndex, targetIndex: event.targetIndex };
+      } else {
+        damageTaken += event.damage;
+      }
+    } else if (event.kind === 'destroyed' && event.side === 'enemy') {
+      if (lastPlayerHit && lastPlayerHit.targetIndex === event.shipIndex && lastPlayerHit.shooterIndex < fleetSize) {
+        kills[lastPlayerHit.shooterIndex]++;
+      }
+    }
+  }
+  return { kills, damageDealt, damageTaken };
 }
 
 // Vision extends further per pick for the Spymaster.
@@ -450,11 +501,29 @@ export function runReducer(state: RunState, action: RunAction): RunState {
     case 'CHOOSE_COMMANDER': {
       if (state.phase !== 'commander') return state;
       if (!state.commanderChoices.includes(action.commanderId)) return state;
+      const commissioned = state.shipsCommissioned ?? state.fleet.length;
       const fleet =
         action.commanderId === 'warlord'
-          ? [...state.fleet, { frameId: 'interceptor' as const, equipped: ['ion'], damage: 0, upgrades: [] }]
+          ? [
+              ...state.fleet,
+              {
+                frameId: 'interceptor' as const,
+                equipped: ['ion'],
+                damage: 0,
+                upgrades: [],
+                name: shipName(state.map.seed, commissioned),
+                kills: 0,
+                fightsSurvived: 0,
+              },
+            ]
           : state.fleet;
-      return { ...state, phase: 'setup', commanderId: action.commanderId, fleet };
+      return {
+        ...state,
+        phase: 'setup',
+        commanderId: action.commanderId,
+        fleet,
+        shipsCommissioned: action.commanderId === 'warlord' ? commissioned + 1 : state.shipsCommissioned,
+      };
     }
 
     case 'SETUP_ADD_PART': {
@@ -728,8 +797,18 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const outcome = combatOutcome(state.combat);
       const returnedCards = unconsumedContingentCards(state.combat);
 
+      // Iteration 18: fight-end stat attribution — per-ship kills, run-wide
+      // damage totals. Computed once here, folded into every branch below.
+      const fightStats = attributeFightStats(state.combat.log, state.fleet.length);
+      const baseStats = state.runStats ?? emptyRunStats();
+
       if (outcome.winner === 'enemy') {
-        return { ...state, phase: 'defeat', pendingAmbushBonus: undefined, rngCounter: nextCounter() };
+        const runStats: RunStats = {
+          ...baseStats,
+          damageDealt: baseStats.damageDealt + fightStats.damageDealt,
+          damageTaken: baseStats.damageTaken + fightStats.damageTaken,
+        };
+        return { ...state, phase: 'defeat', pendingAmbushBonus: undefined, runStats, rngCounter: nextCounter() };
       }
 
       // 14.3: a win-conditional bonus from an event ambush (e.g. the
@@ -759,9 +838,23 @@ export function runReducer(state: RunState, action: RunAction): RunState {
             carrierDestroyed = true;
           }
         } else {
-          survivingFleet.push({ ...ship, damage: shipOutcome.endDamage });
+          survivingFleet.push({
+            ...ship,
+            damage: shipOutcome.endDamage,
+            kills: (ship.kills ?? 0) + fightStats.kills[i],
+            fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
+          });
         }
       });
+
+      // Iteration 18: the run's cumulative record, after this win.
+      const runStatsAfterWin: RunStats = {
+        ...baseStats,
+        fightsWon: baseStats.fightsWon + 1,
+        shipsLost: [...baseStats.shipsLost, ...lostShips],
+        damageDealt: baseStats.damageDealt + fightStats.damageDealt,
+        damageTaken: baseStats.damageTaken + fightStats.damageTaken,
+      };
       // A delivery quest's carrier dying fails the quest silently — the pod
       // (and any reward) goes down with the ship, no separate penalty.
       const activeQuestAfterFight = carrierDestroyed ? undefined : state.activeQuest;
@@ -786,6 +879,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           pendingAmbushBonus: undefined,
           heat: heatAfterWin,
           interceptionActive: undefined,
+          runStats: runStatsAfterWin,
           rngCounter: nextCounter(),
         };
       }
@@ -808,6 +902,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           pendingAmbushBonus: undefined,
           heat: heatAfterWin, // moot — INTERLUDE_CHOOSE resets to 0 regardless, kept for consistency
           interceptionActive: undefined,
+          runStats: runStatsAfterWin,
           rngCounter: nextCounter(),
         };
       }
@@ -898,6 +993,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         activeQuest: isBounty ? undefined : activeQuestAfterFight,
         heat: heatAfterWin,
         interceptionActive: undefined,
+        runStats: runStatsAfterWin,
         rngCounter: nextCounter(),
       };
     }
@@ -910,21 +1006,39 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // Surviving ships keep their damage, same as a win; destroyed ships
       // are lost with parts salvaged and upgrades gone (existing rules).
       // No credits, no reward screen — the fight simply stops.
+      // Iteration 18: kills earned before withdrawing still count, and
+      // surviving a withdrawal is still surviving a fight.
+      const fightStats = attributeFightStats(state.combat.log, state.fleet.length);
+      const baseStats = state.runStats ?? emptyRunStats();
       let inventory = [...state.inventory];
       const survivingFleet: PlayerShipState[] = [];
+      const lostShips: string[] = [];
       let carrierDestroyed = false;
       state.fleet.forEach((ship, i) => {
         const combatShip = state.combat!.playerShips[i];
         const destroyed = combatShip.damage >= combatShip.stats.hp;
         if (destroyed) {
           inventory = [...inventory, ...ship.equipped.filter((id) => id !== CARGO_POD_PART_ID)];
+          lostShips.push(playerShipLabel(state.fleet, i));
           if (state.activeQuest?.archetype === 'delivery' && state.activeQuest.carrierShipIndex === i) {
             carrierDestroyed = true;
           }
         } else {
-          survivingFleet.push({ ...ship, damage: Math.min(combatShip.damage, combatShip.stats.hp) });
+          survivingFleet.push({
+            ...ship,
+            damage: Math.min(combatShip.damage, combatShip.stats.hp),
+            kills: (ship.kills ?? 0) + fightStats.kills[i],
+            fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
+          });
         }
       });
+      const runStats: RunStats = {
+        ...baseStats,
+        fightsWithdrawn: baseStats.fightsWithdrawn + 1,
+        shipsLost: [...baseStats.shipsLost, ...lostShips],
+        damageDealt: baseStats.damageDealt + fightStats.damageDealt,
+        damageTaken: baseStats.damageTaken + fightStats.damageTaken,
+      };
 
       const returnedCards = unconsumedContingentCards(state.combat);
       const hand = [...state.hand, ...returnedCards];
@@ -964,6 +1078,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         activeQuest,
         heat,
         interceptionActive: undefined,
+        runStats,
         pendingAmbushBonus: undefined, // withdrawing from an event ambush forfeits any win-conditional bonus
       };
     }
@@ -1057,13 +1172,23 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.fleet.length >= MAX_FLEET_SIZE) return state;
       const frame = getFrame(action.frameId); // the Flagship ('cruiser') is never purchasable
       if (state.credits < frame.cost) return state;
+      const commissioned = state.shipsCommissioned ?? state.fleet.length;
       return {
         ...state,
         credits: state.credits - frame.cost,
         fleet: [
           ...state.fleet,
-          { frameId: action.frameId, equipped: [...STARTING_FIT[action.frameId]], damage: 0, upgrades: [] },
+          {
+            frameId: action.frameId,
+            equipped: [...STARTING_FIT[action.frameId]],
+            damage: 0,
+            upgrades: [],
+            name: shipName(state.map.seed, commissioned),
+            kills: 0,
+            fightsSurvived: 0,
+          },
         ],
+        shipsCommissioned: commissioned + 1,
       };
     }
 
@@ -1250,7 +1375,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
     }
 
     case 'NEW_RUN':
-      return initialRunState();
+      return initialRunState({ seed: action.seed, mode: action.mode, dailyDate: action.dailyDate });
+
+    // Pure state replacement — the landing screen's slot picker (18). No
+    // rng, no validation beyond what loadRun already did.
+    case 'LOAD_STATE':
+      return action.state;
 
     default:
       return state;

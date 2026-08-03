@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { initCombat, runToEnd } from './combatEngine';
+import { shipName } from './shipNames';
 import { GAUNTLET, OPENER } from './enemies';
 import { MAX_HEAT } from './heat';
 import { BOSS_COLUMN } from './map';
@@ -2013,5 +2014,78 @@ describe('interception at heat 4 ("Hunted")', () => {
     const result = runReducer(state, { type: 'WITHDRAW' });
     expect(result.heat).toBe(0);
     expect(result.interceptionActive).toBeUndefined();
+  });
+});
+
+describe('the fleet remembers (iteration 18)', () => {
+  // Play a fresh seeded run through the opener and return the post-CONTINUE
+  // state — the opener (Picket drones: 2 hulls, missiles only) is the one
+  // guaranteed-winnable, always-first fight, which makes it the natural
+  // fixture for stat attribution.
+  function playThroughOpener(): RunState {
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.42);
+    let state = initialRunState();
+    spy.mockRestore();
+    state = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: state.commanderChoices[0] });
+    state = runReducer(state, { type: 'SETUP_CONFIRM' });
+    state = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    state = runReducer(state, { type: 'ENGAGE' });
+    state = runReducer(state, { type: 'AUTO_RESOLVE' });
+    expect(state.combat?.winner).toBe('player'); // the opener mathematically can't kill the starting ship
+    return runReducer(state, { type: 'CONTINUE' });
+  }
+
+  it('names the starting Flagship deterministically from the run seed', () => {
+    const state = initialRunState({ seed: 7 });
+    expect(state.fleet[0].name).toBe(shipName(7, 0));
+    expect(state.fleet[0].name!.startsWith('ISV ')).toBe(true);
+  });
+
+  it('names the Warlord\'s free Interceptor and advances the commission counter', () => {
+    let state = initialRunState({ seed: 7 });
+    // Force warlord into the choices for a deterministic test.
+    state = { ...state, commanderChoices: ['warlord', ...state.commanderChoices.slice(1)] };
+    const after = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'warlord' });
+    expect(after.fleet).toHaveLength(2);
+    expect(after.fleet[1].name).toBe(shipName(7, 1));
+    expect(after.shipsCommissioned).toBe(2);
+  });
+
+  it('a won fight increments fightsWon, credits kills to ships, and bumps fightsSurvived for survivors', () => {
+    const after = playThroughOpener();
+    const stats = after.runStats!;
+    expect(stats.fightsWon).toBe(1);
+    expect(stats.fightsWithdrawn).toBe(0);
+    expect(stats.shipsLost).toEqual([]); // the opener can't destroy the starting ship
+    // Two picket drones died; every kill is attributable to a plain player
+    // hit-roll here (no prow/arc in the starting loadout).
+    const totalKills = after.fleet.reduce((n, s) => n + (s.kills ?? 0), 0);
+    expect(totalKills).toBe(2);
+    for (const ship of after.fleet) {
+      expect(ship.fightsSurvived).toBe(1);
+    }
+    // The drones' missiles are the only enemy dice — at most 2 damage taken.
+    expect(stats.damageTaken).toBeLessThanOrEqual(2);
+    expect(stats.damageDealt).toBeGreaterThanOrEqual(2); // at least the two killing blows
+  });
+
+  it('LOAD_STATE replaces the state wholesale', () => {
+    const a = initialRunState({ seed: 1 });
+    const b = initialRunState({ seed: 2, mode: 'daily', dailyDate: '2026-08-03' });
+    const loaded = runReducer(a, { type: 'LOAD_STATE', state: b });
+    expect(loaded).toBe(b);
+  });
+
+  it('NEW_RUN with daily options produces a daily-mode state with that exact seed', () => {
+    const fresh = runReducer(initialRunState({ seed: 1 }), {
+      type: 'NEW_RUN',
+      seed: 99,
+      mode: 'daily',
+      dailyDate: '2026-08-03',
+    });
+    expect(fresh.mode).toBe('daily');
+    expect(fresh.dailyDate).toBe('2026-08-03');
+    expect(fresh.map.seed).toBe(99);
+    expect(fresh).toEqual(initialRunState({ seed: 99, mode: 'daily', dailyDate: '2026-08-03' }));
   });
 });

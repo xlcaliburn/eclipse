@@ -5,6 +5,7 @@ import { useMotionSetting } from './useReducedMotion';
 interface HudBarProps {
   credits: number;
   heat: number;
+  daily?: boolean; // iteration 18: this run is today's one-attempt daily
   // Omitted wherever a map peek makes no sense (on the map itself, or once
   // the run is over) — the button simply isn't rendered.
   onViewMap?: () => void;
@@ -16,7 +17,7 @@ interface HudBarProps {
 // Iteration 15.2: joined by the heat track — kept quiet by design (a bare
 // 4-pip gauge, no number), with the tier word and "Hunted" warning only
 // surfacing in the tooltip/pip tint.
-export function HudBar({ credits, heat, onViewMap }: HudBarProps) {
+export function HudBar({ credits, heat, daily, onViewMap }: HudBarProps) {
   const motion = useMotionSetting();
   const reduced = motion === 'reduced';
   const tier = heatTier(heat);
@@ -28,6 +29,11 @@ export function HudBar({ credits, heat, onViewMap }: HudBarProps) {
         <button type="button" className="hud-bar__map-button" onClick={onViewMap}>
           Map
         </button>
+      )}
+      {daily && (
+        <span className="hud-bar__daily-chip" title="Today's daily run — one attempt, same sector for everyone.">
+          DAILY
+        </span>
       )}
       <button
         type="button"

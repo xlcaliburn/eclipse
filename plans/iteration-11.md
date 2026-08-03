@@ -36,7 +36,13 @@ slot replaced so the trio reads money / power / knowledge:
 The interlude screen shows a "fleet repaired" summary line (damage healed,
 per the repair-yard screen's existing pattern) above the choice.
 
-### 11.2 Initiative rework: evasion
+### 11.2 Initiative rework: evasion — SUPERSEDED, never implemented
+
+> **Note (2026-07-27):** this section was never built (the rest of
+> iteration 11's items landed piecemeal). The initiative problem it
+> targeted is solved differently by **iteration 17's Outspeed rule**
+> (extra activations for a large initiative gap) — do not implement
+> evasion; initiative should be one strong idea, not two stacked ones.
 
 New combat rule, one sentence: **a defender that is strictly faster than
 its attacker gains +1 effective shield against that attack** ("evasion").

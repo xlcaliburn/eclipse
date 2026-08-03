@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { hasLineOfRetreat, initialRunState, runReducer } from './game/reducer';
-import { clearRun, loadRun, saveRun } from './game/persistence';
+import { clearRun, loadDailyRecord, loadRun, saveDailyRecord, saveRun } from './game/persistence';
+import { dailySeed, dailyShareText } from './game/daily';
 import { playerShipLabel } from './game/ship';
 import './styles.css';
 import { CombatScreen } from './components/CombatScreen';
@@ -23,6 +24,15 @@ import type { Surface } from './components/TabBar';
 import { useIsCompact } from './components/useIsCompact';
 import { usePrefersReducedMotion } from './components/useReducedMotion';
 
+// The one Date call in the app (src/game/ is Date-free by test): the LOCAL
+// date, so "today's daily" matches the player's own calendar.
+function todayDateString(): string {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
 function App() {
   // The lazy initializer runs once at mount: resume the saved run if one
   // exists (mid-combat, hand, used actives — all of it), otherwise start
@@ -35,6 +45,19 @@ function App() {
   const [hasSave] = useState(() => loadRun() !== null);
   const [awaitingBootChoice, setAwaitingBootChoice] = useState(true);
   const [savingUnavailable, setSavingUnavailable] = useState(false);
+
+  // Iteration 18: the daily run. All read once at boot — the landing screen
+  // is the only consumer, and it only shows at boot.
+  const [today] = useState(() => todayDateString());
+  const [dailyBoot] = useState(() => ({
+    record: loadDailyRecord(),
+    save: loadRun(undefined, 'daily'),
+  }));
+  const todayRecord = dailyBoot.record?.date === today ? dailyBoot.record : null;
+  // Resumable only if today's attempt is unfinished AND its save is really
+  // today's (a stale yesterday-save is ignored, not resumed).
+  const dailyResumable = !!todayRecord && !todayRecord.outcome && dailyBoot.save?.dailyDate === today;
+  const dailyPlayable = !todayRecord;
 
   // Pure view state — no gameplay effect, so it lives outside the reducer.
   // Iteration 16.1: the old viewingMap/viewingFleet booleans are unified
@@ -54,16 +77,28 @@ function App() {
 
   // Autosave after every reducer action, once the landing screen (if any)
   // has been resolved — never while it's still deciding, so a "New run"
-  // pick doesn't race a save of the run being abandoned.
+  // pick doesn't race a save of the run being abandoned. Dailies write to
+  // their own slot so a standard run can coexist.
   useEffect(() => {
     if (awaitingBootChoice) return;
-    if (!saveRun(state)) setSavingUnavailable(true);
+    if (!saveRun(state, undefined, state.mode === 'daily' ? 'daily' : 'standard')) setSavingUnavailable(true);
   }, [state, awaitingBootChoice]);
 
-  // Victory/defeat are terminal — the save has nothing left to resume.
+  // Victory/defeat are terminal — the save has nothing left to resume, and
+  // a daily's attempt record gets its final outcome + share text.
   useEffect(() => {
-    if (state.phase === 'victory' || state.phase === 'defeat') clearRun();
-  }, [state.phase]);
+    if (state.phase !== 'victory' && state.phase !== 'defeat') return;
+    if (state.mode === 'daily') {
+      clearRun(undefined, 'daily');
+      saveDailyRecord({
+        date: state.dailyDate ?? today,
+        outcome: state.phase,
+        shareText: dailyShareText(state, state.phase),
+      });
+    } else {
+      clearRun();
+    }
+  }, [state.phase]); // eslint-disable-line react-hooks/exhaustive-deps -- fires exactly once per terminal transition
 
   // Warp-streak wipe between phases (iteration 10.6) — a brief overlay
   // flash on every phase change; skipped entirely under reduced motion.
@@ -87,9 +122,32 @@ function App() {
     setAwaitingBootChoice(false);
   }
 
+  // Iteration 18: starting the daily consumes today's attempt (recorded
+  // immediately), then boots a run from today's deterministic seed.
+  function handleStartDaily() {
+    saveDailyRecord({ date: today });
+    dispatch({ type: 'NEW_RUN', seed: dailySeed(today), mode: 'daily', dailyDate: today });
+    setAwaitingBootChoice(false);
+  }
+
+  function handleContinueDaily() {
+    if (dailyBoot.save) dispatch({ type: 'LOAD_STATE', state: dailyBoot.save });
+    setAwaitingBootChoice(false);
+  }
+
   function handleAbandon() {
     if (!window.confirm('Abandon this run? This cannot be undone.')) return;
-    clearRun();
+    if (state.mode === 'daily') {
+      // Abandoning a daily finalizes today's attempt — no second try.
+      clearRun(undefined, 'daily');
+      saveDailyRecord({
+        date: state.dailyDate ?? today,
+        outcome: 'abandoned',
+        shareText: dailyShareText(state, 'abandoned'),
+      });
+    } else {
+      clearRun();
+    }
     dispatch({ type: 'NEW_RUN' });
   }
 
@@ -98,7 +156,17 @@ function App() {
       <>
         <Starfield />
         <div className="app">
-          <LandingScreen hasSave={hasSave} onContinue={() => setAwaitingBootChoice(false)} onNewRun={handleNewRun} />
+          <LandingScreen
+            hasSave={hasSave}
+            onContinue={() => setAwaitingBootChoice(false)}
+            onNewRun={handleNewRun}
+            dailyDate={today}
+            dailyPlayable={dailyPlayable}
+            dailyResumable={dailyResumable}
+            dailyResult={todayRecord?.outcome ? todayRecord : null}
+            onStartDaily={handleStartDaily}
+            onContinueDaily={handleContinueDaily}
+          />
         </div>
       </>
     );
@@ -139,7 +207,7 @@ function App() {
       <>
         <Starfield act={state.act} />
         <div className="app">
-          <HudBar credits={state.credits} heat={state.heat} />
+          <HudBar credits={state.credits} heat={state.heat} daily={state.mode === 'daily'} />
           {chartSurface}
         </div>
       </>
@@ -160,6 +228,7 @@ function App() {
         <HudBar
           credits={state.credits}
           heat={state.heat}
+          daily={state.mode === 'daily'}
           onViewMap={canPeekMap ? () => setSurface('chart') : undefined}
         />
       )}
@@ -291,6 +360,8 @@ function App() {
               credits={state.credits}
               visitedCount={state.visited.length}
               fleet={state.fleet}
+              runStats={state.runStats}
+              dailyShare={state.mode === 'daily' ? dailyShareText(state, state.phase) : undefined}
               onNewRun={() => dispatch({ type: 'NEW_RUN' })}
             />
           )}
