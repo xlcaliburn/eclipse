@@ -206,14 +206,27 @@ export function frameCost(baseCost: number, frameId: FrameId, commanderId: Comma
 }
 
 // Credits earned for winning a combat node at the given column.
+//
+// Iteration 22.6: base bumped 4->7. Simulation found the base pool
+// difficulty (mid-tier enemies re-tuned in 22.3, difficulty ramp de-stacked
+// in 22.1) still outpaced what this reward rate could buy by the columns
+// where it mattered — even with veterancy AND escalations fully disabled,
+// the fleet this formula could field only cleared 8% of runs. +3cr per win
+// compounds: a run that fights every column from 1-6 nets ~18cr more by
+// column 6 than the old rate, which is the difference between the Flagship
+// reaching computer 2 by the mid pool or never reaching it at all (see
+// plans/iteration-22.md's status notes on the 0%-comp2-by-col6 finding).
 export function winReward(col: number): number {
-  return 4 + col;
+  return 7 + col;
 }
 
 // Credits earned for winning an elite node at the given column (when the
 // hand is full and a reaction card can't be granted, +4 more is added).
+//
+// Iteration 22.6: base bumped 8->11, same reasoning as winReward above —
+// kept 3cr above it so an elite still reads as the bigger payout.
 export function eliteReward(col: number): number {
-  return 8 + col;
+  return 11 + col;
 }
 
 function bossEnemyForAct(map: GameMap, act: 1 | 2): EnemyDef {

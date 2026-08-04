@@ -1,4 +1,4 @@
-import { eliteEnemyForColumn, eliteVariant, GAUNTLET, getFinalBoss } from '../src/game/enemies';
+import { eliteEnemyForColumn, eliteVariant, GAUNTLET, getBoss, getFinalBoss } from '../src/game/enemies';
 import { forecastWinRate } from '../src/game/forecast';
 import { initCombat, runToEnd } from '../src/game/combatEngine';
 import { deriveFleetForCombat } from '../src/game/ship';
@@ -78,7 +78,16 @@ function findEnemy(id: string): EnemyDef {
 const ANCIENT_GUARDIAN_ELITE = eliteVariant(findEnemy('ancient-guardian'));
 const SNIPER_ELITE = eliteEnemyForColumn(1, 3, Math.random); // the col-3 elite, softened to +1 HP
 
-const MATCHUPS: EnemyDef[] = [...GAUNTLET, SNIPER_ELITE, ANCIENT_GUARDIAN_ELITE];
+// The act-1 mid-boss trio (iteration 8): one of these three is drawn at
+// random for every run's column-10 boss fight, equal probability — GCDS is
+// already in GAUNTLET (its col-3-legacy id kept it there since iteration
+// 1), but Hive Mother and Dreadnought were never added to this table, so
+// only one of the three bosses a run can actually meet was ever measured
+// against the sanity checks below (iteration 22.6 fix).
+const HIVE_MOTHER = getBoss('hive');
+const DREADNOUGHT = getBoss('dread');
+
+const MATCHUPS: EnemyDef[] = [...GAUNTLET, SNIPER_ELITE, ANCIENT_GUARDIAN_ELITE, HIVE_MOTHER, DREADNOUGHT];
 
 console.log(`Win rate over ${SIMS} simulations per matchup\n`);
 
@@ -189,6 +198,19 @@ const checks: { label: string; pass: boolean }[] = [
   {
     label: 'strong fleet vs GCDS in 20-60%',
     pass: rates[GAUNTLET[8].id]['strong fleet'] >= 20 && rates[GAUNTLET[8].id]['strong fleet'] <= 60,
+  },
+  {
+    label: 'strong fleet vs Dreadnought (the other act-1 mid-boss) in 20-60%',
+    pass: rates[DREADNOUGHT.id]['strong fleet'] >= 20 && rates[DREADNOUGHT.id]['strong fleet'] <= 60,
+  },
+  {
+    // Known gap, not yet closed (2026-08-04, iteration 22.6): a 3-ship
+    // fleet with 4+ cannon dice one-shots Hive Mother's 4x 1-2-HP ships
+    // regardless of shield/HP tuning tried so far. Left as a documented
+    // FAIL (see this file's Hive Mother comment) rather than silently
+    // dropped from the table, so a future pass has the number to beat.
+    label: 'strong fleet vs Hive Mother (the other act-1 mid-boss) in 20-60% — KNOWN FAIL, see enemies.ts',
+    pass: rates[HIVE_MOTHER.id]['strong fleet'] >= 20 && rates[HIVE_MOTHER.id]['strong fleet'] <= 60,
   },
   {
     label: 'strong fleet beats the col-7 elite (ancient guardian +2 HP) >= 40%',

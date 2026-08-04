@@ -50,6 +50,7 @@ Rules for working with these files:
 | [19](plans/iteration-19.md) | Telegraphs: enemy opening fire previewed before each round (engine `incomingFirePreview`, combat chips + threat lines, prep-screen volley readout) | implemented |
 | [20](plans/iteration-20.md) | The economy floor: salvage claims (heat-priced income), fleet triage, commodity runs, pre-boss shop + mercenary escort | **mechanics implemented; clear-rate gate (≥40%) NOT met — see status notes, needs a user decision on scope** |
 | [21](plans/iteration-21.md) | Commander doctrines: 5-commander roster (Warlord splits into wide Admiral / tall Warlord), one subsystem lean each, over-repair, aces, signature shop stock — requires 20 | **mechanics implemented; clear-rate gate (40–85%) NOT met for any commander — same root cause as 20, see status notes** |
+| [22](plans/iteration-22.md) | The column-4 wall: de-stack the pool/veterancy/escalation triple cliff, guarantee the first shop, mid-pool + GCDS re-tune, then close the gap via reward economy + fight-count + policy-bug fixes — the measured fix for 20's and 21's failed clear-rate gates (supersedes the parked "poolBand" follow-up) | **implemented (baseline 0.2%→3.8%, 19×; every commander non-zero, best case 20.8%); 40% gate still NOT met but only ~2× short now (was ~6×) — see status notes for what's left** |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes

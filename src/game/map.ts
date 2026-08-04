@@ -85,6 +85,14 @@ export const BOSS_COLUMN = LANE_COLUMNS;
 //     player can route toward, not a hope — and column 9 keeps a plain
 //     combat option alongside the elite, rather than losing it to make
 //     room for the shop.
+// Iteration 22.6: col 6 traded one of its two combats for a repair. Once
+// 22.1 shifted the mid pool to columns 5-7, columns 6 and 7 were the only
+// mid-band columns with zero recovery option — a fleet already carrying
+// damage from column 5 had no escape valve before a second (col 6) and
+// third (col 7) full-strength fight, and column 6 alone accounted for the
+// single largest share of act-1 deaths in the post-22.1/22.2/22.3 sim. This
+// mirrors exactly the logic iteration 20 used for column 1 above.
+//
 // Changing a column's node-TYPE COMPOSITION (not just re-ordering the
 // literal — shuffle draws from the multiset regardless of source order)
 // also changes how many rng calls that column consumes, since only
@@ -99,7 +107,7 @@ const ACT1_QUOTAS: NodeType[][] = [
   ['shop', 'combat', 'event'],
   ['elite', 'combat', 'event'],
   ['repair', 'shop', 'combat'],
-  ['combat', 'combat', 'event'],
+  ['repair', 'combat', 'event'],
   ['elite', 'combat', 'event'],
   ['shop', 'elite', 'combat'],
   ['shop', 'elite', 'combat'],
@@ -127,14 +135,34 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
   return copy;
 }
 
-function generateActColumns(quotas: NodeType[][], rng: () => number): MapNode[][] {
+// Iteration 22.2: places `pinned` at row 1 instead of leaving its row to the
+// shuffle. `nodesConnect` allows |row diff| <= 1, so row 1 is the one row
+// reachable from every row (0, 1, 2) of the previous column — a node pinned
+// here is guaranteed reachable no matter which lane the player took to get
+// there. Used to fix a real gap: about a third of act-1 sim runs reached
+// the mid-tier pool having never been able to route into column 3's shop,
+// because its row was left to chance and a player boxed into row 0 or row 2
+// at column 2 could find it unreachable (see plans/iteration-22.md 22.0).
+function pinToRow1(quota: NodeType[], pinned: NodeType, rng: () => number): NodeType[] {
+  const idx = quota.indexOf(pinned);
+  const rest = [...quota.slice(0, idx), ...quota.slice(idx + 1)];
+  const shuffledRest = shuffle(rest, rng);
+  return [shuffledRest[0], pinned, shuffledRest[1]];
+}
+
+function generateActColumns(
+  quotas: NodeType[][],
+  rng: () => number,
+  pinnedRows: Partial<Record<number, NodeType>> = {},
+): MapNode[][] {
   const columns: MapNode[][] = quotas.map((quota, col) => {
     if (quota.length === 1) return [{ col, row: 0, type: quota[0] }]; // the opener — fixed, not shuffled, never tagged
-    const shuffled = shuffle(quota, rng);
+    const pinned = pinnedRows[col];
+    const types = pinned !== undefined ? pinToRow1(quota, pinned, rng) : shuffle(quota, rng);
     // Cargo is drawn immediately after each node's type is fixed, in row
     // order — keeps the whole map generation one deterministic pass over a
     // single continued rng stream.
-    return shuffled.map((type, row) => ({
+    return types.map((type, row) => ({
       col,
       row,
       type,
@@ -145,8 +173,13 @@ function generateActColumns(quotas: NodeType[][], rng: () => number): MapNode[][
   return columns;
 }
 
+// Iteration 22.2: act 1's column-3 shop only, pinned to row 1 (see
+// pinToRow1) — act 2 is untouched, out of scope for this iteration (see
+// plans/iteration-22.md 22.5).
+const ACT1_PINNED_ROWS: Partial<Record<number, NodeType>> = { 3: 'shop' };
+
 export function generateMap(seed: number, rng: () => number): GameMap {
-  const act1Columns = generateActColumns(ACT1_QUOTAS, rng);
+  const act1Columns = generateActColumns(ACT1_QUOTAS, rng, ACT1_PINNED_ROWS);
   const act1BossId = BOSS_IDS[Math.floor(rng() * BOSS_IDS.length)];
   const act2Columns = generateActColumns(ACT2_QUOTAS, rng);
   const act2BossId = FINAL_BOSS_IDS[Math.floor(rng() * FINAL_BOSS_IDS.length)];

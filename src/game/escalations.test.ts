@@ -23,17 +23,17 @@ describe('drawEscalationSchedule', () => {
     expect(a).toEqual(b);
   });
 
-  it('draws exactly 4 distinct escalations: 2 in act 1 and 2 in act 2, each landing after columns 3 and 6', () => {
+  it('draws exactly 4 distinct escalations: 2 in act 1 and 2 in act 2, each landing after columns 4 and 7 (iteration 22)', () => {
     const schedule = drawEscalationSchedule(mulberry32(42));
     expect(schedule).toHaveLength(4);
     const act1 = schedule.filter((e) => e.act === 1);
     const act2 = schedule.filter((e) => e.act === 2);
     expect(act1).toHaveLength(2);
     expect(act2).toHaveLength(2);
-    expect(act1[0].landsAfterColumn).toBe(3);
-    expect(act1[1].landsAfterColumn).toBe(6);
-    expect(act2[0].landsAfterColumn).toBe(3);
-    expect(act2[1].landsAfterColumn).toBe(6);
+    expect(act1[0].landsAfterColumn).toBe(4);
+    expect(act1[1].landsAfterColumn).toBe(7);
+    expect(act2[0].landsAfterColumn).toBe(4);
+    expect(act2[1].landsAfterColumn).toBe(7);
     const ids = schedule.map((e) => e.id);
     expect(new Set(ids).size).toBe(4); // drawn without replacement — all distinct
     expect(schedule.every((e) => e.revealed === false)).toBe(true);

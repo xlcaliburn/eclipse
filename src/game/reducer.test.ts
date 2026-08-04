@@ -660,7 +660,7 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('interlude');
     expect(result.pendingReward).toBeUndefined();
-    expect(result.credits).toBe(18); // eliteReward(globalColumn(1, 10)) = 8 + 10
+    expect(result.credits).toBe(21); // eliteReward(globalColumn(1, 10)) = 11 + 10
   });
 
   it('winning the final (act-2) boss ends the run in victory and skips the reward screen', () => {
@@ -841,8 +841,8 @@ describe('upgrades — regen and salvage', () => {
     });
     const before = state.credits;
     const result = runReducer(state, { type: 'CONTINUE' });
-    // base reward (winReward(0) = 4) + 2x salvage (3 each) = 10
-    expect(result.credits - before).toBe(4 + 6);
+    // base reward (winReward(0) = 7) + 2x salvage (3 each) = 13
+    expect(result.credits - before).toBe(7 + 6);
   });
 });
 
@@ -918,7 +918,7 @@ describe('ambush events (ancient-cache)', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('reward');
-    expect(result.pendingReward?.credits).toBe(4 + 1); // winReward(1)
+    expect(result.pendingReward?.credits).toBe(7 + 1); // winReward(1)
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
   });
 });
@@ -1071,7 +1071,7 @@ describe('ambush win bonus (14.2/14.3)', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('reward');
-    expect(result.pendingReward?.credits).toBe(4 + 1 + 6); // winReward(1) + the ambush bonus
+    expect(result.pendingReward?.credits).toBe(7 + 1 + 6); // winReward(1) + the ambush bonus
     expect(result.inventory).toContain('plasma');
     expect(result.pendingAmbushBonus).toBeUndefined();
   });
@@ -2135,7 +2135,7 @@ describe('iteration 8: the opener (act-1 column 0)', () => {
     expect(result.currentEnemy).toEqual(OPENER);
   });
 
-  it('pays 4 credits and 1 intel, like any other column-0 combat win, with no upgrade pick', () => {
+  it('pays winReward(0) credits and 1 intel, like any other column-0 combat win, with no upgrade pick', () => {
     const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
     const combat = initCombat(
       [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
@@ -2151,7 +2151,7 @@ describe('iteration 8: the opener (act-1 column 0)', () => {
       combat: { ...combat, winner: 'player' as const },
     };
     const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.pendingReward?.credits).toBe(4);
+    expect(result.pendingReward?.credits).toBe(7);
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
   });
 
@@ -2244,7 +2244,7 @@ describe('iteration 8: global column economy across the act boundary', () => {
     expect(globalColumn(2, 10)).toBe(21);
   });
 
-  it('an act-2 column-0 combat win pays 15 credits (winReward(11))', () => {
+  it('an act-2 column-0 combat win pays 18 credits (winReward(11))', () => {
     const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
     const combat = initCombat(
       [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
@@ -2265,8 +2265,8 @@ describe('iteration 8: global column economy across the act boundary', () => {
       combat: { ...combat, winner: 'player' as const },
     };
     const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.pendingReward?.credits).toBe(15);
-    expect(winReward(globalColumn(2, 0))).toBe(15);
+    expect(result.pendingReward?.credits).toBe(18);
+    expect(winReward(globalColumn(2, 0))).toBe(18);
   });
 });
 

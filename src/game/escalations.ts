@@ -32,12 +32,19 @@ export interface ScheduledEscalation {
 }
 
 // Iteration 8: four escalations per run — two in act 1 (after local columns
-// 3 and 6, shifted one column from iteration 4's 2/5 to match the longer
-// 10-column act) plus two more in act 2 (after the same local columns), all
+// 4 and 7) plus two more in act 2 (after the same local columns), all
 // drawn without replacement from the 5-entry pool so a full run samples
 // nearly the whole escalation kit. Continues whatever rng stream the caller
 // passes in (the reducer threads the same mulberry32 instance used for map
 // generation, so the whole run's setup is deterministic from one seed).
+//
+// Iteration 22: landing columns shifted from 3/6 to 4/7 to stay aligned
+// with enemies.ts's poolBand and veterancyBonus, which shifted for the same
+// reason (see poolBand's comment) — all three used to step up independently
+// at column 4, stacking into one cliff nobody had designed on purpose.
+// scripts/actRun.ts's local drawAct1Escalations mirrors these numbers by
+// hand (it can't import a full RunState-driven schedule) — keep both in
+// sync.
 export function drawEscalationSchedule(rng: () => number): ScheduledEscalation[] {
   const pool = [...ESCALATIONS];
   const pick = (): EscalationId => {
@@ -45,9 +52,9 @@ export function drawEscalationSchedule(rng: () => number): ScheduledEscalation[]
     return pool.splice(index, 1)[0].id;
   };
   return [
-    { id: pick(), act: 1, landsAfterColumn: 3, revealed: false },
-    { id: pick(), act: 1, landsAfterColumn: 6, revealed: false },
-    { id: pick(), act: 2, landsAfterColumn: 3, revealed: false },
-    { id: pick(), act: 2, landsAfterColumn: 6, revealed: false },
+    { id: pick(), act: 1, landsAfterColumn: 4, revealed: false },
+    { id: pick(), act: 1, landsAfterColumn: 7, revealed: false },
+    { id: pick(), act: 2, landsAfterColumn: 4, revealed: false },
+    { id: pick(), act: 2, landsAfterColumn: 7, revealed: false },
   ];
 }

@@ -59,21 +59,21 @@ describe('final bosses bring support', () => {
 });
 
 describe('combatEnemyPool (iteration 8: act + depth band)', () => {
-  it('act 1 uses the original pools, re-banded to easy 0-3 / mid 4-6 / hard 7-9', () => {
+  it('act 1 uses the original pools, re-banded to easy 0-4 / mid 5-7 / hard 8-9 (iteration 22)', () => {
     expect(combatEnemyPool(1, 1)).toBe(EASY_POOL);
-    expect(combatEnemyPool(1, 3)).toBe(EASY_POOL);
-    expect(combatEnemyPool(1, 4)).toBe(MID_POOL);
-    expect(combatEnemyPool(1, 6)).toBe(MID_POOL);
-    expect(combatEnemyPool(1, 7)).toBe(HARD_POOL);
+    expect(combatEnemyPool(1, 4)).toBe(EASY_POOL);
+    expect(combatEnemyPool(1, 5)).toBe(MID_POOL);
+    expect(combatEnemyPool(1, 7)).toBe(MID_POOL);
+    expect(combatEnemyPool(1, 8)).toBe(HARD_POOL);
     expect(combatEnemyPool(1, 9)).toBe(HARD_POOL);
   });
 
   it('act 2 uses the new roster pools at the same column bands', () => {
     expect(combatEnemyPool(2, 0)).toBe(EASY_POOL_ACT2);
-    expect(combatEnemyPool(2, 3)).toBe(EASY_POOL_ACT2);
-    expect(combatEnemyPool(2, 4)).toBe(MID_POOL_ACT2);
-    expect(combatEnemyPool(2, 6)).toBe(MID_POOL_ACT2);
-    expect(combatEnemyPool(2, 7)).toBe(HARD_POOL_ACT2);
+    expect(combatEnemyPool(2, 4)).toBe(EASY_POOL_ACT2);
+    expect(combatEnemyPool(2, 5)).toBe(MID_POOL_ACT2);
+    expect(combatEnemyPool(2, 7)).toBe(MID_POOL_ACT2);
+    expect(combatEnemyPool(2, 8)).toBe(HARD_POOL_ACT2);
     expect(combatEnemyPool(2, 9)).toBe(HARD_POOL_ACT2);
   });
 
@@ -132,13 +132,13 @@ describe('eliteEnemyForColumn / bountyEnemyForColumn (act-aware)', () => {
 });
 
 describe('veterancy (iteration 8)', () => {
-  it('none at cols 0-3, +1 HP at 4-6, +2 HP at 7-9', () => {
-    for (const col of [0, 1, 2, 3]) expect(veterancyBonus(col)).toBe(0);
-    for (const col of [4, 5, 6]) expect(veterancyBonus(col)).toBe(1);
-    for (const col of [7, 8, 9]) expect(veterancyBonus(col)).toBe(2);
+  it('none at cols 0-4, +1 HP at 5-7, +2 HP at 8-9 (iteration 22)', () => {
+    for (const col of [0, 1, 2, 3, 4]) expect(veterancyBonus(col)).toBe(0);
+    for (const col of [5, 6, 7]) expect(veterancyBonus(col)).toBe(1);
+    for (const col of [8, 9]) expect(veterancyBonus(col)).toBe(2);
   });
 
-  it('applyVeterancy folds the bonus into every group\'s stats.hp and labels it; a no-op at col <= 3 leaves the enemy untouched', () => {
+  it('applyVeterancy folds the bonus into every group\'s stats.hp and labels it; a no-op at col <= 4 leaves the enemy untouched', () => {
     const base = EASY_POOL[0];
     const untouched = applyVeterancy(base, 2);
     expect(untouched).toBe(base); // same reference — genuinely a no-op

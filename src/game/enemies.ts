@@ -39,12 +39,24 @@ export const GAUNTLET: EnemyDef[] = [
   {
     id: 'shield-cruiser',
     name: 'Shield cruiser',
+    // Re-tuned 2026-08-04 (iteration 22.3): shield 2 / computer 0 was a
+    // hit-math cliff, not a stat wall — the hit rule is
+    // `raw + computer - shield >= 6` with natural 6s always hitting, so for
+    // any fleet with computer <= 1 (i.e. every fleet actually meeting this
+    // enemy at columns 5-7, per the col3-typical/mid-fleet reference
+    // builds), shield 2 and shield 1 are mathematically identical: only a
+    // natural 6 hits either way. Confirmed by simulation: nerfing shield
+    // alone to 1 produced a byte-identical clear-rate sim result. Shield
+    // 2->1 plus computer 0->1 actually changes the math for those fleets
+    // (comp 1 now lets a 5 also hit): col3-typical fleet's win rate moved
+    // 44% -> see scripts/balance.ts's table. See plans/iteration-22.md 22.0
+    // for the full diagnosis.
     blurb: 'Computers beat shields.',
     groups: solo('cruiser', 1, {
       initiative: 1,
       hp: 3,
-      computer: 0,
-      shield: 2,
+      computer: 1,
+      shield: 0,
       cannons: [{ diceCount: 2, damage: 2 }],
       missiles: [],
     }),
@@ -53,7 +65,7 @@ export const GAUNTLET: EnemyDef[] = [
     id: 'interceptor-swarm',
     name: 'Interceptor swarm',
     blurb: 'Many dice beat many small ships.',
-    groups: solo('interceptor', 4, {
+    groups: solo('interceptor', 3, {
       initiative: 3,
       hp: 1,
       computer: 1,
@@ -142,19 +154,21 @@ export const GAUNTLET: EnemyDef[] = [
   {
     id: 'gcds',
     name: 'GCDS',
-    // Nerfed 2026-08-03: was shield 2 / 4 cannon dice, which made act 1 a
-    // gate rather than a climb — every reference fleet below "strong" won
-    // 0% of the time, and the realistic end-of-run fleet (which spends ~66
-    // of the ~68 credits a full clear earns) only managed 59%. Real runs
-    // spend on repairs and field less than that. Shield 2 -> 1 so mid-tier
-    // computers aren't hard-walled, and one cannon die removed to cut the
-    // incoming alpha. See scripts/actRun.ts for the end-to-end clear rate.
+    // Nerfed 2026-08-03, re-buffed 2026-08-04 (iteration 22.3): the
+    // 2026-08-03 nerf (shield 2->1, one cannon die removed) overshot its
+    // own gate — balance.ts's sanity check wants "strong fleet vs GCDS in
+    // 20-60%" and was actually landing at 95%, a boss a well-built fleet
+    // could no longer lose to. Shield 1 -> 2 restores some of the shield
+    // pierce/computer check the boss is supposed to test, without
+    // restoring the fourth cannon die (that die is what made every
+    // below-"strong" fleet's win rate 0% pre-nerf — it stays cut). See
+    // plans/iteration-22.md 22.3.
     blurb: 'The final stat wall.',
     groups: solo('gcds', 1, {
       initiative: 0,
-      hp: 7,
+      hp: 10,
       computer: 2,
-      shield: 1,
+      shield: 2,
       cannons: [{ diceCount: 3, damage: 2 }],
       missiles: [{ diceCount: 2, damage: 1 }],
     }),
@@ -358,12 +372,19 @@ function totalHp(enemy: EnemyDef): number {
   return enemy.groups.reduce((sum, g) => sum + g.stats.hp * g.count, 0);
 }
 
-// Depth band within a single act's 10-column trellis, re-banded for
-// iteration 8's longer acts: easy 0-3, mid 4-6, hard 7-9 (act 1's column 0
-// is the opener and never queries this).
+// Depth band within a single act's 10-column trellis (act 1's column 0 is
+// the opener and never queries this).
+//
+// Iteration 22: shifted one column later (was easy 0-3, mid 4-6, hard 7-9)
+// after simulation found column 4 was a *triple* cliff — this band,
+// veterancyBonus below, and the first escalation (escalations.ts
+// drawEscalationSchedule) all stepped up at the same column, independently
+// authored, none aware of the other two. All three now move together; see
+// plans/iteration-22.md 22.0 for the diagnosis and 22.1 for why they're
+// pinned to the same column rather than staggered.
 function poolBand(col: number): 'easy' | 'mid' | 'hard' {
-  if (col <= 3) return 'easy';
-  if (col <= 6) return 'mid';
+  if (col <= 4) return 'easy';
+  if (col <= 7) return 'mid';
   return 'hard';
 }
 
@@ -453,10 +474,14 @@ export function hunterKillerForAmbush(act: 1 | 2, col: number): EnemyDef {
 // A per-column HP modifier applied at PICK_NODE, on top of any escalations —
 // difficulty climbs every few columns instead of only in three pool-band
 // steps. Never applied to the opener or bosses (bosses are hand-tuned).
+//
+// Iteration 22: shifted to stay aligned with poolBand above (see its
+// comment) — both step at columns 5 and 8 now, alongside the first two
+// escalations (escalations.ts drawEscalationSchedule).
 export function veterancyBonus(col: number): number {
-  if (col <= 3) return 0;
-  if (col <= 6) return 1;
-  return 2; // cols 7-9
+  if (col <= 4) return 0;
+  if (col <= 7) return 1;
+  return 2; // cols 8-9
 }
 
 export function applyVeterancy(enemy: EnemyDef, col: number): EnemyDef {
@@ -575,6 +600,20 @@ export const BOSS_IDS: BossId[] = ['gcds', 'hive', 'dread'];
 const HIVE_MOTHER: EnemyDef = {
   id: 'hive',
   name: 'Hive Mother',
+  // Measured, not re-tuned, 2026-08-04 (iteration 22.6): added to
+  // balance.ts's matchup table for the first time (see that file's
+  // comment) and found at 100% for the strong-fleet reference — a
+  // pre-existing gap, not something this iteration's other changes
+  // caused. Three different nerfs were tried (HP 2->3, cannon dice 1->2,
+  // shield 0->1) and every one of them left the strong-fleet ceiling at
+  // 100% while measurably hurting every *weaker* reference fleet (col3-
+  // typical fell as low as 3% along the way) — a 3-ship fleet with 4+
+  // cannon dice total one-shots a 1-2-HP target regardless of shield or
+  // incremental HP, so those levers can't move the ceiling without first
+  // making the weaker-fleet floor worse. Reverted to original stats
+  // rather than ship a net-negative change; the strong-fleet-vs-Hive-
+  // Mother gap is now visible in the table (it wasn't before) and is
+  // flagged in plans/iteration-22.md's status notes as unresolved.
   blurb: 'Demands initiative, flak or point-defense, and a taunt-decoy — many small dice.',
   groups: solo('hive', 4, {
     initiative: 3,
@@ -589,12 +628,20 @@ const HIVE_MOTHER: EnemyDef = {
 const DREADNOUGHT: EnemyDef = {
   id: 'dread',
   name: 'Dreadnought',
-  blurb: 'Demands computer 5+ (or optics), and answers big dice with reactive armor.',
+  // Re-tuned 2026-08-04 (iteration 22.6): shield 4 was never checked
+  // against the other two act-1 mid-bosses' difficulty — only GCDS had a
+  // balance.ts sanity check, so Dreadnought (drawn with equal 1-in-3
+  // probability at every run's boss fight) went untested at 6% for the
+  // strong-fleet reference, three times harder to beat than the same
+  // fleet's 55% vs GCDS. Shield 4 -> 2 brings it in line with GCDS's
+  // shield 2 — "demands computer 5+" was a design idea this fleet's
+  // credits could never actually reach.
+  blurb: 'Answers big dice with reactive armor.',
   groups: solo('dreadnought', 1, {
     initiative: 1,
     hp: 9,
     computer: 3,
-    shield: 4,
+    shield: 2,
     cannons: [
       { diceCount: 2, damage: 2 },
       { diceCount: 1, damage: 4 },

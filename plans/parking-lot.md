@@ -39,6 +39,17 @@
 - **Re-arm the balance gate** once the feature pace slows: refresh the
   reference fleets (add a taunt-turtle build), re-derive target bands per
   boss, and reinstate the script as a milestone gate.
+- **Veterancy scaling by percentage, not flat HP (found 2026-08-04, iteration
+  22.3):** `applyVeterancy`'s flat `+1`/`+2` HP is a 100% toughness increase
+  for a 1-HP squadron ship (Interceptor swarm) but only 33-50% for a
+  single-hull enemy at HP 3-4 — the same bonus hits low-HP-per-ship
+  formations far harder than the design likely intended. Interceptor swarm
+  was measurably the single deadliest enemy in the roster post-22.1 because
+  of this; partially mitigated by cutting its ship count 4→3, not fixed at
+  the mechanic level. A proper fix (percentage-based bonus, or excluding
+  sub-2-HP ships from flat bonuses) touches every pool and every other
+  iteration that assumes flat veterancy math — needs its own scoped pass,
+  not a drive-by.
 
 - **Combat-interaction bundle (pitched 2026-07-27, user passed):**
   click-targeted actives (disruptor pulse / tractor snare / painter),

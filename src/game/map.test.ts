@@ -13,7 +13,7 @@ const ACT1_QUOTAS = [
   ['shop', 'combat', 'event'],
   ['elite', 'combat', 'event'],
   ['repair', 'shop', 'combat'],
-  ['combat', 'combat', 'event'],
+  ['repair', 'combat', 'event'],
   ['elite', 'combat', 'event'],
   ['shop', 'elite', 'combat'],
   ['shop', 'elite', 'combat'],
@@ -192,5 +192,51 @@ describe('nodesConnect / reachableNodes', () => {
     const columns = actColumns(map, 1);
     const node = getNode(columns, { col: 2, row: 1 });
     expect(node).toBe(columns[2][1]);
+  });
+});
+
+// Iteration 22.2: about a third of act-1 sim runs used to reach the
+// mid-tier pool having never been able to route into column 3's shop,
+// because its row was left to the shuffle and a player boxed into row 0 or
+// row 2 at column 2 could find it unreachable. The shop is now pinned to
+// row 1, which nodesConnect's |row diff| <= 1 rule makes reachable from
+// every row of the previous column.
+describe('act-1 column-3 shop is always reachable (iteration 22.2)', () => {
+  it('the column-3 shop is always at row 1', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const map = generateMap(seed, mulberry32(seed));
+      const col3 = map.act1Columns[3];
+      const shop = col3.find((n) => n.type === 'shop')!;
+      expect(shop.row).toBe(1);
+    }
+  });
+
+  it('every row of column 2 can reach the column-3 shop', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const map = generateMap(seed, mulberry32(seed));
+      const shop = map.act1Columns[3].find((n) => n.type === 'shop')!;
+      for (const fromRow of [0, 1, 2]) {
+        expect(nodesConnect({ col: 2, row: fromRow }, { col: shop.col, row: shop.row })).toBe(true);
+      }
+    }
+  });
+
+  it('act-1 column 3 still carries its full quota as a set (combat + event alongside the pinned shop)', () => {
+    const map = generateMap(7, mulberry32(7));
+    const types = map.act1Columns[3].map((n) => n.type).sort();
+    expect(types).toEqual(['combat', 'event', 'shop']);
+  });
+
+  it('act 2 is untouched — its own column-3 shop (if the quota drew one) is not pinned', () => {
+    // Act 2's quota at column 2 (0-indexed) is ['shop', 'combat', 'event'] —
+    // pick a handful of seeds and confirm at least one places the shop
+    // outside row 1, proving act 2 was never touched by the act-1-only pin.
+    const rows = new Set<number>();
+    for (let seed = 1; seed <= 20; seed++) {
+      const map = generateMap(seed, mulberry32(seed));
+      const shop = map.act2Columns[2].find((n) => n.type === 'shop');
+      if (shop) rows.add(shop.row);
+    }
+    expect(rows.size).toBeGreaterThan(1);
   });
 });

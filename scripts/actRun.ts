@@ -18,10 +18,12 @@ import {
   commodityLotBuyCost,
   commodityLotCap,
   COMMODITY_LOT_SELL_PRICE,
+  eliteReward,
   fleetCap,
   frameCost,
   mercenaryCost,
   partCost,
+  winReward,
 } from '../src/game/reducer';
 import { getPart, STARTING_LOADOUT } from '../src/game/parts';
 import { applyRepairBanking, deriveFleetForCombat, effectiveSlots } from '../src/game/ship';
@@ -86,13 +88,6 @@ const WISHLIST: PartId[] = [
   'init3',
 ];
 
-function winReward(col: number): number {
-  return 4 + col;
-}
-function eliteReward(col: number): number {
-  return 8 + col;
-}
-
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -104,12 +99,15 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+// Mirrors escalations.ts's drawEscalationSchedule act-1 half by hand (this
+// sim doesn't build a full RunState to drive the real one) — landing
+// columns must stay in sync with that file's 4/7 (iteration 22).
 function drawAct1Escalations(rng: () => number): ScheduledEscalation[] {
   const pool = ESCALATIONS.map((e) => e.id);
   const pick = (): EscalationId => pool.splice(Math.floor(rng() * pool.length), 1)[0];
   return [
-    { id: pick(), act: 1, landsAfterColumn: 3, revealed: false },
-    { id: pick(), act: 1, landsAfterColumn: 6, revealed: false },
+    { id: pick(), act: 1, landsAfterColumn: 4, revealed: false },
+    { id: pick(), act: 1, landsAfterColumn: 7, revealed: false },
   ];
 }
 
@@ -204,10 +202,20 @@ function chooseNode(options: MapNode[], damageRatio: number, rng: () => number, 
         if (n.type === 'elite') base += 10;
         break;
       case 'spymaster':
-        // "fight the minimum, farm every wreck risk-free."
-        if (n.type === 'event') base += 25;
-        if (n.type === 'combat') base -= 10;
-        if (n.type === 'elite') base -= 15;
+        // "farm every wreck risk-free." Iteration 22.6: cut the event bonus
+        // from +25 to +5 (and dropped the combat/elite downweight this had
+        // at launch entirely). At +25, an event (base score 40-55) always
+        // outscored combat (flat 50) regardless of the downweight — so
+        // removing the downweight alone changed nothing (confirmed by
+        // measurement: identical clear rate before and after). With
+        // winReward raised to 7+col (was 4+col), a won fight is worth
+        // several times an average event's ~2.3cr expected value (mostly
+        // the flat +2cr draw, occasionally the Spymaster's own heat-free
+        // +8cr salvage claim) — a doctrine whose only real mechanical edge
+        // is "no heat cost on salvage" doesn't need to out-and-out avoid
+        // fights to realize that edge, just take the free-money event when
+        // it's actually competitive.
+        if (n.type === 'event') base += 5;
         break;
       case 'admiral':
         // "elite nodes are food" — a wide fleet can afford the premium fight.
@@ -276,17 +284,20 @@ export function simulateRun(seed: number, commanderId?: CommanderId): RunOutcome
         }
       }
 
-      // Iteration 21 (the Warlord, tall): "buys flagship parts" — the whole
-      // doctrine is one capital ship, so this policy never expands the
-      // fleet at all; every credit either fits the Flagship or is banked.
+      // Iteration 21 (the Warlord, tall): "buys flagship parts" — fits the
+      // Flagship first, every time, ahead of any escort. Iteration 22.6:
+      // this used to stop shopping entirely once the Flagship was full
+      // ("every credit either fits the Flagship or is banked"), which
+      // measurably hoarded credits no real player would leave idle (avg
+      // 22cr unspent per run) instead of buying even one support hull —
+      // "tall" means the Flagship carries the run, not that a spare 22cr
+      // buys nothing. It now falls through to the same escort-buying floor
+      // every other commander uses once the Flagship has no room left.
       const openShip =
-        commanderId === 'warlord'
-          ? fleet[0].equipped.length < effectiveSlots(fleet[0].frameId, fleet[0].upgrades)
-            ? fleet[0]
-            : undefined
+        commanderId === 'warlord' && fleet[0].equipped.length < effectiveSlots(fleet[0].frameId, fleet[0].upgrades)
+          ? fleet[0]
           : fleet.find((s) => s.equipped.length < effectiveSlots(s.frameId, s.upgrades));
       if (!openShip) {
-        if (commanderId === 'warlord') return;
         // Flagship (and every escort so far) full? Buy an escort and keep
         // fitting it. The realistic end-of-run fleet has two, so a policy
         // that can't buy ships would understate what "actually buying
