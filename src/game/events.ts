@@ -1,4 +1,5 @@
 import { combatEnemyPool, EASY_POOL, EASY_POOL_ACT2, HARD_POOL, HARD_POOL_ACT2, hardestEnemyForAmbush } from './enemies';
+import { addHeat } from './heat';
 import { actColumns, globalColumn } from './map';
 import type { MapPosition } from './map';
 import { deriveFleetStats, deriveStats } from './ship';
@@ -21,7 +22,8 @@ export type EventId =
   | 'defector-pursuit'
   | 'distress-beacon'
   | 'repair-tender'
-  | 'militia-requisition';
+  | 'militia-requisition'
+  | 'salvage-claim';
 
 // --- Requirement predicate library (14.1) -----------------------------
 // A small reusable set, deliberately limited to what the 14.2 content table
@@ -241,6 +243,26 @@ export const EVENTS: EventDef[] = [
         reqText: 'requires Damage control bay',
         chooseShip: true,
       },
+      {
+        label: 'Full-fleet overhaul — every ship repairs 2 damage (8 credits)',
+        requirement: { kind: 'creditsAtLeast', value: 8 },
+        reqText: 'requires 8+ credits',
+      },
+    ],
+  },
+  {
+    // Iteration 20 (the economy floor): makes the heat track's design
+    // literal — safe income exists, priced in pursuit. Self-limiting by
+    // construction: at heat 4 ("Hunted") the next non-combat node is
+    // intercepted outright (see reducer.ts PICK_NODE), so farming wrecks
+    // at Hunted means buying the next ambush.
+    id: 'salvage-claim',
+    title: 'Unclaimed wreck field',
+    flavor: 'A debris field drifts unclaimed — real salvage, if you loiter long enough to strip it.',
+    options: [
+      { label: 'Leave it — no sense lingering' },
+      { label: 'Strip the field (+8 credits, +1 heat)' },
+      { label: 'Thorough sweep — take your time (+12 credits, +2 heat)' },
     ],
   },
   {
@@ -300,6 +322,13 @@ function applyCappedDamage(fleet: PlayerShipState[], shipIndex: number, amount: 
 
 function applyRepair(fleet: PlayerShipState[], shipIndex: number, amount: number): PlayerShipState[] {
   return fleet.map((ship, i) => (i === shipIndex ? { ...ship, damage: Math.max(0, ship.damage - amount) } : ship));
+}
+
+// Fleet triage (iteration 20): every ship at once, instead of the tender's
+// usual pick-one patch-up — a broader but shallower repair, for a player
+// blunting the damage-carryover spiral rather than fixing one bad fight.
+function applyRepairAll(fleet: PlayerShipState[], amount: number): PlayerShipState[] {
+  return fleet.map((ship) => ({ ...ship, damage: Math.max(0, ship.damage - amount) }));
 }
 
 function randomPart(rng: RngFn, pool: PartId[]): PartId {
@@ -661,10 +690,21 @@ export function resolveEventChoice(
           outcomeText: 'The tender patches up your chosen ship for 4 credits.',
         };
       }
-      // choiceIndex 2: Damage control bay — same repair, free.
+      if (choiceIndex === 2) {
+        // Damage control bay — same single-ship repair, free.
+        return {
+          state: { ...state, fleet: applyRepair(state.fleet, shipIndex, 3) },
+          outcomeText: 'Your crews trade technique notes with the tender — a free repair for your chosen ship.',
+        };
+      }
+      // choiceIndex 3: full-fleet overhaul — every ship, 2 damage, 8 credits.
       return {
-        state: { ...state, fleet: applyRepair(state.fleet, shipIndex, 3) },
-        outcomeText: 'Your crews trade technique notes with the tender — a free repair for your chosen ship.',
+        state: {
+          ...state,
+          credits: clampCredits(state.credits - 8),
+          fleet: applyRepairAll(state.fleet, 2),
+        },
+        outcomeText: 'The tender crew works the whole fleet at once — every ship repairs 2 damage, for 8 credits.',
       };
     }
 
@@ -677,6 +717,23 @@ export function resolveEventChoice(
       return {
         state: { ...state, hand, credits: state.credits + 7 },
         outcomeText: `You donate your ${cardId ? getCard(cardId).name : 'card'} module for 7 credits.`,
+      };
+    }
+
+    case 'salvage-claim': {
+      if (choiceIndex === 0) {
+        return { state, outcomeText: 'You leave the field behind.' };
+      }
+      if (choiceIndex === 1) {
+        return {
+          state: { ...state, credits: state.credits + 8, heat: addHeat(state.heat, 1) },
+          outcomeText: 'You strip the field for 8 credits — the extra time in the open costs you a point of heat.',
+        };
+      }
+      // choiceIndex 2: thorough sweep — more credits, more heat.
+      return {
+        state: { ...state, credits: state.credits + 12, heat: addHeat(state.heat, 2) },
+        outcomeText: 'A thorough sweep nets 12 credits — but lingering that long draws real attention: +2 heat.',
       };
     }
 

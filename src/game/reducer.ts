@@ -34,7 +34,7 @@ import { addHeat, MAX_HEAT } from './heat';
 import { actColumns, BOSS_COLUMN, generateMap, getNode, globalColumn, LANE_COLUMNS, reachableNodes } from './map';
 import type { CargoTag, GameMap, MapNode, MapPosition } from './map';
 export { globalColumn } from './map';
-import { CARGO_POD_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
+import { CARGO_POD_PART_ID, COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
 import { generateQuestOffer } from './quests';
 import type { ActiveQuest } from './quests';
 import { randomSeed, resumeRng } from './rng';
@@ -80,6 +80,15 @@ export type RunAction =
   | { type: 'SET_TARGETING_STANCE'; stance: TargetingStance }
   | { type: 'ACCEPT_QUEST'; carrierShipIndex?: number }
   | { type: 'MOVE_CARGO_POD'; toShipIndex: number }
+  // Iteration 20 (commodity runs): buy loads the lot onto the chosen ship;
+  // sell removes whichever ship currently carries it (there is never more
+  // than one lot in the fleet at a time — see RunState.commodityLotBought-
+  // AtGlobalColumn).
+  | { type: 'BUY_COMMODITY_LOT'; shipIndex: number }
+  | { type: 'SELL_COMMODITY_LOT' }
+  // Iteration 20 (war assets): a one-fight-only escort. Consumed the very
+  // next time a combat resolves (win or withdraw), regardless of outcome.
+  | { type: 'BUY_MERCENARY' }
   | { type: 'USE_ACTIVE'; shipIndex: number; abilityIndex: number }
   | { type: 'REROLL' }
   | { type: 'LEAVE_SHOP' }
@@ -139,6 +148,19 @@ const STARTING_FIT: Record<'interceptor' | 'bastion' | 'dreadnought' | 'light-cr
 function setupSpent(equipped: PartId[]): number {
   return equipped.reduce((sum, id) => sum + getPart(id).cost, 0);
 }
+
+// Iteration 20 (commodity runs): buy low at one shop, sell high at any
+// later one. The +5cr spread is the reward; the risk is the slot it ties up
+// for however many columns pass in between, and that it's lost outright if
+// the carrying ship is.
+export const COMMODITY_LOT_BUY_COST = 4;
+export const COMMODITY_LOT_SELL_PRICE = 9;
+
+// Iteration 20 (war assets): a one-fight escort, priced above a real
+// Interceptor (8cr) since it costs nothing but credits and never has to
+// survive past the fight it's hired for.
+export const MERCENARY_COST = 12;
+const MERCENARY_SHIP_NAME = 'Mercenary escort';
 
 // Credits earned for winning a combat node at the given column.
 export function winReward(col: number): number {
@@ -346,6 +368,14 @@ function removeOnce<T>(list: T[], item: T): T[] {
   const copy = [...list];
   copy.splice(index, 1);
   return copy;
+}
+
+// Neither pseudo-part is real equipment — a cargo pod is failed quest
+// freight, a commodity lot is unrealized profit. Both are lost outright
+// with a destroyed/scuttled ship rather than salvaged to inventory; shared
+// here so every salvage site excludes both without repeating the list.
+function isSalvageablePart(partId: PartId): boolean {
+  return partId !== CARGO_POD_PART_ID && partId !== COMMODITY_LOT_PART_ID;
 }
 
 // Iteration 7: a flat uniform draw over ~30 parts can no longer reliably
@@ -737,6 +767,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
     case 'UNEQUIP': {
       if (state.phase !== 'prep' && state.phase !== 'shop') return state;
       if (action.partId === CARGO_POD_PART_ID) return state; // moved via MOVE_CARGO_POD, never unequipped to inventory
+      if (action.partId === COMMODITY_LOT_PART_ID) return state; // sold via SELL_COMMODITY_LOT, never unequipped to inventory
       const ship = state.fleet[action.shipIndex];
       if (!ship || !ship.equipped.includes(action.partId)) return state;
       const equipped = removeOnce(ship.equipped, action.partId);
@@ -824,13 +855,18 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const survivingFleet: PlayerShipState[] = [];
       let carrierDestroyed = false;
       state.fleet.forEach((ship, i) => {
+        // A hired mercenary is good for exactly this one fight — it leaves
+        // the fleet the moment combat resolves regardless of outcome, with
+        // no salvage and no ships-lost entry. It fought; it's not owed
+        // anything beyond that.
+        if (ship.mercenary) return;
         const shipOutcome = outcome.playerShips[i];
         if (shipOutcome.destroyed) {
           // Parts salvage back to inventory; upgrades are lost with the
           // ship — that's what makes a capital ship's upgrades feel earned.
-          // A cargo pod is not a real part — it's lost with the ship, not
-          // salvaged (the quest has failed; there's nothing to keep).
-          const salvage = ship.equipped.filter((id) => id !== CARGO_POD_PART_ID);
+          // Cargo pods and commodity lots are not real parts — lost with
+          // the ship, not salvaged.
+          const salvage = ship.equipped.filter(isSalvageablePart);
           inventory = [...inventory, ...salvage];
           salvagedParts.push(...salvage);
           lostShips.push(playerShipLabel(state.fleet, i));
@@ -1015,10 +1051,15 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const lostShips: string[] = [];
       let carrierDestroyed = false;
       state.fleet.forEach((ship, i) => {
+        // Same rule as a resolved combat (CONTINUE): a mercenary leaves the
+        // fleet the moment this fight is over, win, loss, or — here —
+        // withdrawal. Without this, a mercenary that happened to survive to
+        // the withdraw would wrongly persist into the next fight for free.
+        if (ship.mercenary) return;
         const combatShip = state.combat!.playerShips[i];
         const destroyed = combatShip.damage >= combatShip.stats.hp;
         if (destroyed) {
-          inventory = [...inventory, ...ship.equipped.filter((id) => id !== CARGO_POD_PART_ID)];
+          inventory = [...inventory, ...ship.equipped.filter(isSalvageablePart)];
           lostShips.push(playerShipLabel(state.fleet, i));
           if (state.activeQuest?.archetype === 'delivery' && state.activeQuest.carrierShipIndex === i) {
             carrierDestroyed = true;
@@ -1200,7 +1241,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'shop') return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship || ship.frameId === 'cruiser') return state;
-      const salvage = ship.equipped.filter((id) => id !== CARGO_POD_PART_ID);
+      const salvage = ship.equipped.filter(isSalvageablePart);
       const fleet = state.fleet.filter((_, i) => i !== action.shipIndex);
       const quest = state.activeQuest;
       let activeQuest = quest;
@@ -1269,6 +1310,81 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         return s;
       });
       return { ...state, fleet, activeQuest: { ...state.activeQuest, carrierShipIndex: action.toShipIndex } };
+    }
+
+    case 'BUY_COMMODITY_LOT': {
+      if (state.phase !== 'shop') return state;
+      if (state.credits < COMMODITY_LOT_BUY_COST) return state;
+      // Fleet-wide cap of 1 — a second lot would just be a second bet on the
+      // same trade, not a new decision.
+      if (state.fleet.some((s) => s.equipped.includes(COMMODITY_LOT_PART_ID))) return state;
+      const ship = state.fleet[action.shipIndex];
+      if (!ship) return state;
+      // A mercenary leaves the fleet — with whatever it's carrying — the
+      // moment its one fight resolves. Refusing here rather than letting the
+      // lot silently vanish later keeps the loss a rule, not a trap.
+      if (ship.mercenary) return state;
+      if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades)) return state;
+      const fleet = state.fleet.map((s, i) =>
+        i === action.shipIndex ? { ...s, equipped: [...s.equipped, COMMODITY_LOT_PART_ID] } : s,
+      );
+      const boughtAtGlobalColumn = globalColumn(state.act, state.position?.col ?? 0);
+      return {
+        ...state,
+        fleet,
+        credits: state.credits - COMMODITY_LOT_BUY_COST,
+        commodityLotBoughtAtGlobalColumn: boughtAtGlobalColumn,
+      };
+    }
+
+    case 'SELL_COMMODITY_LOT': {
+      if (state.phase !== 'shop') return state;
+      const carrierIndex = state.fleet.findIndex((s) => s.equipped.includes(COMMODITY_LOT_PART_ID));
+      if (carrierIndex === -1) return state;
+      const boughtAt = state.commodityLotBoughtAtGlobalColumn;
+      const here = globalColumn(state.act, state.position?.col ?? 0);
+      // Only a LATER station than the one it was bought at — same-visit
+      // flipping is impossible by construction (shops are forward-only
+      // nodes the player can't revisit), but the check stands on its own
+      // regardless of how a future map feature might change that.
+      if (boughtAt === undefined || here <= boughtAt) return state;
+      const fleet = state.fleet.map((s, i) =>
+        i === carrierIndex ? { ...s, equipped: removeOnce(s.equipped, COMMODITY_LOT_PART_ID) } : s,
+      );
+      return {
+        ...state,
+        fleet,
+        credits: state.credits + COMMODITY_LOT_SELL_PRICE,
+        commodityLotBoughtAtGlobalColumn: undefined,
+      };
+    }
+
+    case 'BUY_MERCENARY': {
+      if (state.phase !== 'shop') return state;
+      if (state.fleet.length >= MAX_FLEET_SIZE) return state;
+      if (state.credits < MERCENARY_COST) return state;
+      return {
+        ...state,
+        credits: state.credits - MERCENARY_COST,
+        fleet: [
+          ...state.fleet,
+          {
+            frameId: 'interceptor',
+            equipped: ['ion'],
+            damage: 0,
+            upgrades: [],
+            name: MERCENARY_SHIP_NAME,
+            kills: 0,
+            fightsSurvived: 0,
+            mercenary: true,
+          },
+        ],
+        // Deliberately NOT counted against shipsCommissioned — the naming
+        // counter is for the fleet's real, permanent roster (ships that
+        // earn a seeded name); a one-fight hire has a literal name instead
+        // and shouldn't shift later ships' names by consuming a slot in
+        // that sequence.
+      };
     }
 
     case 'USE_ACTIVE': {

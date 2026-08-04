@@ -74,9 +74,27 @@ export const BOSS_COLUMN = LANE_COLUMNS;
 // node's type is visible on the map (subject to iteration-6 fog) —
 // routing is the whole point. A one-entry quota (the act-1 opener) is a
 // fixed single node, never shuffled.
+//
+// Iteration 20 (the economy floor) touched two things here, per the
+// act-1 clear-rate gate in scripts/actRun.ts:
+//   - col 1 gained an event node (was 3 combats) — one more income node
+//     early, and one fewer damage-intake node on the way to it.
+//   - both acts' LAST lane column (9) now guarantees a shop (dropping
+//     repair, same as act 2 already had at col 9 vs. act 1's old
+//     repair/elite/combat), so arriving at the boss rich is a plan the
+//     player can route toward, not a hope — and column 9 keeps a plain
+//     combat option alongside the elite, rather than losing it to make
+//     room for the shop.
+// Changing a column's node-TYPE COMPOSITION (not just re-ordering the
+// literal — shuffle draws from the multiset regardless of source order)
+// also changes how many rng calls that column consumes, since only
+// 'combat' entries draw a cargo tag: fewer/more combats shifts every rng
+// draw for the rest of map generation and the run. Downstream seeded test
+// expectations were updated alongside this change, not preserved — the
+// old numbers described the old content, not a contract.
 const ACT1_QUOTAS: NodeType[][] = [
   ['opener'],
-  ['combat', 'combat', 'combat'],
+  ['combat', 'combat', 'event'],
   ['combat', 'combat', 'event'],
   ['shop', 'combat', 'event'],
   ['elite', 'combat', 'event'],
@@ -84,7 +102,7 @@ const ACT1_QUOTAS: NodeType[][] = [
   ['combat', 'combat', 'event'],
   ['elite', 'combat', 'event'],
   ['shop', 'elite', 'combat'],
-  ['repair', 'elite', 'combat'],
+  ['shop', 'elite', 'combat'],
 ];
 
 const ACT2_QUOTAS: NodeType[][] = [
@@ -97,7 +115,7 @@ const ACT2_QUOTAS: NodeType[][] = [
   ['combat', 'elite', 'event'],
   ['shop', 'elite', 'combat'],
   ['repair', 'elite', 'combat'],
-  ['elite', 'combat', 'event'],
+  ['shop', 'elite', 'combat'],
 ];
 
 function shuffle<T>(items: T[], rng: () => number): T[] {

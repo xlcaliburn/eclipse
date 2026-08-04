@@ -34,6 +34,12 @@ const SAVE_KEY = 'eclipse.save.v1';
 // fields, which none of these are.)
 const DAILY_SAVE_KEY = 'eclipse.save.daily.v1';
 const DAILY_RECORD_KEY = 'eclipse.daily.v1';
+// Iteration 20 (the economy floor): new RunState surface —
+// `commodityLotBoughtAtGlobalColumn` and PlayerShipState's `mercenary` —
+// is optional with read-site fallbacks (a mercenary ship is only ever
+// created with the flag set; an absent lot-bought-column just means "no
+// lot," which is also true of every pre-20 save). Same reasoning as 18's
+// no-bump note above: no new required-at-render field, so no version bump.
 
 export type SaveSlot = 'standard' | 'daily';
 

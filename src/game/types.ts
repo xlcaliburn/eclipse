@@ -128,6 +128,11 @@ export interface PlayerShipState {
   name?: string; // seeded at commissioning ("ISV Resolute"); falls back to "Frame #N" in labels
   kills?: number; // enemy ships this hull has destroyed, across the whole run
   fightsSurvived?: number; // fights this hull came out of alive (wins and withdrawals)
+  // Iteration 20 (war assets): a hired escort, good for exactly one combat.
+  // Removed from the fleet the moment that combat resolves (win, loss, or
+  // withdrawal) — see reducer.ts's CONTINUE/WITHDRAW. No salvage, no kill
+  // credit, doesn't count toward shipsLost.
+  mercenary?: boolean;
 }
 
 // Iteration 18: run-wide counters for the end-screen summary and the daily
@@ -331,4 +336,11 @@ export interface RunState {
   dailyDate?: string; // the YYYY-MM-DD this daily was generated for
   shipsCommissioned?: number; // naming counter — ships ever created this run (not fleet size)
   runStats?: RunStats;
+  // Iteration 20 (commodity runs): the GLOBAL column (see map.ts's
+  // globalColumn) of the shop where the fleet's current commodity lot was
+  // bought, if any. Sellable only at a later shop. Not indexed by ship —
+  // at most one lot exists fleet-wide at a time, so "which ship carries it"
+  // is answered by scanning fleet.equipped for COMMODITY_LOT_PART_ID rather
+  // than storing (and having to re-index on scuttle) a ship pointer.
+  commodityLotBoughtAtGlobalColumn?: number;
 }

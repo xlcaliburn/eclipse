@@ -302,8 +302,23 @@ const CARGO_POD_PART: Part = {
   cost: 0,
 };
 
+// The commodity lot (iteration 20): same pseudo-part shape as the cargo pod
+// above — occupies a slot, never sells, never unequips to inventory — but
+// bought and sold for real credits via BUY_COMMODITY_LOT/SELL_COMMODITY_LOT
+// instead of riding a delivery quest. Kept out of `PARTS` for the same
+// reason: the shop's random offer draw must never surface it.
+export const COMMODITY_LOT_PART_ID: PartId = 'commodity-lot';
+
+const COMMODITY_LOT_PART: Part = {
+  id: COMMODITY_LOT_PART_ID,
+  name: 'Commodity lot',
+  type: 'cargo',
+  description: 'Bought low, sold high at a later station. Occupies a slot; lost if the carrying ship is.',
+  cost: 0,
+};
+
 const PARTS_BY_ID: Record<PartId, Part> = Object.fromEntries(
-  [...PARTS, CARGO_POD_PART].map((p) => [p.id, p]),
+  [...PARTS, CARGO_POD_PART, COMMODITY_LOT_PART].map((p) => [p.id, p]),
 );
 
 export function getPart(id: PartId): Part {

@@ -13,6 +13,15 @@
 - **Trader mini-shop rework** (`wandering-trader` still retired from the
   event pool). Partially superseded by iteration 20's commodity runs —
   revisit only if shops still feel flat after 20 ships.
+- **Shops selling reaction cards: decided against (2026-08-04).** Proposed
+  in iteration 20's spec as a war-asset sink, but `cards.ts` already has a
+  standing law from iteration 7: "cards are found, never bought — the shop
+  no longer sells them." The spec was written without knowing that law
+  existed; implementation caught the conflict and dropped the feature
+  rather than silently reversing iteration 7. The mercenary escort (20.5,
+  shipped) covers the same "give late wealth a mouth" goal without it. Do
+  not re-propose card sales without deliberately revisiting the iteration-7
+  decision first.
 - **Audio pass** (deliberately not a rider on iteration 10's visual
   overhaul): a small set of synthesized/bundled SFX for the combat
   theater's event replay (shots, hits, destruction, warp), mute by

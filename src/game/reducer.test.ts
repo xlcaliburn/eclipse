@@ -1387,6 +1387,205 @@ describe('quests (iteration 6)', () => {
   });
 });
 
+describe('BUY_COMMODITY_LOT / SELL_COMMODITY_LOT (iteration 20)', () => {
+  it('loads the lot onto the chosen ship, charges 4cr, and records the global column bought at', () => {
+    let state = stateWithMap('shop', { phase: 'shop', credits: 10, position: { col: 2, row: 0 } });
+    state = runReducer(state, { type: 'BUY_COMMODITY_LOT', shipIndex: 0 });
+    expect(state.fleet[0].equipped).toContain('commodity-lot');
+    expect(state.credits).toBe(6);
+    expect(state.commodityLotBoughtAtGlobalColumn).toBe(globalColumn(1, 2));
+  });
+
+  it('refuses without 4cr, without a free hardpoint, or if the fleet already carries a lot', () => {
+    const poor = stateWithMap('shop', { phase: 'shop', credits: 3 });
+    expect(runReducer(poor, { type: 'BUY_COMMODITY_LOT', shipIndex: 0 }).fleet[0].equipped).not.toContain(
+      'commodity-lot',
+    );
+
+    const dreadnoughtFull: PlayerShipState[] = [
+      { frameId: 'dreadnought', equipped: Array(8).fill('hull1') as PartId[], damage: 0, upgrades: [] },
+    ];
+    const full = stateWithMap('shop', { phase: 'shop', credits: 10, fleet: dreadnoughtFull });
+    expect(runReducer(full, { type: 'BUY_COMMODITY_LOT', shipIndex: 0 }).fleet[0].equipped).not.toContain(
+      'commodity-lot',
+    );
+
+    const alreadyCarrying = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 10,
+      fleet: [
+        { frameId: 'cruiser', equipped: ['commodity-lot'], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] },
+      ],
+    });
+    const result = runReducer(alreadyCarrying, { type: 'BUY_COMMODITY_LOT', shipIndex: 1 });
+    expect(result.fleet[1].equipped).not.toContain('commodity-lot'); // fleet-wide cap of 1
+    expect(result.credits).toBe(10); // unspent — the buy never happened
+  });
+
+  it('refuses to load a lot onto a mercenary — it would be lost with the ship after one fight', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [], mercenary: true },
+    ];
+    const state = stateWithMap('shop', { phase: 'shop', credits: 10, fleet });
+    const result = runReducer(state, { type: 'BUY_COMMODITY_LOT', shipIndex: 0 });
+    expect(result.fleet[0].equipped).not.toContain('commodity-lot');
+    expect(result.credits).toBe(10);
+  });
+
+  it('SELL refuses at the same global column it was bought, and refuses if nothing carries a lot', () => {
+    const noLot = stateWithMap('shop', { phase: 'shop', credits: 0, position: { col: 5, row: 0 } });
+    expect(runReducer(noLot, { type: 'SELL_COMMODITY_LOT' }).credits).toBe(0);
+
+    const sameColumn = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 0,
+      position: { col: 2, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: ['commodity-lot'], damage: 0, upgrades: [] }],
+      commodityLotBoughtAtGlobalColumn: globalColumn(1, 2),
+    });
+    const result = runReducer(sameColumn, { type: 'SELL_COMMODITY_LOT' });
+    expect(result.credits).toBe(0); // still can't flip it at the station it was bought at
+    expect(result.fleet[0].equipped).toContain('commodity-lot');
+  });
+
+  it('SELL at a later station pays 9cr, removes the lot from whichever ship carries it, and clears the record', () => {
+    const state = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 0,
+      position: { col: 5, row: 0 },
+      fleet: [
+        { frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: ['ion', 'commodity-lot'], damage: 0, upgrades: [] },
+      ],
+      commodityLotBoughtAtGlobalColumn: globalColumn(1, 2),
+    });
+    const result = runReducer(state, { type: 'SELL_COMMODITY_LOT' });
+    expect(result.credits).toBe(9);
+    expect(result.fleet[1].equipped).not.toContain('commodity-lot');
+    expect(result.fleet[1].equipped).toContain('ion'); // its real part is untouched
+    expect(result.commodityLotBoughtAtGlobalColumn).toBeUndefined();
+  });
+
+  it('UNEQUIP refuses to remove the commodity lot to inventory — SELL_COMMODITY_LOT is the only way out', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['commodity-lot'], damage: 0, upgrades: [] }];
+    let state: RunState = { ...initialRunState(), phase: 'prep', fleet };
+    state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'commodity-lot' as PartId });
+    expect(state.fleet[0].equipped).toContain('commodity-lot');
+    expect(state.inventory).not.toContain('commodity-lot');
+  });
+
+  it('a lot is lost, not salvaged, if the ship carrying it is destroyed', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'interceptor', equipped: ['ion', 'commodity-lot'], damage: 1, upgrades: [] }, // destroyed
+    ];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 1, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 1 }],
+      GAUNTLET[0],
+      1,
+    );
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 0, row: 0 },
+      fleet,
+      currentEnemy: GAUNTLET[0],
+      combat: { ...combat, winner: 'player' as const },
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.inventory).not.toContain('commodity-lot');
+  });
+
+  it('SCUTTLE_SHIP loses the lot with the ship rather than salvaging it', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['ion', 'commodity-lot'], damage: 0, upgrades: [] },
+    ];
+    let state = stateWithMap('shop', { phase: 'shop', fleet });
+    state = runReducer(state, { type: 'SCUTTLE_SHIP', shipIndex: 1 });
+    expect(state.inventory).toContain('ion'); // the real part still salvages
+    expect(state.inventory).not.toContain('commodity-lot');
+  });
+});
+
+describe('BUY_MERCENARY (iteration 20)', () => {
+  it('hires an Interceptor flagged mercenary, pre-fitted with an ion cannon, for 12cr', () => {
+    let state = stateWithMap('shop', { phase: 'shop', credits: 20 });
+    state = runReducer(state, { type: 'BUY_MERCENARY' });
+    expect(state.fleet).toHaveLength(2);
+    expect(state.fleet[1]).toMatchObject({ frameId: 'interceptor', equipped: ['ion'], mercenary: true });
+    expect(state.credits).toBe(8);
+  });
+
+  it('does not consume the ship-naming counter — a hire is not a commissioned ship', () => {
+    let state = stateWithMap('shop', { phase: 'shop', credits: 20 });
+    const before = state.shipsCommissioned;
+    state = runReducer(state, { type: 'BUY_MERCENARY' });
+    expect(state.shipsCommissioned).toBe(before);
+  });
+
+  it('refuses without 12cr or at the fleet cap', () => {
+    const poor = stateWithMap('shop', { phase: 'shop', credits: 11 });
+    expect(runReducer(poor, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(1);
+
+    const fullFleet: PlayerShipState[] = Array.from({ length: 4 }, () => ({
+      frameId: 'interceptor' as const,
+      equipped: [],
+      damage: 0,
+      upgrades: [],
+    }));
+    const full = stateWithMap('shop', { phase: 'shop', credits: 100, fleet: fullFleet });
+    expect(runReducer(full, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(4);
+  });
+
+  // A hired escort is good for exactly the next combat — these three cover
+  // every way that combat can end.
+  function combatWithMercenary(mercDamage: number, winner: 'player' | undefined): RunState {
+    const combat = initCombat(
+      [
+        { stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 },
+        { stats: { initiative: 1, hp: 1, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: mercDamage },
+      ],
+      GAUNTLET[0],
+      1,
+    );
+    return {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 0, row: 0 },
+      fleet: [
+        { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [], mercenary: true },
+      ],
+      currentEnemy: GAUNTLET[0],
+      combat: winner ? { ...combat, winner, round: 1 } : { ...combat, round: 1 },
+    };
+  }
+
+  it('CONTINUE (win): the mercenary leaves the fleet even though it survived unscathed', () => {
+    const state = combatWithMercenary(0, 'player');
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.fleet).toHaveLength(1);
+    expect(result.fleet.some((s) => s.mercenary)).toBe(false);
+  });
+
+  it('CONTINUE (win): the mercenary leaves with no salvage even though it was destroyed', () => {
+    const state = combatWithMercenary(1, 'player'); // 1 damage >= 1 hp — destroyed
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.fleet).toHaveLength(1);
+    expect(result.inventory).not.toContain('ion'); // rented, not salvaged
+    // The run's ships-lost record is for the permanent fleet, not a hire.
+    expect(result.runStats?.shipsLost ?? []).not.toContain('Mercenary escort');
+  });
+
+  it('WITHDRAW: a mercenary that survived to the retreat still leaves the fleet, not just a destroyed one', () => {
+    const state = combatWithMercenary(0, undefined);
+    const result = runReducer(state, { type: 'WITHDRAW' });
+    expect(result.fleet).toHaveLength(1);
+    expect(result.fleet.some((s) => s.mercenary)).toBe(false);
+  });
+});
+
 describe('commander effects (iteration 6)', () => {
   function winningCombatState(overrides: Partial<RunState> = {}): RunState {
     const combat = initCombat(

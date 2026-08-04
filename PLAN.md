@@ -48,7 +48,7 @@ Rules for working with these files:
 | [17](plans/iteration-17.md) | Outspeed: a ≥4 initiative gap over the enemy's fastest survivor grants one extra cannon activation — initiative becomes a build-around (supersedes iteration 11's unbuilt evasion) | implemented |
 | [18](plans/iteration-18.md) | The daily run (seeded one-attempt challenge + share text) & the fleet remembers (named ships, kill records, run summary) | implemented |
 | [19](plans/iteration-19.md) | Telegraphs: enemy opening fire previewed before each round (engine `incomingFirePreview`, combat chips + threat lines, prep-screen volley readout) | implemented |
-| [20](plans/iteration-20.md) | The economy floor: salvage claims (heat-priced income), fleet triage, commodity runs, pre-boss shop + war assets — gated on `scripts/actRun.ts` act-1 clear rate ≥ 40% | **specced — next up** |
+| [20](plans/iteration-20.md) | The economy floor: salvage claims (heat-priced income), fleet triage, commodity runs, pre-boss shop + mercenary escort | **mechanics implemented; clear-rate gate (≥40%) NOT met — see status notes, needs a user decision on scope** |
 | [21](plans/iteration-21.md) | Commander doctrines: 5-commander roster (Warlord splits into wide Admiral / tall Warlord), one subsystem lean each, over-repair, aces, signature shop stock — requires 20 | specced (after 20) |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 

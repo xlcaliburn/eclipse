@@ -411,6 +411,60 @@ describe('resolveEventChoice — repair-tender', () => {
     const { state } = resolveEventChoice('repair-tender', 2, s0, fixedRng([]), { shipIndex: 0 });
     expect(state.fleet[0].damage).toBe(0);
   });
+
+  // Iteration 20 (fleet triage): option 3, every ship at once instead of
+  // the tender's usual pick-one.
+  it('option 3: full-fleet overhaul pays 8 credits and repairs 2 on every ship, no picker needed', () => {
+    const s0 = baseState({
+      credits: 8,
+      fleet: [
+        { frameId: 'cruiser', equipped: [], damage: 3, upgrades: [] },
+        { frameId: 'cruiser', equipped: ['hull2'], damage: 1, upgrades: [] },
+        { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+      ],
+    });
+    const { state } = resolveEventChoice('repair-tender', 3, s0, fixedRng([]));
+    expect(state.credits).toBe(0);
+    expect(state.fleet[0].damage).toBe(1); // 3 - 2
+    expect(state.fleet[1].damage).toBe(0); // 1 - 2, clamped
+    expect(state.fleet[2].damage).toBe(0); // already 0, stays 0
+  });
+
+  it('option 3 clamps credits at 0 rather than going negative', () => {
+    const s0 = baseState({ credits: 8, fleet: [{ frameId: 'cruiser', equipped: [], damage: 2, upgrades: [] }] });
+    const { state } = resolveEventChoice('repair-tender', 3, s0, fixedRng([]));
+    expect(state.credits).toBe(0);
+  });
+});
+
+// Iteration 20 (the economy floor): heat-priced income, making the heat
+// track's design literal — safe credits exist, priced in pursuit.
+describe('resolveEventChoice — salvage-claim', () => {
+  it('option 0: leaving it changes nothing', () => {
+    const s0 = baseState({ heat: 1 });
+    const { state } = resolveEventChoice('salvage-claim', 0, s0, fixedRng([]));
+    expect(state).toEqual(s0);
+  });
+
+  it('option 1: strip the field pays 8 credits for 1 heat', () => {
+    const s0 = baseState({ credits: 5, heat: 0 });
+    const { state } = resolveEventChoice('salvage-claim', 1, s0, fixedRng([]));
+    expect(state.credits).toBe(13);
+    expect(state.heat).toBe(1);
+  });
+
+  it('option 2: a thorough sweep pays more for more heat', () => {
+    const s0 = baseState({ credits: 5, heat: 0 });
+    const { state } = resolveEventChoice('salvage-claim', 2, s0, fixedRng([]));
+    expect(state.credits).toBe(17);
+    expect(state.heat).toBe(2);
+  });
+
+  it('heat from a salvage claim is clamped at MAX_HEAT (4), same as any other heat gain', () => {
+    const s0 = baseState({ heat: 3 });
+    const { state } = resolveEventChoice('salvage-claim', 2, s0, fixedRng([])); // would be 3+2=5
+    expect(state.heat).toBe(4);
+  });
 });
 
 describe('resolveEventChoice — militia-requisition', () => {

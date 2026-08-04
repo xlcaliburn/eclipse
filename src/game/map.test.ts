@@ -4,9 +4,11 @@ import { mulberry32 } from './rng';
 import { actColumns, BOSS_COLUMN, generateMap, getNode, LANE_COLUMNS, nodesConnect, reachableNodes } from './map';
 import type { CargoTag } from './map';
 
+// Mirrors map.ts's ACT1_QUOTAS/ACT2_QUOTAS — see that file's comment for
+// why iteration 20 changed columns 1 and 9.
 const ACT1_QUOTAS = [
   ['opener'],
-  ['combat', 'combat', 'combat'],
+  ['combat', 'combat', 'event'],
   ['combat', 'combat', 'event'],
   ['shop', 'combat', 'event'],
   ['elite', 'combat', 'event'],
@@ -14,7 +16,7 @@ const ACT1_QUOTAS = [
   ['combat', 'combat', 'event'],
   ['elite', 'combat', 'event'],
   ['shop', 'elite', 'combat'],
-  ['repair', 'elite', 'combat'],
+  ['shop', 'elite', 'combat'],
 ];
 
 const ACT2_QUOTAS = [
@@ -27,7 +29,7 @@ const ACT2_QUOTAS = [
   ['combat', 'elite', 'event'],
   ['shop', 'elite', 'combat'],
   ['repair', 'elite', 'combat'],
-  ['elite', 'combat', 'event'],
+  ['shop', 'elite', 'combat'],
 ];
 
 describe('generateMap', () => {

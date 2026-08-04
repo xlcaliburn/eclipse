@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { hasLineOfRetreat, initialRunState, runReducer } from './game/reducer';
+import { globalColumn, hasLineOfRetreat, initialRunState, runReducer } from './game/reducer';
 import { clearRun, loadDailyRecord, loadRun, saveDailyRecord, saveRun } from './game/persistence';
 import { dailySeed, dailyShareText } from './game/daily';
 import { playerShipLabel } from './game/ship';
@@ -220,6 +220,15 @@ function App() {
   // peek above and Fleet as an additive modal — both unchanged from before.
   const showMission = !isCompact || surface === 'mission';
 
+  // Iteration 20 (commodity runs): a lot is sellable only at a station
+  // reached AFTER the one it was bought at. ShopScreen receives the fleet
+  // directly and can tell whether a lot is carried on its own — this is
+  // just the half that needs the global-column math.
+  const commodityLotSellable =
+    state.commodityLotBoughtAtGlobalColumn !== undefined &&
+    state.position !== null &&
+    globalColumn(state.act, state.position.col) > state.commodityLotBoughtAtGlobalColumn;
+
   return (
     <>
     <Starfield act={state.act} />
@@ -311,12 +320,16 @@ function App() {
               shopQuestOffer={state.shopQuestOffer}
               activeQuest={state.activeQuest}
               commanderId={state.commanderId}
+              commodityLotSellable={commodityLotSellable}
               onBuyPart={(offerIndex) => dispatch({ type: 'BUY_PART', offerIndex })}
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}
               onBuyShip={(frameId) => dispatch({ type: 'BUY_SHIP', frameId })}
               onScuttle={(shipIndex) => dispatch({ type: 'SCUTTLE_SHIP', shipIndex })}
               onAcceptQuest={(carrierShipIndex) => dispatch({ type: 'ACCEPT_QUEST', carrierShipIndex })}
               onMoveCargoPod={(toShipIndex) => dispatch({ type: 'MOVE_CARGO_POD', toShipIndex })}
+              onBuyCommodityLot={(shipIndex) => dispatch({ type: 'BUY_COMMODITY_LOT', shipIndex })}
+              onSellCommodityLot={() => dispatch({ type: 'SELL_COMMODITY_LOT' })}
+              onBuyMercenary={() => dispatch({ type: 'BUY_MERCENARY' })}
               onReroll={() => dispatch({ type: 'REROLL' })}
               onLeave={() => dispatch({ type: 'LEAVE_SHOP' })}
               onViewMap={() => setSurface('chart')}

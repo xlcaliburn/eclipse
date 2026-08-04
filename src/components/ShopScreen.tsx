@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import type { CommanderId } from '../game/commanders';
 import { FRAMES, MAX_FLEET_SIZE } from '../game/frames';
-import { getPart } from '../game/parts';
+import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import type { ActiveQuest } from '../game/quests';
-import { QUEST_STAKE, rerollCost } from '../game/reducer';
+import { COMMODITY_LOT_BUY_COST, COMMODITY_LOT_SELL_PRICE, MERCENARY_COST, QUEST_STAKE, rerollCost } from '../game/reducer';
 import { playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { FleetPanel } from './FleetPanel';
@@ -32,12 +32,19 @@ interface ShopScreenProps {
   shopQuestOffer?: ActiveQuest;
   activeQuest?: ActiveQuest;
   commanderId?: CommanderId;
+  // Iteration 20 (commodity runs): whether the fleet's currently-carried lot
+  // (if any) was bought at an earlier station than this one — the shop
+  // itself doesn't know the global column math, so App.tsx precomputes it.
+  commodityLotSellable: boolean;
   onBuyPart: (offerIndex: number) => void;
   onSellPart: (partId: PartId) => void;
   onBuyShip: (frameId: 'interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser') => void;
   onScuttle: (shipIndex: number) => void;
   onAcceptQuest: (carrierShipIndex?: number) => void;
   onMoveCargoPod: (toShipIndex: number) => void;
+  onBuyCommodityLot: (shipIndex: number) => void;
+  onSellCommodityLot: () => void;
+  onBuyMercenary: () => void;
   onReroll: () => void;
   onLeave: () => void;
   onViewMap: () => void;
@@ -53,12 +60,16 @@ export function ShopScreen({
   shopQuestOffer,
   activeQuest,
   commanderId,
+  commodityLotSellable,
   onBuyPart,
   onSellPart,
   onBuyShip,
   onScuttle,
   onAcceptQuest,
   onMoveCargoPod,
+  onBuyCommodityLot,
+  onSellCommodityLot,
+  onBuyMercenary,
   onReroll,
   onLeave,
   onViewMap,
@@ -69,6 +80,7 @@ export function ShopScreen({
   const safeSelectedIndex = Math.min(selectedShipIndex, fleet.length - 1);
   const fleetFull = fleet.length >= MAX_FLEET_SIZE;
   const effectiveRerollCost = rerollCost(commanderId);
+  const carriesCommodityLot = fleet.some((s) => s.equipped.includes(COMMODITY_LOT_PART_ID));
 
   return (
     <div className="shop-screen">
@@ -141,6 +153,67 @@ export function ShopScreen({
           <span className="frame-card__cost">
             {shopQuestOffer ? `${QUEST_STAKE[shopQuestOffer.archetype]} cr stake` : 'Free'}
           </span>
+        </div>
+      </div>
+
+      {/* Iteration 20 (the economy floor): two ways to spend credits that
+          aren't parts or hulls — a trade lot and a one-fight hire. Both are
+          about giving late-run wealth somewhere to go. */}
+      <h3>War assets</h3>
+      <div className="shop-screen__offers">
+        <div className="card-tile card-tile--deep-scan">
+          <span className="card-tile__name">Commodity lot</span>
+          {carriesCommodityLot ? (
+            commodityLotSellable ? (
+              <>
+                <span className="card-tile__desc">
+                  Bought cheap upstream — this station will pay {COMMODITY_LOT_SELL_PRICE} credits for it.
+                </span>
+                <button type="button" className="shop-button" onClick={onSellCommodityLot}>
+                  Sell lot (+{COMMODITY_LOT_SELL_PRICE} cr)
+                </button>
+              </>
+            ) : (
+              <span className="card-tile__desc">
+                Loaded and riding along — not sellable until a later station.
+              </span>
+            )
+          ) : credits < COMMODITY_LOT_BUY_COST ? (
+            <span className="card-tile__desc warning">Can't afford a lot ({COMMODITY_LOT_BUY_COST} cr).</span>
+          ) : (
+            <>
+              <span className="card-tile__desc">
+                Occupies a hardpoint until you sell it at a later station — and it's lost outright if the ship
+                carrying it is.
+              </span>
+              <div className="card-tile__lane-buttons">
+                {fleet.map((_, i) => (
+                  <button key={i} type="button" className="shop-button" onClick={() => onBuyCommodityLot(i)}>
+                    Load: {playerShipLabel(fleet, i)}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <span className="frame-card__cost">
+            {carriesCommodityLot ? 'Owned' : `${COMMODITY_LOT_BUY_COST} cr`}
+          </span>
+        </div>
+
+        <div className="card-tile card-tile--deep-scan">
+          <span className="card-tile__name">Mercenary escort</span>
+          <span className="card-tile__desc">
+            An Interceptor for hire — fights your very next combat, then moves on. No salvage if it falls, no
+            wages if it doesn't.
+          </span>
+          {fleetFull ? (
+            <span className="card-tile__desc">Fleet is already at maximum size.</span>
+          ) : (
+            <button type="button" className="shop-button" onClick={onBuyMercenary} disabled={credits < MERCENARY_COST}>
+              Hire ({MERCENARY_COST} cr)
+            </button>
+          )}
+          <span className="frame-card__cost">{MERCENARY_COST} cr</span>
         </div>
       </div>
 
