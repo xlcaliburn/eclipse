@@ -1,7 +1,8 @@
+import type { CommanderId } from '../game/commanders';
 import { qualifiesForOutspeed } from '../game/combatEngine';
 import { getFrame } from '../game/frames';
 import { CARGO_POD_PART_ID, getPart } from '../game/parts';
-import { deriveStats, effectiveSlots, playerShipLabel } from '../game/ship';
+import { deriveFleetStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import { PartCard } from './PartCard';
@@ -30,6 +31,12 @@ interface FleetPanelProps {
   // stays short enough to read against the enemy beside it. The shop leaves
   // this off: browsing parts is the entire point there.
   collapsibleParts?: boolean;
+  // Iteration 21 (the Admiral, ace pilots): folded into each ship's derived
+  // stats below so a 3+-kill veteran's +1 initiative shows here the same
+  // way it affects the actual fight — one source of truth (ship.ts's
+  // withAceBonus, via deriveFleetStats), not a display-only badge that
+  // could drift from what combat actually does.
+  commanderId?: CommanderId;
 }
 
 export { playerShipLabel };
@@ -48,6 +55,7 @@ export function FleetPanel({
   onPartHover,
   outspeedFastestEnemyInitiative,
   collapsibleParts,
+  commanderId,
 }: FleetPanelProps) {
   const selectedShip = fleet[selectedShipIndex];
   const selectedHasRoom = selectedShip
@@ -70,7 +78,7 @@ export function FleetPanel({
       </h2>
 
       {fleet.map((ship, shipIndex) => {
-        const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades);
+        const stats = deriveFleetStats([ship], commanderId)[0];
         const selected = shipIndex === selectedShipIndex;
         const emptySlots = effectiveSlots(ship.frameId, ship.upgrades) - ship.equipped.length;
         const outspeeding =

@@ -1,4 +1,5 @@
 import { initCombat, runToEnd } from '../src/game/combatEngine';
+import type { CommanderId } from '../src/game/commanders';
 import {
   applyEscalations,
   applyVeterancy,
@@ -10,13 +11,22 @@ import {
 import { getFrame } from '../src/game/frames';
 import { ESCALATIONS } from '../src/game/escalations';
 import type { EscalationId, ScheduledEscalation } from '../src/game/escalations';
-import { addHeat, MAX_HEAT } from '../src/game/heat';
+import { addHeat } from '../src/game/heat';
 import { actColumns, generateMap, globalColumn, reachableNodes } from '../src/game/map';
 import type { MapNode } from '../src/game/map';
-import { COMMODITY_LOT_BUY_COST, COMMODITY_LOT_SELL_PRICE, MERCENARY_COST } from '../src/game/reducer';
+import {
+  commodityLotBuyCost,
+  commodityLotCap,
+  COMMODITY_LOT_SELL_PRICE,
+  fleetCap,
+  frameCost,
+  mercenaryCost,
+  partCost,
+} from '../src/game/reducer';
 import { getPart, STARTING_LOADOUT } from '../src/game/parts';
-import { deriveFleetForCombat, effectiveSlots } from '../src/game/ship';
-import type { PartId, PlayerShipState } from '../src/game/types';
+import { applyRepairBanking, deriveFleetForCombat, effectiveSlots } from '../src/game/ship';
+import type { CombatEvent, PartId, PlayerShipState } from '../src/game/types';
+import { randomUpgradeIds } from '../src/game/upgrades';
 
 // Simulates a WHOLE act-1 run: "can a player who actually spends their
 // credits expect to clear act 1?"
@@ -31,12 +41,16 @@ import type { PartId, PlayerShipState } from '../src/game/types';
 // draft invented a lane that fought at every column with two repairs, which
 // reported 0% and was measuring its own bad assumptions.
 //
-// Iteration 20 (the economy floor): this policy now also engages the new
+// Iteration 20 (the economy floor): this policy also engages the new
 // non-combat economy — salvage claims, fleet triage, commodity-lot
-// flipping, and a mercenary before the boss. Everything else (parts
-// wishlist, routing preference) is unchanged from the pre-20 draft that
-// first found the ~0% baseline, so the delta this reports is attributable
-// to the new mechanics, not a rewritten policy.
+// flipping, and a mercenary before the boss.
+//
+// Iteration 21 (commander doctrines, 21.6): the policy is now parameterized
+// by commanderId — each of the 5 commanders gets a route bias and a shopping
+// bias that leans into their doctrine (per the table in the module's
+// COMMANDER_POLICY comment below), on top of the shared "reasonable but not
+// optimal" wishlist/routing floor. `undefined` still runs the doctrine-free
+// baseline from iteration 20, reported alongside the five for comparison.
 //
 // Run: npx tsx scripts/actRun.ts
 
@@ -99,6 +113,26 @@ function drawAct1Escalations(rng: () => number): ScheduledEscalation[] {
   ];
 }
 
+// Iteration 18-style kill attribution, trimmed to just the part this sim
+// needs (ace-pilot tracking) from the combat log runToEnd already returns —
+// mirrors reducer.ts's attributeFightStats without needing a full RunState.
+function attributeKills(log: CombatEvent[], fleetSize: number): number[] {
+  const kills = Array.from({ length: fleetSize }, () => 0);
+  let lastPlayerHit: { shooterIndex: number; targetIndex: number } | null = null;
+  for (const event of log) {
+    if (event.kind === 'roll') {
+      if (event.side === 'player' && event.hit) {
+        lastPlayerHit = { shooterIndex: event.shooterIndex, targetIndex: event.targetIndex };
+      }
+    } else if (event.kind === 'destroyed' && event.side === 'enemy') {
+      if (lastPlayerHit && lastPlayerHit.targetIndex === event.shipIndex && lastPlayerHit.shooterIndex < fleetSize) {
+        kills[lastPlayerHit.shooterIndex]++;
+      }
+    }
+  }
+  return kills;
+}
+
 export interface RunOutcome {
   won: boolean;
   diedAt: { col: number; type: string } | null;
@@ -123,17 +157,29 @@ export interface RunOutcome {
 // not a signal about the game. Elites now always score below combat; the
 // existing 15% routing noise still occasionally takes one anyway, same as
 // a real player size-of-mistake.
-function chooseNode(options: MapNode[], damageRatio: number, rng: () => number): MapNode {
+//
+// Iteration 21 (21.6): commanderId nudges the base score toward each
+// doctrine's "route read" from plans/iteration-21.md — the Merchant chases
+// shops, the Engineer and Admiral lean into fights their doctrine is built
+// to absorb, the Spymaster avoids them in favor of events (where salvage
+// claims live). The Warlord has no routing doctrine (its whole identity is
+// shop-side, not route-side), so it uses the shared baseline unmodified.
+function chooseNode(options: MapNode[], damageRatio: number, rng: () => number, commanderId?: CommanderId): MapNode {
   const score = (n: MapNode): number => {
+    let base: number;
     switch (n.type) {
       case 'repair':
-        return damageRatio > 0.4 ? 100 : 20;
+        base = damageRatio > 0.4 ? 100 : 20;
+        break;
       case 'shop':
-        return 80;
+        base = 80;
+        break;
       case 'combat':
-        return 50;
+        base = 50;
+        break;
       case 'elite':
-        return damageRatio < 0.3 ? 35 : 5;
+        base = damageRatio < 0.3 ? 35 : 5;
+        break;
       // Column 1-2 has no shop or repair node at all (see ACT1_QUOTAS), so
       // an event is the only chance to avoid stacking a second fight's
       // damage onto the first before column 3's shop — not a guaranteed
@@ -141,10 +187,36 @@ function chooseNode(options: MapNode[], damageRatio: number, rng: () => number):
       // gambling on one over a certain second fight is realistic, not
       // optimal-play cheating.
       case 'event':
-        return damageRatio > 0.15 ? 55 : 40;
+        base = damageRatio > 0.15 ? 55 : 40;
+        break;
       default:
-        return 30;
+        base = 30;
     }
+    switch (commanderId) {
+      case 'merchant':
+        // "shop-to-shop, skip marginal fights, buy the boss fight."
+        if (n.type === 'shop') base += 30;
+        if (n.type === 'combat') base -= 15;
+        break;
+      case 'engineer':
+        // "takes the fights everyone else routes around."
+        if (n.type === 'combat') base += 20;
+        if (n.type === 'elite') base += 10;
+        break;
+      case 'spymaster':
+        // "fight the minimum, farm every wreck risk-free."
+        if (n.type === 'event') base += 25;
+        if (n.type === 'combat') base -= 10;
+        if (n.type === 'elite') base -= 15;
+        break;
+      case 'admiral':
+        // "elite nodes are food" — a wide fleet can afford the premium fight.
+        if (n.type === 'elite') base += 15;
+        break;
+      default:
+        break;
+    }
+    return base;
   };
   const best = options.reduce((a, b) => (score(b) > score(a) ? b : a), options[0]);
   // A little noise so runs aren't all identical routes.
@@ -159,50 +231,77 @@ function chooseNode(options: MapNode[], damageRatio: number, rng: () => number):
 // repair-tender and salvage-claim are each 1 of those 13.
 const RANDOM_EVENT_COUNT = 13;
 
-export function simulateRun(seed: number): RunOutcome {
+export function simulateRun(seed: number, commanderId?: CommanderId): RunOutcome {
   const rng = mulberry32(seed);
   const map = generateMap(seed, rng);
   const columns = actColumns(map, 1);
   const escalations = drawAct1Escalations(rng);
 
   const fleet: PlayerShipState[] = [
-    { frameId: 'cruiser', equipped: [...STARTING_LOADOUT], upgrades: [], damage: 0 },
+    { frameId: 'cruiser', equipped: [...STARTING_LOADOUT], upgrades: [], damage: 0, kills: 0 },
   ];
+  // Iteration 21: the Admiral inherits the old Warlord's free starting
+  // Interceptor; the Warlord instead gets one random upgrade auto-granted to
+  // the Flagship (mirrors CHOOSE_COMMANDER in reducer.ts).
+  if (commanderId === 'admiral') {
+    fleet.push({ frameId: 'interceptor', equipped: ['ion'], upgrades: [], damage: 0, kills: 0 });
+  }
+  if (commanderId === 'warlord') {
+    fleet[0].upgrades = [randomUpgradeIds(1, rng)[0]];
+  }
+
   let credits = 0;
   let spent = 0;
   let wishIndex = 0;
   let fights = 0;
   let heat = 0;
-  // Iteration 20: mirrors RunState.commodityLotBoughtAtGlobalColumn — undef
-  // means the fleet carries no lot. Heat here tracks ONLY salvage-claim
-  // gains, not the real game's per-dock-node cost or combat-win decay (that
-  // full loop, including Hunted interception, isn't modeled) — a real
-  // player's heat runs higher than this sim's, so the salvage policy below
-  // is slightly more permissive than perfectly safe play. Documented, not
-  // hidden, since it would otherwise read as more validated than it is.
-  let lotBoughtAtGlobalColumn: number | undefined;
 
   const totalHp = () => fleet.reduce((n, s) => n + 4 + s.equipped.filter((p) => getPart(p).hull).length, 0);
   const damageRatio = () => fleet.reduce((n, s) => n + s.damage, 0) / Math.max(1, totalHp());
-  const carriesLot = () => fleet.some((s) => s.equipped.includes('commodity-lot'));
 
   function shopWishlist() {
     for (;;) {
-      // Flagship full? Buy an escort and keep fitting it. The realistic
-      // end-of-run fleet has two, so a policy that can't buy ships would
-      // understate what "actually buying things" reaches.
-      const openShip = fleet.find((s) => s.equipped.length < effectiveSlots(s.frameId, s.upgrades));
+      // Iteration 21 (the Admiral, wide): "buys hulls" — a cheap escort,
+      // discounted, is reached for before more gear whenever the fleet has
+      // room to grow. Checked first every loop, not just when the Flagship
+      // is full, so the wide doctrine actually outpaces the shared fallback
+      // (which only expands the fleet once nothing else fits).
+      if (commanderId === 'admiral' && fleet.length < fleetCap(commanderId)) {
+        const cost = frameCost(getFrame('interceptor').cost, 'interceptor', commanderId);
+        if (cost <= credits) {
+          fleet.push({ frameId: 'interceptor', equipped: [], upgrades: [], damage: 0, kills: 0 });
+          credits -= cost;
+          spent += cost;
+          continue;
+        }
+      }
+
+      // Iteration 21 (the Warlord, tall): "buys flagship parts" — the whole
+      // doctrine is one capital ship, so this policy never expands the
+      // fleet at all; every credit either fits the Flagship or is banked.
+      const openShip =
+        commanderId === 'warlord'
+          ? fleet[0].equipped.length < effectiveSlots(fleet[0].frameId, fleet[0].upgrades)
+            ? fleet[0]
+            : undefined
+          : fleet.find((s) => s.equipped.length < effectiveSlots(s.frameId, s.upgrades));
       if (!openShip) {
+        if (commanderId === 'warlord') return;
+        // Flagship (and every escort so far) full? Buy an escort and keep
+        // fitting it. The realistic end-of-run fleet has two, so a policy
+        // that can't buy ships would understate what "actually buying
+        // things" reaches.
         const interceptor = getFrame('interceptor');
-        if (fleet.length >= 4 || interceptor.cost > credits) return;
-        fleet.push({ frameId: 'interceptor', equipped: [], upgrades: [], damage: 0 });
-        credits -= interceptor.cost;
-        spent += interceptor.cost;
+        const cost = frameCost(interceptor.cost, 'interceptor', commanderId);
+        if (fleet.length >= fleetCap(commanderId) || cost > credits) return;
+        fleet.push({ frameId: 'interceptor', equipped: [], upgrades: [], damage: 0, kills: 0 });
+        credits -= cost;
+        spent += cost;
         continue;
       }
       const want = WISHLIST[wishIndex];
       if (!want) return;
-      const cost = getPart(want).cost;
+      const cost = partCost(want, commanderId);
       if (cost > credits) return;
       openShip.equipped.push(want);
       credits -= cost;
@@ -217,21 +316,35 @@ export function simulateRun(seed: number): RunOutcome {
   // of letting it sit idle. A rational player sells the moment they can:
   // holding longer adds risk (the carrying ship might die) for no extra
   // reward (the price doesn't appreciate).
+  //
+  // Iteration 21: lot tracking moved to a per-ship field (matching the real
+  // reducer), so the Merchant's cap-2 can carry two lots on two different
+  // ships at once instead of one scalar for the whole fleet.
   function shopCommodityLot(here: number) {
-    if (carriesLot() && lotBoughtAtGlobalColumn !== undefined && here > lotBoughtAtGlobalColumn) {
-      const carrierIndex = fleet.findIndex((s) => s.equipped.includes('commodity-lot'));
-      fleet[carrierIndex].equipped = fleet[carrierIndex].equipped.filter((p) => p !== 'commodity-lot');
-      credits += COMMODITY_LOT_SELL_PRICE;
-      lotBoughtAtGlobalColumn = undefined;
-    }
-    if (!carriesLot() && credits >= COMMODITY_LOT_BUY_COST) {
-      const carrier = fleet.find((s) => s.equipped.length < effectiveSlots(s.frameId, s.upgrades));
-      if (carrier) {
-        carrier.equipped.push('commodity-lot');
-        credits -= COMMODITY_LOT_BUY_COST;
-        spent += COMMODITY_LOT_BUY_COST;
-        lotBoughtAtGlobalColumn = here;
+    for (const s of fleet) {
+      if (
+        s.equipped.includes('commodity-lot') &&
+        s.commodityLotBoughtAtGlobalColumn !== undefined &&
+        here > s.commodityLotBoughtAtGlobalColumn
+      ) {
+        s.equipped = s.equipped.filter((p) => p !== 'commodity-lot');
+        s.commodityLotBoughtAtGlobalColumn = undefined;
+        credits += COMMODITY_LOT_SELL_PRICE;
       }
+    }
+    const cap = commodityLotCap(commanderId);
+    const buyCost = commodityLotBuyCost(commanderId);
+    let carried = fleet.filter((s) => s.equipped.includes('commodity-lot')).length;
+    while (carried < cap && credits >= buyCost) {
+      const carrier = fleet.find(
+        (s) => !s.equipped.includes('commodity-lot') && s.equipped.length < effectiveSlots(s.frameId, s.upgrades),
+      );
+      if (!carrier) break;
+      carrier.equipped.push('commodity-lot');
+      carrier.commodityLotBoughtAtGlobalColumn = here;
+      credits -= buyCost;
+      spent += buyCost;
+      carried++;
     }
   }
 
@@ -245,12 +358,16 @@ export function simulateRun(seed: number): RunOutcome {
   // RANDOM_EVENT_COUNT above). Weighted by draw probability so the run's
   // total event income reflects the real pool, not just "assume the best
   // event every time."
+  //
+  // Iteration 21 (the Spymaster): salvage claims cost no heat for them, so
+  // the heat-gate that makes everyone else sometimes skip the field never
+  // applies — "farm every wreck risk-free."
   function event() {
     const roll = rng();
     if (roll < 1 / RANDOM_EVENT_COUNT) {
-      // Salvage claim: strip the field if heat is low enough not to risk
-      // Hunted soon; otherwise leave it.
-      if (heat <= 2) {
+      if (commanderId === 'spymaster') {
+        credits += 8;
+      } else if (heat <= 2) {
         credits += 8;
         heat = addHeat(heat, 1);
       }
@@ -263,7 +380,15 @@ export function simulateRun(seed: number): RunOutcome {
       // priorities for this policy, so it isn't modeled separately.)
       if (damageRatio() > 0 && credits >= 8) {
         credits -= 8;
-        for (const s of fleet) s.damage = Math.max(0, s.damage - 2);
+        for (const s of fleet) {
+          if (commanderId === 'engineer') {
+            const banked = applyRepairBanking(s, 2);
+            s.damage = banked.damage;
+            s.overRepairBank = banked.overRepairBank;
+          } else {
+            s.damage = Math.max(0, s.damage - 2);
+          }
+        }
       }
       return;
     }
@@ -275,13 +400,32 @@ export function simulateRun(seed: number): RunOutcome {
   function fight(enemyRaw: ReturnType<typeof getBoss>, col: number, tag: string): RunOutcome | null {
     fights++;
     const enemy = applyEscalations(applyVeterancy(enemyRaw, col), col, escalations);
-    const result = runToEnd(initCombat(deriveFleetForCombat(fleet), enemy, seed * 1000 + col * 13 + fights));
+    const fleetInput = deriveFleetForCombat(fleet, commanderId);
+    // Mirrors reducer.ts's ENGAGE case: the bank is folded into this fight's
+    // ablative by deriveFleetForCombat above, then cleared so it can't also
+    // apply to a second fight.
+    for (const s of fleet) if (s.overRepairBank) s.overRepairBank = undefined;
+    const result = runToEnd(initCombat(fleetInput, enemy, seed * 1000 + col * 13 + fights));
     if (result.winner !== 'player') {
       return { won: false, diedAt: { col, type: tag }, spent, leftOver: credits, fights };
     }
+    const kills = attributeKills(result.log, fleet.length);
     result.playerShips.forEach((s, i) => {
-      if (fleet[i]) fleet[i].damage = s.damage;
+      if (fleet[i]) {
+        fleet[i].damage = s.damage;
+        fleet[i].kills = (fleet[i].kills ?? 0) + kills[i];
+      }
     });
+    // Iteration 21 (the Engineer): +1 heal per win, banked like any other
+    // over-repair (mirrors reducer.ts's engineerHeal, applied unconditionally
+    // like every other repair source).
+    if (commanderId === 'engineer') {
+      for (const s of fleet) {
+        const banked = applyRepairBanking(s, 1);
+        s.damage = banked.damage;
+        s.overRepairBank = banked.overRepairBank;
+      }
+    }
     // Experiment knob: patch-up after a win. Damage carryover is the run's
     // dominant killer (a stock fleet drops 90% -> 48% against a missile
     // frigate with just 2 damage), so this measures how much of act 1's
@@ -296,7 +440,7 @@ export function simulateRun(seed: number): RunOutcome {
   for (;;) {
     const options = reachableNodes(columns, position);
     if (options.length === 0) break;
-    const node = chooseNode(options, damageRatio(), rng);
+    const node = chooseNode(options, damageRatio(), rng, commanderId);
     position = { col: node.col, row: node.row };
     const here = globalColumn(1, node.col);
 
@@ -305,7 +449,18 @@ export function simulateRun(seed: number): RunOutcome {
         shop(here);
         break;
       case 'repair':
-        for (const s of fleet) s.damage = 0;
+        // Iteration 21 (the Engineer): a repair-yard full heal has no
+        // "excess" by definition, so it grants a flat +1 bank instead
+        // (mirrors reducer.ts's repairFleet(..., bankFlat)).
+        for (const s of fleet) {
+          if (commanderId === 'engineer') {
+            const banked = applyRepairBanking(s, s.damage, true);
+            s.damage = banked.damage;
+            s.overRepairBank = banked.overRepairBank;
+          } else {
+            s.damage = 0;
+          }
+        }
         break;
       case 'event':
         event();
@@ -337,11 +492,13 @@ export function simulateRun(seed: number): RunOutcome {
         shop(here); // spend whatever is left before the boss — any real player does
         // Iteration 20 (war assets): a rich run spends its last leftover
         // credits on one-fight firepower rather than banking money the run
-        // is about to end either way.
-        if (fleet.length < 4 && credits >= MERCENARY_COST) {
-          fleet.push({ frameId: 'interceptor', equipped: ['ion'], upgrades: [], damage: 0, mercenary: true });
-          credits -= MERCENARY_COST;
-          spent += MERCENARY_COST;
+        // is about to end either way. Iteration 21: cheaper and the fleet
+        // cap is wider for the commanders whose doctrine says so.
+        if (fleet.length < fleetCap(commanderId) && credits >= mercenaryCost(commanderId)) {
+          const cost = mercenaryCost(commanderId);
+          fleet.push({ frameId: 'interceptor', equipped: ['ion'], upgrades: [], damage: 0, mercenary: true, kills: 0 });
+          credits -= cost;
+          spent += cost;
         }
         const dead = fight(getBoss(map.act1BossId), node.col, 'boss');
         if (dead) return dead;
@@ -352,35 +509,77 @@ export function simulateRun(seed: number): RunOutcome {
   return { won: false, diedAt: null, spent, leftOver: credits, fights };
 }
 
-function report() {
-  const outcomes = Array.from({ length: RUNS }, (_, i) => simulateRun(i + 1));
+interface CommanderReport {
+  label: string;
+  commanderId: CommanderId | undefined;
+  clearRate: number;
+  wins: number;
+}
+
+function runFor(commanderId: CommanderId | undefined): RunOutcome[] {
+  return Array.from({ length: RUNS }, (_, i) => simulateRun(i + 1, commanderId));
+}
+
+function printOutcomes(label: string, outcomes: RunOutcome[]): number {
   const wins = outcomes.filter((o) => o.won).length;
   const byType = new Map<string, number>();
   const byCol = new Map<number, number>();
-  const byColType = new Map<string, number>();
   for (const o of outcomes) {
     if (!o.diedAt) continue;
     byType.set(o.diedAt.type, (byType.get(o.diedAt.type) ?? 0) + 1);
     byCol.set(o.diedAt.col, (byCol.get(o.diedAt.col) ?? 0) + 1);
-    const key = `c${o.diedAt.col}:${o.diedAt.type}`;
-    byColType.set(key, (byColType.get(key) ?? 0) + 1);
   }
   const avg = (f: (o: RunOutcome) => number) => outcomes.reduce((n, o) => n + f(o), 0) / outcomes.length;
+  const clearRate = (wins / RUNS) * 100;
 
-  console.log(`Act-1 run simulation — ${RUNS} runs on real generated maps.`);
-  console.log('Player buys down a fixed wishlist at shops, repairs when hurt, plays no cards.\n');
-  console.log(`  ACT-1 CLEAR RATE: ${((wins / RUNS) * 100).toFixed(0)}%   (${wins}/${RUNS})`);
+  console.log(`\n=== ${label} ===`);
+  console.log(`  ACT-1 CLEAR RATE: ${clearRate.toFixed(1)}%   (${wins}/${RUNS})`);
   console.log(`  avg fights: ${avg((o) => o.fights).toFixed(1)}`);
   console.log(`  avg spent: ${avg((o) => o.spent).toFixed(0)}cr, avg unspent: ${avg((o) => o.leftOver).toFixed(0)}cr`);
   console.log(
-    `\n  deaths by node type: ${[...byType.entries()].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t}=${n}`).join('  ')}`,
+    `  deaths by node type: ${[...byType.entries()].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t}=${n}`).join('  ') || 'none'}`,
   );
   console.log(
-    `  deaths by column:    ${[...byCol.entries()].sort((a, b) => a[0] - b[0]).map(([c, n]) => `c${c}=${n}`).join('  ')}`,
+    `  deaths by column:    ${[...byCol.entries()].sort((a, b) => a[0] - b[0]).map(([c, n]) => `c${c}=${n}`).join('  ') || 'none'}`,
   );
-  console.log(
-    `  deaths by col+type:  ${[...byColType.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => `${k}=${n}`).join('  ')}`,
-  );
+  return clearRate;
+}
+
+// Iteration 21 (21.6): gate is "every commander's clear rate ≥ the
+// iteration-20 baseline gate (40%), and no commander exceeds ~85%" — a
+// doctrine that trivializes the act is as much a failure as one that can't
+// clear it.
+const GATE_MIN = 40;
+const GATE_MAX = 85;
+
+function report() {
+  console.log(`Act-1 run simulation — ${RUNS} runs per commander on real generated maps.`);
+  console.log('Each commander buys down the same wishlist floor, plus a doctrine-specific route/shop bias.\n');
+
+  const baseline = printOutcomes('No commander (iteration-20 baseline)', runFor(undefined));
+
+  const commanders: { id: CommanderId; label: string }[] = [
+    { id: 'merchant', label: 'The Merchant' },
+    { id: 'engineer', label: 'The Engineer' },
+    { id: 'spymaster', label: 'The Spymaster' },
+    { id: 'admiral', label: 'The Admiral' },
+    { id: 'warlord', label: 'The Warlord' },
+  ];
+
+  const results: CommanderReport[] = commanders.map(({ id, label }) => ({
+    label,
+    commanderId: id,
+    wins: 0,
+    clearRate: printOutcomes(label, runFor(id)),
+  }));
+
+  console.log(`\n=== Gate check (${GATE_MIN}%–${GATE_MAX}%) ===`);
+  console.log(`  baseline (no commander, informational only): ${baseline.toFixed(1)}%`);
+  for (const r of results) {
+    const pass = r.clearRate >= GATE_MIN && r.clearRate <= GATE_MAX;
+    const reason = r.clearRate < GATE_MIN ? 'below floor' : r.clearRate > GATE_MAX ? 'trivializes the act' : 'ok';
+    console.log(`  ${r.label.padEnd(16)} ${r.clearRate.toFixed(1)}%  ${pass ? 'PASS' : 'FAIL'} (${reason})`);
+  }
 }
 
 report();

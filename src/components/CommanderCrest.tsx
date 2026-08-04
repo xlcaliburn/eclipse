@@ -42,6 +42,15 @@ const CREST_SHAPES: Record<CommanderId, React.ReactNode> = {
       <circle cx="50" cy="50" r="7" />
     </>
   ),
+  // Three equal-sized hulls abreast — a wide fleet, not one bigger ship
+  // (the distinction from the Warlord's single pair of crossed blades).
+  admiral: (
+    <>
+      <polygon points="20,30 28,42 28,68 20,80 12,68 12,42" />
+      <polygon points="50,22 58,34 58,76 50,90 42,76 42,34" />
+      <polygon points="80,30 88,42 88,68 80,80 72,68 72,42" />
+    </>
+  ),
 };
 
 export function CommanderCrest({ commanderId, size = 64 }: { commanderId: CommanderId; size?: number }) {

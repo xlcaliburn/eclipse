@@ -1,5 +1,6 @@
 import { incomingFirePreview, initCombat, openingTargetIndex, OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
 import type { FirePreview } from '../game/combatEngine';
+import type { CommanderId } from '../game/commanders';
 import { getEnemyLore } from '../game/enemyLore';
 import { getEscalation } from '../game/escalations';
 import { deriveFleetForCombat, playerShipLabel } from '../game/ship';
@@ -14,6 +15,10 @@ interface EnemyPanelProps {
   // for Outspeed in the readout below — index-matched to fleetStats
   // (both are derived from the same fleet, in the same order).
   fleet?: PlayerShipState[];
+  // Iteration 21 (the Admiral, ace pilots): so the opening-volley preview
+  // below (which activation fires first, and on whom) reflects a 3+-kill
+  // veteran's +1 initiative the same way the real fight will.
+  commanderId?: CommanderId;
 }
 
 // Flattened index of the first ship in each group, matching the per-side
@@ -58,7 +63,7 @@ function fastestInitiative(groups: EnemyGroup[]): number {
   return groups.reduce((best, g) => Math.max(best, g.stats.initiative), -Infinity);
 }
 
-export function EnemyPanel({ enemy, fleetStats, fleet }: EnemyPanelProps) {
+export function EnemyPanel({ enemy, fleetStats, fleet, commanderId }: EnemyPanelProps) {
   const enemyShield = highestShield(enemy.groups);
   const requiredComputer = enemyShield + 1;
   const bestComputer = fleetStats ? bestEffectiveComputer(fleetStats) : undefined;
@@ -105,7 +110,8 @@ export function EnemyPanel({ enemy, fleetStats, fleet }: EnemyPanelProps) {
     const targetNames = [...new Set(preview.entries.map((e) => e.targetIndex))].map((i) => playerShipLabel(fleet, i));
     return { dice, damage, targetNames, flak: preview.flakCancels, outspeed: preview.entries.some((e) => e.outspeed) };
   }
-  const previewState = fleet && fleet.length > 0 ? initCombat(deriveFleetForCombat(fleet), enemy, 1) : null;
+  const previewState =
+    fleet && fleet.length > 0 ? initCombat(deriveFleetForCombat(fleet, commanderId), enemy, 1) : null;
   const missileVolley = volleySummary(previewState ? incomingFirePreview(previewState) : null);
   const cannonVolley = volleySummary(previewState ? incomingFirePreview({ ...previewState, round: 1 }) : null);
 

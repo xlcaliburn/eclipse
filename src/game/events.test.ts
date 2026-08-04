@@ -465,6 +465,30 @@ describe('resolveEventChoice — salvage-claim', () => {
     const { state } = resolveEventChoice('salvage-claim', 2, s0, fixedRng([])); // would be 3+2=5
     expect(state.heat).toBe(4);
   });
+
+  // Iteration 21: the Spymaster's one hook on this event — no heat at all,
+  // on either option, while everyone else still pays.
+  it('costs the Spymaster no heat on the strip option', () => {
+    const s0 = baseState({ credits: 5, heat: 1, commanderId: 'spymaster' });
+    const { state } = resolveEventChoice('salvage-claim', 1, s0, fixedRng([]));
+    expect(state.credits).toBe(13);
+    expect(state.heat).toBe(1); // unchanged
+  });
+
+  it('costs the Spymaster no heat on the thorough-sweep option either', () => {
+    const s0 = baseState({ credits: 5, heat: 1, commanderId: 'spymaster' });
+    const { state } = resolveEventChoice('salvage-claim', 2, s0, fixedRng([]));
+    expect(state.credits).toBe(17);
+    expect(state.heat).toBe(1); // unchanged
+  });
+
+  it('every other commander still pays the normal heat cost', () => {
+    for (const commanderId of ['merchant', 'engineer', 'warlord', 'admiral', undefined] as const) {
+      const s0 = baseState({ heat: 0, commanderId });
+      const { state } = resolveEventChoice('salvage-claim', 1, s0, fixedRng([]));
+      expect(state.heat).toBe(1);
+    }
+  });
 });
 
 describe('resolveEventChoice — militia-requisition', () => {

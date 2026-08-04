@@ -34,12 +34,18 @@ const SAVE_KEY = 'eclipse.save.v1';
 // fields, which none of these are.)
 const DAILY_SAVE_KEY = 'eclipse.save.daily.v1';
 const DAILY_RECORD_KEY = 'eclipse.daily.v1';
-// Iteration 20 (the economy floor): new RunState surface —
-// `commodityLotBoughtAtGlobalColumn` and PlayerShipState's `mercenary` —
-// is optional with read-site fallbacks (a mercenary ship is only ever
-// created with the flag set; an absent lot-bought-column just means "no
-// lot," which is also true of every pre-20 save). Same reasoning as 18's
-// no-bump note above: no new required-at-render field, so no version bump.
+// Iteration 20 (the economy floor): PlayerShipState's `mercenary` is
+// optional with a read-site fallback (a mercenary ship is only ever created
+// with the flag set, so its absence just means "not a mercenary," true of
+// every pre-20 ship). Same reasoning as 18's no-bump note above: no new
+// required-at-render field, so no version bump.
+// Iteration 21 (commander doctrines): CommanderId gained a 5th value
+// ('admiral') — a string union, not validated by shape here, so an old
+// save's 4-value commanderId just keeps working. Two more optional
+// PlayerShipState fields: `overRepairBank` (the Engineer) and
+// `commodityLotBoughtAtGlobalColumn`, moved here from RunState (where it
+// lived as a single scalar in 20) to let the Merchant carry more than one
+// lot — both read-site-fallback optional, same story as `mercenary` above.
 
 export type SaveSlot = 'standard' | 'daily';
 

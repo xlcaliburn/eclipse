@@ -220,14 +220,18 @@ function App() {
   // peek above and Fleet as an additive modal — both unchanged from before.
   const showMission = !isCompact || surface === 'mission';
 
-  // Iteration 20 (commodity runs): a lot is sellable only at a station
-  // reached AFTER the one it was bought at. ShopScreen receives the fleet
-  // directly and can tell whether a lot is carried on its own — this is
-  // just the half that needs the global-column math.
+  // Iteration 20 (commodity runs), per-ship since iteration 21 (the
+  // Merchant can carry 2 at once — see PlayerShipState.commodityLotBought-
+  // AtGlobalColumn): a lot is sellable only at a station reached AFTER the
+  // one it was bought at. True if ANY carried lot qualifies; ShopScreen's
+  // sell action itself sweeps every eligible one, not just one.
   const commodityLotSellable =
-    state.commodityLotBoughtAtGlobalColumn !== undefined &&
     state.position !== null &&
-    globalColumn(state.act, state.position.col) > state.commodityLotBoughtAtGlobalColumn;
+    state.fleet.some(
+      (s) =>
+        s.commodityLotBoughtAtGlobalColumn !== undefined &&
+        globalColumn(state.act, state.position!.col) > s.commodityLotBoughtAtGlobalColumn,
+    );
 
   return (
     <>

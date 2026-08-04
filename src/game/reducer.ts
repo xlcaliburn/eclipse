@@ -30,6 +30,7 @@ import { drawEscalationSchedule } from './escalations';
 import { drawEvent, getEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
 import type { EventId } from './events';
 import { getFrame, MAX_FLEET_SIZE } from './frames';
+import type { FrameId } from './frames';
 import { addHeat, MAX_HEAT } from './heat';
 import { actColumns, BOSS_COLUMN, generateMap, getNode, globalColumn, LANE_COLUMNS, reachableNodes } from './map';
 import type { CargoTag, GameMap, MapNode, MapPosition } from './map';
@@ -40,6 +41,7 @@ import type { ActiveQuest } from './quests';
 import { randomSeed, resumeRng } from './rng';
 import type { RngFn } from './rng';
 import {
+  applyRepairBanking,
   deriveFleetForCombat,
   deriveFleetStats,
   deriveStats,
@@ -152,15 +154,56 @@ function setupSpent(equipped: PartId[]): number {
 // Iteration 20 (commodity runs): buy low at one shop, sell high at any
 // later one. The +5cr spread is the reward; the risk is the slot it ties up
 // for however many columns pass in between, and that it's lost outright if
-// the carrying ship is.
-export const COMMODITY_LOT_BUY_COST = 4;
+// the carrying ship is. The sell price never varies by commander — only the
+// Merchant's buy side and capacity change (iteration 21).
 export const COMMODITY_LOT_SELL_PRICE = 9;
+const BASE_COMMODITY_LOT_BUY_COST = 4;
+const MERCHANT_COMMODITY_LOT_BUY_COST = 3;
+export function commodityLotBuyCost(commanderId: CommanderId | undefined): number {
+  return commanderId === 'merchant' ? MERCHANT_COMMODITY_LOT_BUY_COST : BASE_COMMODITY_LOT_BUY_COST;
+}
+const BASE_COMMODITY_LOT_CAP = 1;
+const MERCHANT_COMMODITY_LOT_CAP = 2;
+export function commodityLotCap(commanderId: CommanderId | undefined): number {
+  return commanderId === 'merchant' ? MERCHANT_COMMODITY_LOT_CAP : BASE_COMMODITY_LOT_CAP;
+}
 
 // Iteration 20 (war assets): a one-fight escort, priced above a real
 // Interceptor (8cr) since it costs nothing but credits and never has to
-// survive past the fight it's hired for.
-export const MERCENARY_COST = 12;
+// survive past the fight it's hired for. The Merchant's discount (iteration
+// 21) still prices it above the real Interceptor.
+const BASE_MERCENARY_COST = 12;
+const MERCHANT_MERCENARY_COST = 8;
+export function mercenaryCost(commanderId: CommanderId | undefined): number {
+  return commanderId === 'merchant' ? MERCHANT_MERCENARY_COST : BASE_MERCENARY_COST;
+}
 const MERCENARY_SHIP_NAME = 'Mercenary escort';
+
+// Iteration 21 (the Admiral, wide): fleet cap 5 instead of the standard 4.
+const ADMIRAL_FLEET_CAP = 5;
+export function fleetCap(commanderId: CommanderId | undefined): number {
+  return commanderId === 'admiral' ? ADMIRAL_FLEET_CAP : MAX_FLEET_SIZE;
+}
+
+// Iteration 21: purchasable-frame pricing for the two ship-doctrine
+// commanders. The Admiral (wide) discounts every frame 25%, rounded down —
+// a general shopping discount, since the doctrine is "many cheap hulls."
+// The Warlord (tall) discounts only the Dreadnought, flatly — the whole
+// doctrine is "one specific ship," not a general one. The two commanders
+// are mutually exclusive within a run, so there's no stacking case to
+// resolve. The Flagship is never purchasable, so it never reaches this.
+const ADMIRAL_FRAME_MULTIPLIER = 0.75; // 25% off
+const WARLORD_DREADNOUGHT_DISCOUNT = 5;
+export function frameCost(baseCost: number, frameId: FrameId, commanderId: CommanderId | undefined): number {
+  // Rounds the FINAL price down (not the discount amount down before
+  // subtracting) — Math.floor(cost * 0.75), not cost - Math.floor(cost *
+  // 0.25). The two differ whenever cost is odd (6cr: 4cr either way is
+  // fine, but 7cr gives 5cr vs. 6cr) and "rounds in the player's favor" is
+  // the more natural reading of a discount, so this is deliberate.
+  if (commanderId === 'admiral') return Math.floor(baseCost * ADMIRAL_FRAME_MULTIPLIER);
+  if (commanderId === 'warlord' && frameId === 'dreadnought') return Math.max(0, baseCost - WARLORD_DREADNOUGHT_DISCOUNT);
+  return baseCost;
+}
 
 // Credits earned for winning a combat node at the given column.
 export function winReward(col: number): number {
@@ -401,9 +444,41 @@ function drawUniqueFrom(pool: { id: PartId }[], taken: Set<PartId>, rng: RngFn):
   return id;
 }
 
-function drawShopOffers(rng: RngFn): PartId[] {
+// Iteration 21 (signature stock): each commander always finds their
+// signature part in stock, at a discount — a cheap alternative to true
+// exclusive item pools (a much bigger content/balance surface). No entry
+// for the Merchant: 21.2 covers their doctrine entirely via the commodity
+// lot (already guaranteed by commodityLotCap/commodityLotBuyCost) and the
+// mercenary discount, with no additional part.
+const SIGNATURE_PART: Partial<Record<CommanderId, PartId>> = {
+  engineer: 'dcbay',
+  spymaster: 'cloak',
+  warlord: 'siege',
+  admiral: 'uplink2',
+};
+const SIGNATURE_DISCOUNT = 2;
+
+// The offer slot a signature part is force-inserted into if the normal
+// stratified draw didn't already surface it — matched to the part's own
+// type so a guaranteed slot never distorts the offer's usual balance (one
+// weapon slot, one defense slot, etc. either way). Index into the fixed
+// 6-slot layout drawShopOffers builds below.
+const SIGNATURE_SLOT: Partial<Record<CommanderId, number>> = {
+  engineer: 5, // dcbay: hull + active -> the active slot
+  spymaster: 2, // cloak: shield -> the first defense slot
+  warlord: 0, // siege: weapon -> the first weapon slot
+  admiral: 4, // uplink2: computer + active -> the computer/drive slot
+};
+
+export function partCost(partId: PartId, commanderId: CommanderId | undefined): number {
+  const base = getPart(partId).cost;
+  if (commanderId && SIGNATURE_PART[commanderId] === partId) return Math.max(0, base - SIGNATURE_DISCOUNT);
+  return base;
+}
+
+function drawShopOffers(rng: RngFn, commanderId?: CommanderId): PartId[] {
   const taken = new Set<PartId>();
-  return [
+  const offers = [
     drawUniqueFrom(WEAPON_POOL, taken, rng),
     drawUniqueFrom(WEAPON_POOL, taken, rng),
     drawUniqueFrom(DEFENSE_POOL, taken, rng),
@@ -411,6 +486,12 @@ function drawShopOffers(rng: RngFn): PartId[] {
     drawUniqueFrom(COMPUTER_DRIVE_POOL, taken, rng),
     drawUniqueFrom(ACTIVE_POOL, taken, rng),
   ];
+  const signaturePart = commanderId ? SIGNATURE_PART[commanderId] : undefined;
+  const signatureSlot = commanderId ? SIGNATURE_SLOT[commanderId] : undefined;
+  if (signaturePart && signatureSlot !== undefined && !offers.includes(signaturePart)) {
+    offers[signatureSlot] = signaturePart;
+  }
+  return offers;
 }
 
 function drawRandomCard(rng: RngFn): CardId {
@@ -442,11 +523,19 @@ export function applyCargoReward(tag: CargoTag | undefined, base: number): numbe
   return base;
 }
 
-function repairFleet(fleet: PlayerShipState[]): { fleet: PlayerShipState[]; totalRepaired: number } {
+// `bankFlat`: the Engineer's flat +1 over-repair bank on every ship visiting
+// a repair yard — a full heal has no excess by definition (there's no
+// damage left over to measure against), so without this a yard visit would
+// give the Engineer nothing beyond what any other commander gets, which is
+// exactly backwards for the doctrine most interested in repair sources.
+function repairFleet(
+  fleet: PlayerShipState[],
+  bankFlat: boolean,
+): { fleet: PlayerShipState[]; totalRepaired: number } {
   let totalRepaired = 0;
   const repaired = fleet.map((ship) => {
     totalRepaired += ship.damage;
-    return { ...ship, damage: 0 };
+    return bankFlat ? applyRepairBanking(ship, ship.damage, true) : { ...ship, damage: 0 };
   });
   return { fleet: repaired, totalRepaired };
 }
@@ -460,16 +549,31 @@ function repairSummaryText(totalRepaired: number, shipCount: number): string {
 // acquisition (elite reward, the interlude's Field promotion, or now a
 // repair-yard overhaul) replaces the old one rather than stacking. The old
 // one is simply gone (destroyed), same as any upgrade lost with its ship.
-function withUpgrade(ship: PlayerShipState, upgradeId: UpgradeId): PlayerShipState {
-  return { ...ship, upgrades: [upgradeId] };
+//
+// Iteration 21 (the Warlord, tall): the Flagship alone may hold 2. A third
+// pick still replaces rather than being refused outright — same "oldest
+// simply gone" rule as the base case, just with room for one more before it
+// kicks in. `slice(-cap)` keeps only the most recent `cap` entries either
+// way, so this one function covers both caps without a separate branch.
+function upgradeCapFor(ship: PlayerShipState, commanderId: CommanderId | undefined): number {
+  return commanderId === 'warlord' && ship.frameId === 'cruiser' ? 2 : 1;
+}
+function withUpgrade(
+  ship: PlayerShipState,
+  upgradeId: UpgradeId,
+  commanderId?: CommanderId,
+): PlayerShipState {
+  const cap = upgradeCapFor(ship, commanderId);
+  return { ...ship, upgrades: [...ship.upgrades, upgradeId].slice(-cap) };
 }
 
 // Iteration 15.3: overhaul is locked out once every ship already carries a
-// (permanent, at-most-1) upgrade — swapping a player's own earned pick for
-// a random one is never the better choice, so the option is withheld
-// rather than offered as a trap.
-function everyShipAtUpgradeCap(fleet: PlayerShipState[]): boolean {
-  return fleet.length > 0 && fleet.every((s) => s.upgrades.length >= 1);
+// full complement of upgrades — swapping a player's own earned pick for a
+// random one is never the better choice, so the option is withheld rather
+// than offered as a trap. "Full complement" is per-ship since iteration 21
+// (the Warlord's Flagship holds 2, not 1).
+function everyShipAtUpgradeCap(fleet: PlayerShipState[], commanderId: CommanderId | undefined): boolean {
+  return fleet.length > 0 && fleet.every((s) => s.upgrades.length >= upgradeCapFor(s, commanderId));
 }
 
 function samePosition(a: MapPosition, b: MapPosition): boolean {
@@ -532,8 +636,17 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'commander') return state;
       if (!state.commanderChoices.includes(action.commanderId)) return state;
       const commissioned = state.shipsCommissioned ?? state.fleet.length;
+      // One rng instance for the whole case — the Warlord branch below is
+      // the only one that actually draws from it; nextCounter() naturally
+      // reports 0 extra consumed when it doesn't, so it's always safe to
+      // call unconditionally rather than needing an if/else on the action.
+      const { rng, nextCounter } = runRng(state);
+
+      // The Admiral (wide, iteration 21) inherits the old Warlord's free
+      // starting Interceptor — the fleet begins at 2 ships either way, just
+      // under the commander whose whole doctrine is "many hulls" now.
       const fleet =
-        action.commanderId === 'warlord'
+        action.commanderId === 'admiral'
           ? [
               ...state.fleet,
               {
@@ -547,12 +660,28 @@ export function runReducer(state: RunState, action: RunAction): RunState {
               },
             ]
           : state.fleet;
+
+      // The Warlord (tall, reworked) starts with one upgrade already fitted
+      // to the Flagship instead — a random pick, not a player choice; a
+      // full pick screen for a one-time run-start bonus was more UI than
+      // the flavor is worth. Their 2-upgrade cap (withUpgrade,
+      // upgradeCapFor) means this doesn't cost them a later pick the way it
+      // would for anyone else. Maps to a fresh array rather than assigning
+      // into `fleet[0]` directly — `fleet` still aliases `state.fleet` for
+      // every commander but the Admiral, and mutating it in place would
+      // corrupt the state this reducer was handed.
+      const finalFleet =
+        action.commanderId === 'warlord' && fleet[0]
+          ? fleet.map((s, i) => (i === 0 ? withUpgrade(s, randomUpgradeIds(1, rng)[0], action.commanderId) : s))
+          : fleet;
+
       return {
         ...state,
         phase: 'setup',
         commanderId: action.commanderId,
-        fleet,
-        shipsCommissioned: action.commanderId === 'warlord' ? commissioned + 1 : state.shipsCommissioned,
+        fleet: finalFleet,
+        shipsCommissioned: action.commanderId === 'admiral' ? commissioned + 1 : state.shipsCommissioned,
+        rngCounter: nextCounter(),
       };
     }
 
@@ -713,7 +842,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         return {
           ...base,
           phase: 'shop',
-          shopOffers: drawShopOffers(rng),
+          shopOffers: drawShopOffers(rng, state.commanderId),
           shopQuestOffer: generateQuestOffer(columns, node, rng) ?? undefined,
           heat,
           rngCounter: nextCounter(),
@@ -782,17 +911,23 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'ENGAGE': {
       if (state.phase !== 'prep' || !state.currentEnemy || state.currentCombatSeed === undefined) return state;
-      const fleetStats = deriveFleetStats(state.fleet);
+      const fleetStats = deriveFleetStats(state.fleet, state.commanderId);
       if (!fleetHasWeapon(fleetStats)) return state;
 
-      const fleetInput = deriveFleetForCombat(state.fleet);
+      const fleetInput = deriveFleetForCombat(state.fleet, state.commanderId);
       // The combat seed was already drawn (and stored) when this fight was
       // set up, not now — a reload before Engage can never reroll it (9.1).
       let combat = initCombat(fleetInput, state.currentEnemy, state.currentCombatSeed, state.targetingStance);
       // Neither fleet has a missile weapon — round 0 is a guaranteed no-op,
       // so skip straight past it rather than making the player click through.
       if (!hasMissilePhase(combat)) combat = advanceRound(combat);
-      return { ...state, phase: 'combat', combat };
+      // The Engineer's banked over-repair (ship.overRepairBank) was already
+      // folded into fleetInput's ablativeRemaining above — clear it here so
+      // it can't carry into a second fight this bank was never meant for.
+      const fleet = state.fleet.some((s) => s.overRepairBank)
+        ? state.fleet.map((s) => (s.overRepairBank ? { ...s, overRepairBank: undefined } : s))
+        : state.fleet;
+      return { ...state, phase: 'combat', combat, fleet };
     }
 
     case 'ADVANCE_ROUND': {
@@ -988,7 +1123,13 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         const regenCount = ship.upgrades.filter((u) => u === 'regen').length;
         salvageTotal += ship.upgrades.filter((u) => u === 'salvage').length * 3;
         const totalHeal = regenCount + engineerHeal;
-        if (totalHeal === 0 || ship.damage === 0) return ship;
+        if (totalHeal === 0) return ship;
+        // The Engineer banks a heal that outran actual damage instead of
+        // wasting it — including a ship that's already at 0 damage, where
+        // the WHOLE heal is excess. Everyone else keeps the plain no-op
+        // skip (nothing to gain from computing a repair that does nothing).
+        if (state.commanderId === 'engineer') return applyRepairBanking(ship, totalHeal);
+        if (ship.damage === 0) return ship;
         return { ...ship, damage: Math.max(0, ship.damage - totalHeal) };
       });
 
@@ -1129,7 +1270,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (!state.pendingReward.upgradeOptions.includes(action.upgradeId)) return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
-      const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, action.upgradeId) : s));
+      const fleet = state.fleet.map((s, i) =>
+        i === action.shipIndex ? withUpgrade(s, action.upgradeId, state.commanderId) : s,
+      );
       return {
         ...state,
         fleet,
@@ -1159,7 +1302,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // of the player's choice.
         if (action.shipIndex === undefined || !state.fleet[action.shipIndex]) return state;
         const upgradeId = randomUpgradeIds(1, rng)[0];
-        fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, upgradeId) : s));
+        fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, upgradeId, state.commanderId) : s));
       } else {
         return state;
       }
@@ -1190,7 +1333,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'shop' || !state.shopOffers) return state;
       const partId = state.shopOffers[action.offerIndex];
       if (!partId) return state;
-      const cost = getPart(partId).cost;
+      const cost = partCost(partId, state.commanderId);
       if (state.credits < cost) return state;
       const shopOffers = [...state.shopOffers];
       shopOffers.splice(action.offerIndex, 1);
@@ -1210,13 +1353,14 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'BUY_SHIP': {
       if (state.phase !== 'shop') return state;
-      if (state.fleet.length >= MAX_FLEET_SIZE) return state;
+      if (state.fleet.length >= fleetCap(state.commanderId)) return state;
       const frame = getFrame(action.frameId); // the Flagship ('cruiser') is never purchasable
-      if (state.credits < frame.cost) return state;
+      const cost = frameCost(frame.cost, action.frameId, state.commanderId);
+      if (state.credits < cost) return state;
       const commissioned = state.shipsCommissioned ?? state.fleet.length;
       return {
         ...state,
-        credits: state.credits - frame.cost,
+        credits: state.credits - cost,
         fleet: [
           ...state.fleet,
           {
@@ -1314,10 +1458,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'BUY_COMMODITY_LOT': {
       if (state.phase !== 'shop') return state;
-      if (state.credits < COMMODITY_LOT_BUY_COST) return state;
-      // Fleet-wide cap of 1 — a second lot would just be a second bet on the
-      // same trade, not a new decision.
-      if (state.fleet.some((s) => s.equipped.includes(COMMODITY_LOT_PART_ID))) return state;
+      const cost = commodityLotBuyCost(state.commanderId);
+      if (state.credits < cost) return state;
+      // Cap 1 normally, 2 for the Merchant — a second lot for anyone else
+      // would just be a second bet on the same trade, not a new decision.
+      const lotsCarried = state.fleet.filter((s) => s.equipped.includes(COMMODITY_LOT_PART_ID)).length;
+      if (lotsCarried >= commodityLotCap(state.commanderId)) return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
       // A mercenary leaves the fleet — with whatever it's carrying — the
@@ -1325,47 +1471,48 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // lot silently vanish later keeps the loss a rule, not a trap.
       if (ship.mercenary) return state;
       if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades)) return state;
-      const fleet = state.fleet.map((s, i) =>
-        i === action.shipIndex ? { ...s, equipped: [...s.equipped, COMMODITY_LOT_PART_ID] } : s,
-      );
       const boughtAtGlobalColumn = globalColumn(state.act, state.position?.col ?? 0);
-      return {
-        ...state,
-        fleet,
-        credits: state.credits - COMMODITY_LOT_BUY_COST,
-        commodityLotBoughtAtGlobalColumn: boughtAtGlobalColumn,
-      };
+      const fleet = state.fleet.map((s, i) =>
+        i === action.shipIndex
+          ? { ...s, equipped: [...s.equipped, COMMODITY_LOT_PART_ID], commodityLotBoughtAtGlobalColumn: boughtAtGlobalColumn }
+          : s,
+      );
+      return { ...state, fleet, credits: state.credits - cost };
     }
 
     case 'SELL_COMMODITY_LOT': {
       if (state.phase !== 'shop') return state;
-      const carrierIndex = state.fleet.findIndex((s) => s.equipped.includes(COMMODITY_LOT_PART_ID));
-      if (carrierIndex === -1) return state;
-      const boughtAt = state.commodityLotBoughtAtGlobalColumn;
       const here = globalColumn(state.act, state.position?.col ?? 0);
-      // Only a LATER station than the one it was bought at — same-visit
-      // flipping is impossible by construction (shops are forward-only
-      // nodes the player can't revisit), but the check stands on its own
+      // Sells EVERY lot that's eligible (bought at an earlier station) in
+      // one action, not just one — with the Merchant able to carry 2 at
+      // once, requiring a second click to clear the second lot would be
+      // friction the single-lot case never had. Same-visit flipping is
+      // impossible by construction (shops are forward-only nodes the
+      // player can't revisit), but the per-ship check stands on its own
       // regardless of how a future map feature might change that.
-      if (boughtAt === undefined || here <= boughtAt) return state;
-      const fleet = state.fleet.map((s, i) =>
-        i === carrierIndex ? { ...s, equipped: removeOnce(s.equipped, COMMODITY_LOT_PART_ID) } : s,
-      );
-      return {
-        ...state,
-        fleet,
-        credits: state.credits + COMMODITY_LOT_SELL_PRICE,
-        commodityLotBoughtAtGlobalColumn: undefined,
-      };
+      let sold = 0;
+      const fleet = state.fleet.map((s) => {
+        const boughtAt = s.commodityLotBoughtAtGlobalColumn;
+        if (!s.equipped.includes(COMMODITY_LOT_PART_ID) || boughtAt === undefined || here <= boughtAt) return s;
+        sold++;
+        return {
+          ...s,
+          equipped: removeOnce(s.equipped, COMMODITY_LOT_PART_ID),
+          commodityLotBoughtAtGlobalColumn: undefined,
+        };
+      });
+      if (sold === 0) return state;
+      return { ...state, fleet, credits: state.credits + sold * COMMODITY_LOT_SELL_PRICE };
     }
 
     case 'BUY_MERCENARY': {
       if (state.phase !== 'shop') return state;
-      if (state.fleet.length >= MAX_FLEET_SIZE) return state;
-      if (state.credits < MERCENARY_COST) return state;
+      if (state.fleet.length >= fleetCap(state.commanderId)) return state;
+      const cost = mercenaryCost(state.commanderId);
+      if (state.credits < cost) return state;
       return {
         ...state,
-        credits: state.credits - MERCENARY_COST,
+        credits: state.credits - cost,
         fleet: [
           ...state.fleet,
           {
@@ -1398,7 +1545,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const cost = rerollCost(state.commanderId);
       if (state.credits < cost) return state;
       const { rng, nextCounter } = runRng(state);
-      return { ...state, credits: state.credits - cost, shopOffers: drawShopOffers(rng), rngCounter: nextCounter() };
+      return {
+        ...state,
+        credits: state.credits - cost,
+        shopOffers: drawShopOffers(rng, state.commanderId),
+        rngCounter: nextCounter(),
+      };
     }
 
     case 'LEAVE_SHOP': {
@@ -1420,18 +1572,20 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'repair' || state.repairSummary !== undefined) return state;
 
       if (action.choice === 'full') {
-        const { fleet, totalRepaired } = repairFleet(state.fleet);
+        const { fleet, totalRepaired } = repairFleet(state.fleet, state.commanderId === 'engineer');
         return { ...state, fleet, repairSummary: repairSummaryText(totalRepaired, state.fleet.length) };
       }
 
       // Overhaul: no healing — attach one of the 3 pre-drawn upgrades to a
       // chosen ship instead. Locked out once every ship already carries a
-      // (permanent, at-most-1) upgrade.
+      // full complement of upgrades (per-ship cap — see everyShipAtUpgradeCap).
       if (!state.repairUpgradeOptions?.includes(action.upgradeId)) return state;
-      if (everyShipAtUpgradeCap(state.fleet)) return state;
+      if (everyShipAtUpgradeCap(state.fleet, state.commanderId)) return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
-      const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, action.upgradeId) : s));
+      const fleet = state.fleet.map((s, i) =>
+        i === action.shipIndex ? withUpgrade(s, action.upgradeId, state.commanderId) : s,
+      );
       const label = playerShipLabel(state.fleet, action.shipIndex);
       return {
         ...state,

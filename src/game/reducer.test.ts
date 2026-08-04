@@ -86,13 +86,24 @@ describe('CHOOSE_COMMANDER — setup phase gate', () => {
     expect(result.commanderId).toBe(state.commanderChoices[0]);
   });
 
-  it('the Warlord starts with a free, ion-fitted Interceptor — fleet begins at 2', () => {
+  // Iteration 21: the free starting Interceptor moved from the Warlord to
+  // the new Admiral (wide) when the Warlord was reworked to a tall,
+  // one-capital-ship doctrine.
+  it('the Admiral starts with a free, ion-fitted Interceptor — fleet begins at 2', () => {
     let state = initialRunState();
-    state = { ...state, commanderChoices: ['warlord', 'merchant', 'engineer'] };
-    const result = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'warlord' });
+    state = { ...state, commanderChoices: ['admiral', 'merchant', 'engineer'] };
+    const result = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'admiral' });
     expect(result.fleet).toHaveLength(2);
     expect(result.fleet[1].frameId).toBe('interceptor');
     expect(result.fleet[1].equipped).toEqual(['ion']);
+  });
+
+  it('the Warlord starts with one random upgrade already fitted to the Flagship instead', () => {
+    let state = initialRunState();
+    state = { ...state, commanderChoices: ['warlord', 'merchant', 'engineer'] };
+    const result = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'warlord' });
+    expect(result.fleet).toHaveLength(1); // no second ship — the Warlord's bonus is on the Flagship
+    expect(result.fleet[0].upgrades).toHaveLength(1);
   });
 
   it('other commanders do not add a second ship', () => {
@@ -401,6 +412,49 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
       state = runReducer(state, { type: 'EQUIP', shipIndex: 1, partId: 'plasma' });
     }
     expect(state.fleet[1].equipped).toHaveLength(4); // ion + 3 plasma fill all 4 slots, no weapon-cap refusal
+  });
+
+  // Iteration 21 (the Admiral, wide): every purchasable frame 25% off,
+  // rounded down (floor(cost * 0.75), not cost - floor(cost * 0.25) — the
+  // two differ on an odd cost and rounding toward the player is deliberate).
+  it('the Admiral buys every frame 25% cheaper, rounded down in the player\'s favor', () => {
+    const cases: ['interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser', number][] = [
+      ['interceptor', 4], // 6cr -> floor(4.5) = 4
+      ['bastion', 9], // 12cr -> floor(9) = 9
+      ['dreadnought', 15], // 20cr -> floor(15) = 15
+      ['light-cruiser', 7], // 10cr -> floor(7.5) = 7
+    ];
+    for (const [frameId, expectedCost] of cases) {
+      const state = stateWithMap('shop', { phase: 'shop', credits: 20, commanderId: 'admiral' });
+      const result = runReducer(state, { type: 'BUY_SHIP', frameId });
+      expect(result.credits).toBe(20 - expectedCost);
+    }
+  });
+
+  // Iteration 21 (the Warlord, tall): only the Dreadnought is discounted,
+  // and flatly (5cr) rather than by percentage — everything else is full
+  // price, unlike the Admiral's blanket discount.
+  it('the Warlord buys only the Dreadnought cheaper (flat -5cr); other frames are full price', () => {
+    const dread = stateWithMap('shop', { phase: 'shop', credits: 20, commanderId: 'warlord' });
+    expect(runReducer(dread, { type: 'BUY_SHIP', frameId: 'dreadnought' }).credits).toBe(20 - 15); // 20 - 5
+
+    const interceptor = stateWithMap('shop', { phase: 'shop', credits: 20, commanderId: 'warlord' });
+    expect(runReducer(interceptor, { type: 'BUY_SHIP', frameId: 'interceptor' }).credits).toBe(20 - 6); // full price
+  });
+
+  // Iteration 21 (the Admiral, wide): fleet cap 5 instead of 4.
+  it('the Admiral can field a 5th ship; everyone else is still capped at 4', () => {
+    const fullFleet: PlayerShipState[] = Array.from({ length: 4 }, () => ({
+      frameId: 'interceptor' as const,
+      equipped: [],
+      damage: 0,
+      upgrades: [],
+    }));
+    const admiral = stateWithMap('shop', { phase: 'shop', credits: 100, commanderId: 'admiral', fleet: fullFleet });
+    expect(runReducer(admiral, { type: 'BUY_SHIP', frameId: 'interceptor' }).fleet).toHaveLength(5);
+
+    const plain = stateWithMap('shop', { phase: 'shop', credits: 100, fleet: fullFleet });
+    expect(runReducer(plain, { type: 'BUY_SHIP', frameId: 'interceptor' }).fleet).toHaveLength(4);
   });
 });
 
@@ -711,6 +765,55 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
     const picked = runReducer(state, { type: 'PICK_UPGRADE', upgradeId, shipIndex: 0 });
     expect(picked.fleet[0].upgrades).toEqual([upgradeId]);
     expect(picked.fleet[0].upgrades).not.toContain('spine');
+  });
+
+  // Iteration 21 (the Warlord, tall): the Flagship alone may hold 2
+  // upgrades — a second pick stacks instead of replacing; a third still
+  // replaces (the oldest), keeping the cap at 2 rather than growing forever.
+  it("the Warlord's Flagship holds 2 upgrades; a second stacks, a third replaces the oldest", () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: ['spine'] }];
+    const state = runReducer(wonNonBossState({ fleet, commanderId: 'warlord' }, true), { type: 'CONTINUE' });
+    const second = state.pendingReward!.upgradeOptions!.find((u) => u !== 'spine')!;
+    let picked = runReducer(state, { type: 'PICK_UPGRADE', upgradeId: second, shipIndex: 0 });
+    expect(picked.fleet[0].upgrades).toEqual(['spine', second]); // stacked, not replaced
+
+    const state2 = runReducer(wonNonBossState({ fleet: picked.fleet, commanderId: 'warlord' }, true), {
+      type: 'CONTINUE',
+    });
+    const third = state2.pendingReward!.upgradeOptions!.find((u) => u !== 'spine' && u !== second)!;
+    picked = runReducer(state2, { type: 'PICK_UPGRADE', upgradeId: third, shipIndex: 0 });
+    expect(picked.fleet[0].upgrades).toHaveLength(2); // cap holds at 2
+    expect(picked.fleet[0].upgrades).toEqual([second, third]); // oldest ('spine') fell off
+  });
+
+  it('a non-Flagship ship is still capped at 1 upgrade even for the Warlord', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: [], damage: 0, upgrades: ['spine'] },
+    ];
+    const combat = initCombat(
+      [
+        { stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 },
+        { stats: { initiative: 2, hp: 2, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 },
+      ],
+      { ...GAUNTLET[0], id: `${GAUNTLET[0].id}-elite` },
+      1,
+    );
+    const state = runReducer(
+      {
+        ...stateWithMap('combat'),
+        phase: 'combat',
+        position: { col: 0, row: 0 },
+        fleet,
+        currentEnemy: { ...GAUNTLET[0], id: `${GAUNTLET[0].id}-elite` },
+        combat: { ...combat, winner: 'player' as const },
+        commanderId: 'warlord',
+      },
+      { type: 'CONTINUE' },
+    );
+    const upgradeId = state.pendingReward!.upgradeOptions!.find((u) => u !== 'spine')!;
+    const picked = runReducer(state, { type: 'PICK_UPGRADE', upgradeId, shipIndex: 1 });
+    expect(picked.fleet[1].upgrades).toEqual([upgradeId]); // replaced, not stacked
   });
 });
 
@@ -1388,12 +1491,12 @@ describe('quests (iteration 6)', () => {
 });
 
 describe('BUY_COMMODITY_LOT / SELL_COMMODITY_LOT (iteration 20)', () => {
-  it('loads the lot onto the chosen ship, charges 4cr, and records the global column bought at', () => {
+  it('loads the lot onto the chosen ship, charges 4cr, and records the global column bought at on that ship', () => {
     let state = stateWithMap('shop', { phase: 'shop', credits: 10, position: { col: 2, row: 0 } });
     state = runReducer(state, { type: 'BUY_COMMODITY_LOT', shipIndex: 0 });
     expect(state.fleet[0].equipped).toContain('commodity-lot');
     expect(state.credits).toBe(6);
-    expect(state.commodityLotBoughtAtGlobalColumn).toBe(globalColumn(1, 2));
+    expect(state.fleet[0].commodityLotBoughtAtGlobalColumn).toBe(globalColumn(1, 2));
   });
 
   it('refuses without 4cr, without a free hardpoint, or if the fleet already carries a lot', () => {
@@ -1441,8 +1544,15 @@ describe('BUY_COMMODITY_LOT / SELL_COMMODITY_LOT (iteration 20)', () => {
       phase: 'shop',
       credits: 0,
       position: { col: 2, row: 0 },
-      fleet: [{ frameId: 'cruiser', equipped: ['commodity-lot'], damage: 0, upgrades: [] }],
-      commodityLotBoughtAtGlobalColumn: globalColumn(1, 2),
+      fleet: [
+        {
+          frameId: 'cruiser',
+          equipped: ['commodity-lot'],
+          damage: 0,
+          upgrades: [],
+          commodityLotBoughtAtGlobalColumn: globalColumn(1, 2),
+        },
+      ],
     });
     const result = runReducer(sameColumn, { type: 'SELL_COMMODITY_LOT' });
     expect(result.credits).toBe(0); // still can't flip it at the station it was bought at
@@ -1456,15 +1566,85 @@ describe('BUY_COMMODITY_LOT / SELL_COMMODITY_LOT (iteration 20)', () => {
       position: { col: 5, row: 0 },
       fleet: [
         { frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] },
-        { frameId: 'interceptor', equipped: ['ion', 'commodity-lot'], damage: 0, upgrades: [] },
+        {
+          frameId: 'interceptor',
+          equipped: ['ion', 'commodity-lot'],
+          damage: 0,
+          upgrades: [],
+          commodityLotBoughtAtGlobalColumn: globalColumn(1, 2),
+        },
       ],
-      commodityLotBoughtAtGlobalColumn: globalColumn(1, 2),
     });
     const result = runReducer(state, { type: 'SELL_COMMODITY_LOT' });
     expect(result.credits).toBe(9);
     expect(result.fleet[1].equipped).not.toContain('commodity-lot');
     expect(result.fleet[1].equipped).toContain('ion'); // its real part is untouched
-    expect(result.commodityLotBoughtAtGlobalColumn).toBeUndefined();
+    expect(result.fleet[1].commodityLotBoughtAtGlobalColumn).toBeUndefined();
+  });
+
+  it('SELL pays out for every eligible lot at once, not just one', () => {
+    const state = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 0,
+      commanderId: 'merchant',
+      position: { col: 6, row: 0 },
+      fleet: [
+        {
+          frameId: 'cruiser',
+          equipped: ['commodity-lot'],
+          damage: 0,
+          upgrades: [],
+          commodityLotBoughtAtGlobalColumn: globalColumn(1, 2), // eligible
+        },
+        {
+          frameId: 'interceptor',
+          equipped: ['commodity-lot'],
+          damage: 0,
+          upgrades: [],
+          commodityLotBoughtAtGlobalColumn: globalColumn(1, 6), // bought THIS visit — not eligible yet
+        },
+      ],
+    });
+    const result = runReducer(state, { type: 'SELL_COMMODITY_LOT' });
+    expect(result.credits).toBe(9); // only the eligible one sold
+    expect(result.fleet[0].equipped).not.toContain('commodity-lot');
+    expect(result.fleet[1].equipped).toContain('commodity-lot'); // still riding along
+  });
+
+  it("the Merchant carries 2 lots at 3cr each; everyone else is capped at 1 lot at 4cr", () => {
+    const plain = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 10,
+      fleet: [
+        { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] },
+      ],
+    });
+    let plainState = runReducer(plain, { type: 'BUY_COMMODITY_LOT', shipIndex: 0 });
+    expect(plainState.credits).toBe(6); // 4cr base price
+    plainState = runReducer(plainState, { type: 'BUY_COMMODITY_LOT', shipIndex: 1 });
+    expect(plainState.fleet[1].equipped).not.toContain('commodity-lot'); // capped at 1
+
+    const merchant = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 10,
+      commanderId: 'merchant',
+      fleet: [
+        { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] },
+      ],
+    });
+    let merchantState = runReducer(merchant, { type: 'BUY_COMMODITY_LOT', shipIndex: 0 });
+    expect(merchantState.credits).toBe(7); // 3cr Merchant price
+    merchantState = runReducer(merchantState, { type: 'BUY_COMMODITY_LOT', shipIndex: 1 });
+    expect(merchantState.credits).toBe(4); // second lot, also 3cr
+    expect(merchantState.fleet[1].equipped).toContain('commodity-lot');
+    // A third is still refused even for the Merchant.
+    const thirdShip = runReducer(
+      { ...merchantState, fleet: [...merchantState.fleet, { frameId: 'bastion', equipped: [], damage: 0, upgrades: [] }] },
+      { type: 'BUY_COMMODITY_LOT', shipIndex: 2 },
+    );
+    expect(thirdShip.fleet[2].equipped).not.toContain('commodity-lot');
   });
 
   it('UNEQUIP refuses to remove the commodity lot to inventory — SELL_COMMODITY_LOT is the only way out', () => {
@@ -1536,6 +1716,34 @@ describe('BUY_MERCENARY (iteration 20)', () => {
     }));
     const full = stateWithMap('shop', { phase: 'shop', credits: 100, fleet: fullFleet });
     expect(runReducer(full, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(4);
+  });
+
+  it('the Merchant hires for 8cr instead of 12, and the fleet cap raise is Admiral-only', () => {
+    const merchant = stateWithMap('shop', { phase: 'shop', credits: 8, commanderId: 'merchant' });
+    expect(runReducer(merchant, { type: 'BUY_MERCENARY' }).credits).toBe(0);
+
+    const fullFleet: PlayerShipState[] = Array.from({ length: 4 }, () => ({
+      frameId: 'interceptor' as const,
+      equipped: [],
+      damage: 0,
+      upgrades: [],
+    }));
+    // A full-4 fleet still refuses a hire for the Merchant (cap unchanged)...
+    const merchantFull = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 100,
+      commanderId: 'merchant',
+      fleet: fullFleet,
+    });
+    expect(runReducer(merchantFull, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(4);
+    // ...but the Admiral's raised cap (5) allows a 5th ship, hired or bought.
+    const admiralFull = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 100,
+      commanderId: 'admiral',
+      fleet: fullFleet,
+    });
+    expect(runReducer(admiralFull, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(5);
   });
 
   // A hired escort is good for exactly the next combat — these three cover
@@ -1640,6 +1848,91 @@ describe('commander effects (iteration 6)', () => {
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.fleet[0].damage).toBe(4); // engineer: -1
     expect(result.fleet[1].damage).toBe(3); // engineer -1 + regen -1
+  });
+
+  // Iteration 21 (the Engineer, over-repair): a heal that outruns actual
+  // damage banks the excess instead of wasting it.
+  it("the Engineer's over-repair banks a heal that outruns actual damage", () => {
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 10, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      GAUNTLET[0],
+      1,
+    );
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 0, row: 0 },
+      // 0 damage: the Engineer's +1 heal is entirely excess.
+      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }],
+      currentEnemy: GAUNTLET[0],
+      combat: { ...combat, winner: 'player' as const },
+      commanderId: 'engineer',
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.fleet[0].damage).toBe(0);
+    expect(result.fleet[0].overRepairBank).toBe(1);
+  });
+
+  it("the Engineer's over-repair bank is capped at 2, even stacking with regen", () => {
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 10, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      GAUNTLET[0],
+      1,
+    );
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 0, row: 0 },
+      // regen (1) + engineer (1) = 2 heal against 0 damage — all excess,
+      // would be 2 already; a second win must not push it past the cap.
+      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: ['regen'] }],
+      currentEnemy: GAUNTLET[0],
+      combat: { ...combat, winner: 'player' as const },
+      commanderId: 'engineer',
+    };
+    let result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.fleet[0].overRepairBank).toBe(2);
+    // A second win, same conditions, must not exceed the cap.
+    const second = { ...state, fleet: result.fleet, combat: { ...combat, winner: 'player' as const } };
+    result = runReducer(second, { type: 'CONTINUE' });
+    expect(result.fleet[0].overRepairBank).toBe(2);
+  });
+
+  it('a repair-yard full heal banks a flat +1 for the Engineer, even with nothing to repair', () => {
+    const undamaged: RunState = {
+      ...initialRunState(),
+      phase: 'repair',
+      commanderId: 'engineer',
+      repairUpgradeOptions: ['spine', 'reactor', 'lattice'],
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+    };
+    const result = runReducer(undamaged, { type: 'REPAIR_CHOOSE', choice: 'full' });
+    expect(result.fleet[0].damage).toBe(0);
+    expect(result.fleet[0].overRepairBank).toBe(1);
+
+    // Non-Engineer commanders get the plain full heal, no bank.
+    const plain = { ...undamaged, commanderId: undefined };
+    const plainResult = runReducer(plain, { type: 'REPAIR_CHOOSE', choice: 'full' });
+    expect(plainResult.fleet[0].overRepairBank).toBeUndefined();
+  });
+
+  it("the Engineer's banked over-repair becomes ablative HP for the next fight, then clears at ENGAGE", () => {
+    let state: RunState = {
+      ...initialRunState(),
+      phase: 'prep',
+      commanderId: 'engineer',
+      currentEnemy: GAUNTLET[0],
+      currentCombatSeed: 1,
+      fleet: [
+        { frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [], overRepairBank: 2 },
+      ],
+    };
+    state = runReducer(state, { type: 'ENGAGE' });
+    expect(state.phase).toBe('combat');
+    expect(state.combat!.playerShips[0].ablativeRemaining).toBe(2);
+    // Consumed — cleared on the RunState-level fleet so a second ENGAGE
+    // (impossible mid-combat, but the field itself) can't reuse it.
+    expect(state.fleet[0].overRepairBank).toBeFalsy();
   });
 
   it('the Spymaster gains 2 columns of vision per pick instead of 1', () => {
@@ -1762,6 +2055,64 @@ describe('shop rework (iteration 7): stratified draw + selling', () => {
     state = runReducer(state, { type: 'SELL_PART', partId: 'plasma' });
     expect(state.credits).toBe(0);
     expect(state.inventory).toContain('plasma');
+  });
+});
+
+// Iteration 21 (signature stock): the Engineer, Warlord, and Admiral each
+// always find their doctrine part in the shop, at a discount — the Merchant
+// and Spymaster have no signature part (their doctrines aren't part-based).
+describe('signature shop stock (iteration 21)', () => {
+  const SIGNATURE: Record<'engineer' | 'spymaster' | 'warlord' | 'admiral', PartId> = {
+    engineer: 'dcbay',
+    spymaster: 'cloak',
+    warlord: 'siege',
+    admiral: 'uplink2',
+  };
+
+  it.each(Object.entries(SIGNATURE) as [keyof typeof SIGNATURE, PartId][])(
+    "the %s's signature part is present in every shop draw, across many rerolls",
+    (commanderId, partId) => {
+      let state = runReducer(stateWithMap('shop', { commanderId, credits: 1000 }), { type: 'PICK_NODE', row: 0 });
+      for (let i = 0; i < 30; i++) {
+        expect(state.shopOffers).toContain(partId);
+        state = runReducer(state, { type: 'REROLL' });
+      }
+    },
+  );
+
+  it('a signature part is discounted by 2cr for its own commander, full price for anyone else', () => {
+    for (const [commanderId, partId] of Object.entries(SIGNATURE) as [keyof typeof SIGNATURE, PartId][]) {
+      const base = getPart(partId).cost;
+      const owner = runReducer(stateWithMap('shop', { commanderId, credits: 1000 }), { type: 'PICK_NODE', row: 0 });
+      const ownerOfferIndex = owner.shopOffers!.indexOf(partId);
+      const ownerBought = runReducer(owner, { type: 'BUY_PART', offerIndex: ownerOfferIndex });
+      expect(owner.credits - ownerBought.credits).toBe(Math.max(0, base - 2));
+
+      // Force the same part into another commander's offers directly (bypassing
+      // the draw) to confirm partCost — not the draw itself — is what withholds
+      // the discount from a non-owning commander. The Merchant owns no
+      // signature part at all, so it's a safe "outsider" for every case.
+      const other = { ...stateWithMap('shop', { commanderId: 'merchant', credits: 1000 }) };
+      const otherWithOffers = runReducer(other, { type: 'PICK_NODE', row: 0 });
+      const forced = { ...otherWithOffers, shopOffers: [partId, ...otherWithOffers.shopOffers!.slice(1)] };
+      const otherBought = runReducer(forced, { type: 'BUY_PART', offerIndex: 0 });
+      expect(forced.credits - otherBought.credits).toBe(base);
+    }
+  });
+
+  it('the Merchant has no signature part forced into their offers (their doctrine is priced, not stocked)', () => {
+    let state = runReducer(stateWithMap('shop', { commanderId: 'merchant', credits: 1000 }), {
+      type: 'PICK_NODE',
+      row: 0,
+    });
+    // Across many rerolls, a signature part may still appear by ordinary
+    // chance — but it is never *guaranteed* the way it is for its owner.
+    let everMissing = false;
+    for (let i = 0; i < 20; i++) {
+      if (Object.values(SIGNATURE).every((partId) => !state.shopOffers!.includes(partId))) everMissing = true;
+      state = runReducer(state, { type: 'REROLL' });
+    }
+    expect(everMissing).toBe(true);
   });
 });
 
@@ -2240,11 +2591,11 @@ describe('the fleet remembers (iteration 18)', () => {
     expect(state.fleet[0].name!.startsWith('ISV ')).toBe(true);
   });
 
-  it('names the Warlord\'s free Interceptor and advances the commission counter', () => {
+  it("names the Admiral's free Interceptor and advances the commission counter", () => {
     let state = initialRunState({ seed: 7 });
-    // Force warlord into the choices for a deterministic test.
-    state = { ...state, commanderChoices: ['warlord', ...state.commanderChoices.slice(1)] };
-    const after = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'warlord' });
+    // Force admiral into the choices for a deterministic test.
+    state = { ...state, commanderChoices: ['admiral', ...state.commanderChoices.slice(1)] };
+    const after = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'admiral' });
     expect(after.fleet).toHaveLength(2);
     expect(after.fleet[1].name).toBe(shipName(7, 1, 'interceptor'));
     expect(after.shipsCommissioned).toBe(2);

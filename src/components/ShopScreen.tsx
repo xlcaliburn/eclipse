@@ -1,9 +1,19 @@
 import { useState } from 'react';
 import type { CommanderId } from '../game/commanders';
-import { FRAMES, MAX_FLEET_SIZE } from '../game/frames';
+import { FRAMES } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import type { ActiveQuest } from '../game/quests';
-import { COMMODITY_LOT_BUY_COST, COMMODITY_LOT_SELL_PRICE, MERCENARY_COST, QUEST_STAKE, rerollCost } from '../game/reducer';
+import {
+  commodityLotBuyCost,
+  commodityLotCap,
+  COMMODITY_LOT_SELL_PRICE,
+  fleetCap,
+  frameCost,
+  mercenaryCost,
+  partCost,
+  QUEST_STAKE,
+  rerollCost,
+} from '../game/reducer';
 import { playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { FleetPanel } from './FleetPanel';
@@ -78,9 +88,14 @@ export function ShopScreen({
 }: ShopScreenProps) {
   const [selectedShipIndex, setSelectedShipIndex] = useState(0);
   const safeSelectedIndex = Math.min(selectedShipIndex, fleet.length - 1);
-  const fleetFull = fleet.length >= MAX_FLEET_SIZE;
+  const currentFleetCap = fleetCap(commanderId);
+  const fleetFull = fleet.length >= currentFleetCap;
   const effectiveRerollCost = rerollCost(commanderId);
-  const carriesCommodityLot = fleet.some((s) => s.equipped.includes(COMMODITY_LOT_PART_ID));
+  const lotsCarried = fleet.filter((s) => s.equipped.includes(COMMODITY_LOT_PART_ID)).length;
+  const lotCap = commodityLotCap(commanderId);
+  const canBuyMoreLots = lotsCarried < lotCap;
+  const lotBuyCost = commodityLotBuyCost(commanderId);
+  const mercCost = mercenaryCost(commanderId);
 
   return (
     <div className="shop-screen">
@@ -99,14 +114,20 @@ export function ShopScreen({
       ) : (
         <div className="shop-screen__offers">
           {offers.map((partId, i) => {
-            const part = getPart(partId);
+            // A commander's signature part (always in stock — see
+            // reducer.ts's drawShopOffers) shows its discounted price here;
+            // everyone else's offers are unaffected. Overriding just the
+            // displayed cost on a copy of the Part reuses PartCard's
+            // existing rendering/disabled logic untouched.
+            const cost = partCost(partId, commanderId);
+            const part = { ...getPart(partId), cost };
             return (
               <PartCard
                 key={`${partId}-${i}`}
                 part={part}
                 showCost
-                onClick={credits >= part.cost ? () => onBuyPart(i) : undefined}
-                disabled={credits < part.cost}
+                onClick={credits >= cost ? () => onBuyPart(i) : undefined}
+                disabled={credits < cost}
               />
             );
           })}
@@ -163,40 +184,39 @@ export function ShopScreen({
       <div className="shop-screen__offers">
         <div className="card-tile card-tile--deep-scan">
           <span className="card-tile__name">Commodity lot</span>
-          {carriesCommodityLot ? (
-            commodityLotSellable ? (
+          {lotsCarried > 0 && (
+            <span className="card-tile__desc">
+              {lotsCarried} of {lotCap} lot{lotCap === 1 ? '' : 's'} carried.{' '}
+              {commodityLotSellable
+                ? `This station will pay ${COMMODITY_LOT_SELL_PRICE} credits each for whichever are old enough to sell.`
+                : 'Not sellable until a later station.'}
+            </span>
+          )}
+          {commodityLotSellable && (
+            <button type="button" className="shop-button" onClick={onSellCommodityLot}>
+              Sell eligible lot{lotsCarried > 1 ? 's' : ''} (+{COMMODITY_LOT_SELL_PRICE} cr each)
+            </button>
+          )}
+          {canBuyMoreLots &&
+            (credits < lotBuyCost ? (
+              <span className="card-tile__desc warning">Can't afford a lot ({lotBuyCost} cr).</span>
+            ) : (
               <>
                 <span className="card-tile__desc">
-                  Bought cheap upstream — this station will pay {COMMODITY_LOT_SELL_PRICE} credits for it.
+                  Occupies a hardpoint until you sell it at a later station — and it's lost outright if the ship
+                  carrying it is.
                 </span>
-                <button type="button" className="shop-button" onClick={onSellCommodityLot}>
-                  Sell lot (+{COMMODITY_LOT_SELL_PRICE} cr)
-                </button>
+                <div className="card-tile__lane-buttons">
+                  {fleet.map((_, i) => (
+                    <button key={i} type="button" className="shop-button" onClick={() => onBuyCommodityLot(i)}>
+                      Load: {playerShipLabel(fleet, i)}
+                    </button>
+                  ))}
+                </div>
               </>
-            ) : (
-              <span className="card-tile__desc">
-                Loaded and riding along — not sellable until a later station.
-              </span>
-            )
-          ) : credits < COMMODITY_LOT_BUY_COST ? (
-            <span className="card-tile__desc warning">Can't afford a lot ({COMMODITY_LOT_BUY_COST} cr).</span>
-          ) : (
-            <>
-              <span className="card-tile__desc">
-                Occupies a hardpoint until you sell it at a later station — and it's lost outright if the ship
-                carrying it is.
-              </span>
-              <div className="card-tile__lane-buttons">
-                {fleet.map((_, i) => (
-                  <button key={i} type="button" className="shop-button" onClick={() => onBuyCommodityLot(i)}>
-                    Load: {playerShipLabel(fleet, i)}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+            ))}
           <span className="frame-card__cost">
-            {carriesCommodityLot ? 'Owned' : `${COMMODITY_LOT_BUY_COST} cr`}
+            {canBuyMoreLots ? `${lotBuyCost} cr` : `${lotsCarried}/${lotCap} owned`}
           </span>
         </div>
 
@@ -209,33 +229,36 @@ export function ShopScreen({
           {fleetFull ? (
             <span className="card-tile__desc">Fleet is already at maximum size.</span>
           ) : (
-            <button type="button" className="shop-button" onClick={onBuyMercenary} disabled={credits < MERCENARY_COST}>
-              Hire ({MERCENARY_COST} cr)
+            <button type="button" className="shop-button" onClick={onBuyMercenary} disabled={credits < mercCost}>
+              Hire ({mercCost} cr)
             </button>
           )}
-          <span className="frame-card__cost">{MERCENARY_COST} cr</span>
+          <span className="frame-card__cost">{mercCost} cr</span>
         </div>
       </div>
 
       <h3>Expand your fleet</h3>
       {fleetFull ? (
-        <p className="hint">Fleet is at maximum size ({MAX_FLEET_SIZE} ships).</p>
+        <p className="hint">Fleet is at maximum size ({currentFleetCap} ships).</p>
       ) : (
         <div className="shop-screen__frames">
-          {PURCHASABLE_FRAMES.map((frame) => (
-            <button
-              key={frame.id}
-              type="button"
-              className="frame-card"
-              onClick={() => onBuyShip(frame.id as 'interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser')}
-              disabled={credits < frame.cost}
-            >
-              <FrameSilhouette frameId={frame.id} size={40} />
-              <span className="frame-card__name">{frame.name}</span>
-              <span className="frame-card__desc">{frame.blurb}</span>
-              <span className="frame-card__cost">{frame.cost} cr</span>
-            </button>
-          ))}
+          {PURCHASABLE_FRAMES.map((frame) => {
+            const cost = frameCost(frame.cost, frame.id, commanderId);
+            return (
+              <button
+                key={frame.id}
+                type="button"
+                className="frame-card"
+                onClick={() => onBuyShip(frame.id as 'interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser')}
+                disabled={credits < cost}
+              >
+                <FrameSilhouette frameId={frame.id} size={40} />
+                <span className="frame-card__name">{frame.name}</span>
+                <span className="frame-card__desc">{frame.blurb}</span>
+                <span className="frame-card__cost">{cost} cr</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -251,6 +274,7 @@ export function ShopScreen({
         cargoCarrierIndex={activeQuest?.archetype === 'delivery' ? activeQuest.carrierShipIndex : undefined}
         onMoveCargoPod={onMoveCargoPod}
         onScuttle={onScuttle}
+        commanderId={commanderId}
       />
 
       <div className="shop-screen__footer">

@@ -2,7 +2,7 @@ import { combatEnemyPool, EASY_POOL, EASY_POOL_ACT2, HARD_POOL, HARD_POOL_ACT2, 
 import { addHeat } from './heat';
 import { actColumns, globalColumn } from './map';
 import type { MapPosition } from './map';
-import { deriveFleetStats, deriveStats } from './ship';
+import { applyRepairBanking, deriveFleetStats, deriveStats } from './ship';
 import { getPart } from './parts';
 import { CARDS, getCard, MAX_HAND_SIZE } from './cards';
 import type { CardId } from './cards';
@@ -43,9 +43,12 @@ export function meetsRequirement(req: EventRequirement, state: RunState): boolea
     case 'partEquipped':
       return state.fleet.some((s) => s.equipped.includes(req.partId));
     case 'everyShipInitiativeAtLeast':
-      return state.fleet.length > 0 && deriveFleetStats(state.fleet).every((s) => s.initiative >= req.value);
+      return (
+        state.fleet.length > 0 &&
+        deriveFleetStats(state.fleet, state.commanderId).every((s) => s.initiative >= req.value)
+      );
     case 'anyShipComputerAtLeast':
-      return deriveFleetStats(state.fleet).some((s) => s.computer >= req.value);
+      return deriveFleetStats(state.fleet, state.commanderId).some((s) => s.computer >= req.value);
     case 'framePresent':
       return state.fleet.some((s) => s.frameId === req.frameId);
     case 'handAtLeast':
@@ -320,15 +323,23 @@ function applyCappedDamage(fleet: PlayerShipState[], shipIndex: number, amount: 
   });
 }
 
-function applyRepair(fleet: PlayerShipState[], shipIndex: number, amount: number): PlayerShipState[] {
-  return fleet.map((ship, i) => (i === shipIndex ? { ...ship, damage: Math.max(0, ship.damage - amount) } : ship));
+// `bank`: the Engineer (iteration 21) banks any repair that heals past the
+// ship's actual damage instead of wasting it — see ship.ts's
+// applyRepairBanking. Everyone else keeps the plain clamp.
+function applyRepair(fleet: PlayerShipState[], shipIndex: number, amount: number, bank: boolean): PlayerShipState[] {
+  return fleet.map((ship, i) => {
+    if (i !== shipIndex) return ship;
+    return bank ? applyRepairBanking(ship, amount) : { ...ship, damage: Math.max(0, ship.damage - amount) };
+  });
 }
 
 // Fleet triage (iteration 20): every ship at once, instead of the tender's
 // usual pick-one patch-up — a broader but shallower repair, for a player
 // blunting the damage-carryover spiral rather than fixing one bad fight.
-function applyRepairAll(fleet: PlayerShipState[], amount: number): PlayerShipState[] {
-  return fleet.map((ship) => ({ ...ship, damage: Math.max(0, ship.damage - amount) }));
+function applyRepairAll(fleet: PlayerShipState[], amount: number, bank: boolean): PlayerShipState[] {
+  return fleet.map((ship) =>
+    bank ? applyRepairBanking(ship, amount) : { ...ship, damage: Math.max(0, ship.damage - amount) },
+  );
 }
 
 function randomPart(rng: RngFn, pool: PartId[]): PartId {
@@ -680,12 +691,13 @@ export function resolveEventChoice(
         return { state, outcomeText: 'You move on.' };
       }
       const shipIndex = selection.shipIndex ?? 0;
+      const bank = state.commanderId === 'engineer';
       if (choiceIndex === 1) {
         return {
           state: {
             ...state,
             credits: clampCredits(state.credits - 4),
-            fleet: applyRepair(state.fleet, shipIndex, 3),
+            fleet: applyRepair(state.fleet, shipIndex, 3, bank),
           },
           outcomeText: 'The tender patches up your chosen ship for 4 credits.',
         };
@@ -693,7 +705,7 @@ export function resolveEventChoice(
       if (choiceIndex === 2) {
         // Damage control bay — same single-ship repair, free.
         return {
-          state: { ...state, fleet: applyRepair(state.fleet, shipIndex, 3) },
+          state: { ...state, fleet: applyRepair(state.fleet, shipIndex, 3, bank) },
           outcomeText: 'Your crews trade technique notes with the tender — a free repair for your chosen ship.',
         };
       }
@@ -702,7 +714,7 @@ export function resolveEventChoice(
         state: {
           ...state,
           credits: clampCredits(state.credits - 8),
-          fleet: applyRepairAll(state.fleet, 2),
+          fleet: applyRepairAll(state.fleet, 2, bank),
         },
         outcomeText: 'The tender crew works the whole fleet at once — every ship repairs 2 damage, for 8 credits.',
       };
@@ -724,16 +736,24 @@ export function resolveEventChoice(
       if (choiceIndex === 0) {
         return { state, outcomeText: 'You leave the field behind.' };
       }
+      // Iteration 21: the Spymaster knows the patrol schedules — salvage
+      // claims cost them no heat at all, the one doctrine hook this event
+      // has. Everyone else pays the normal price.
+      const spymaster = state.commanderId === 'spymaster';
       if (choiceIndex === 1) {
         return {
-          state: { ...state, credits: state.credits + 8, heat: addHeat(state.heat, 1) },
-          outcomeText: 'You strip the field for 8 credits — the extra time in the open costs you a point of heat.',
+          state: { ...state, credits: state.credits + 8, heat: spymaster ? state.heat : addHeat(state.heat, 1) },
+          outcomeText: spymaster
+            ? 'You strip the field for 8 credits — you know these patrol routes; no one is watching.'
+            : 'You strip the field for 8 credits — the extra time in the open costs you a point of heat.',
         };
       }
       // choiceIndex 2: thorough sweep — more credits, more heat.
       return {
-        state: { ...state, credits: state.credits + 12, heat: addHeat(state.heat, 2) },
-        outcomeText: 'A thorough sweep nets 12 credits — but lingering that long draws real attention: +2 heat.',
+        state: { ...state, credits: state.credits + 12, heat: spymaster ? state.heat : addHeat(state.heat, 2) },
+        outcomeText: spymaster
+          ? 'A thorough sweep nets 12 credits — timed clean around the patrol schedule, no heat at all.'
+          : 'A thorough sweep nets 12 credits — but lingering that long draws real attention: +2 heat.',
       };
     }
 

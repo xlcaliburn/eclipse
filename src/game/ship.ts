@@ -1,3 +1,4 @@
+import type { CommanderId } from './commanders';
 import { getFrame } from './frames';
 import type { FrameId } from './frames';
 import { getPart } from './parts';
@@ -78,17 +79,56 @@ export function deriveStats(frameId: FrameId, equippedPartIds: PartId[], upgrade
   return stats;
 }
 
-export function deriveFleetStats(fleet: PlayerShipState[]): ShipStats[] {
-  return fleet.map((ship) => deriveStats(ship.frameId, ship.equipped, ship.upgrades));
+// Iteration 21 (the Admiral, ace pilots): the only other commander-doctrine
+// effect that needs to reach derived stats, so deriveFleetStats/
+// deriveFleetForCombat below take one shared optional commanderId param
+// rather than each doctrine inventing its own.
+const ACE_KILL_THRESHOLD = 3;
+const ACE_INITIATIVE_BONUS = 1;
+
+// A ship with 3+ kills gains +1 initiative for the Admiral — folded into
+// derived stats (not a separate combat-engine hook) so it's automatically
+// correct everywhere derived stats already flow: UI display, Outspeed
+// qualification, activation order, all from one source of truth.
+function withAceBonus(stats: ShipStats, ship: PlayerShipState, commanderId: CommanderId | undefined): ShipStats {
+  if (commanderId === 'admiral' && (ship.kills ?? 0) >= ACE_KILL_THRESHOLD) {
+    return { ...stats, initiative: stats.initiative + ACE_INITIATIVE_BONUS };
+  }
+  return stats;
+}
+
+export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: CommanderId): ShipStats[] {
+  return fleet.map((ship) => withAceBonus(deriveStats(ship.frameId, ship.equipped, ship.upgrades), ship, commanderId));
 }
 
 // The shape the combat engine needs: each ship's derived stats plus whatever
 // damage it's carrying in from a previous fight (0 for an undamaged ship).
-export function deriveFleetForCombat(fleet: PlayerShipState[]): { stats: ShipStats; initialDamage: number }[] {
-  return fleet.map((ship) => ({
-    stats: deriveStats(ship.frameId, ship.equipped, ship.upgrades),
-    initialDamage: ship.damage,
-  }));
+// Also where the Engineer's banked over-repair (ship.overRepairBank) becomes
+// real ablative HP for this one fight — reducer.ts's ENGAGE clears the bank
+// afterward so it can't carry into a second fight.
+export function deriveFleetForCombat(
+  fleet: PlayerShipState[],
+  commanderId?: CommanderId,
+): { stats: ShipStats; initialDamage: number }[] {
+  return fleet.map((ship) => {
+    const stats = withAceBonus(deriveStats(ship.frameId, ship.equipped, ship.upgrades), ship, commanderId);
+    if (ship.overRepairBank) stats.ablative = (stats.ablative ?? 0) + ship.overRepairBank;
+    return { stats, initialDamage: ship.damage };
+  });
+}
+
+// Iteration 21 (the Engineer, over-repair): repairs `amount` on `ship`, and
+// if that heals past its actual damage, banks the excess (cap 2 per ship)
+// instead of wasting it. A repair-yard full heal has no excess by
+// definition (nothing to overheal past) — its caller passes `flatBank:
+// true` instead, granting a flat +1 so a yard visit is never a wasted trip
+// for the doctrine that's supposed to want repair sources most.
+const OVER_REPAIR_CAP = 2;
+export function applyRepairBanking(ship: PlayerShipState, amount: number, flatBank = false): PlayerShipState {
+  const excess = flatBank ? 1 : Math.max(0, amount - ship.damage);
+  const overRepairBank =
+    excess > 0 ? Math.min(OVER_REPAIR_CAP, (ship.overRepairBank ?? 0) + excess) : ship.overRepairBank;
+  return { ...ship, damage: Math.max(0, ship.damage - amount), overRepairBank };
 }
 
 // A slotless expansion bay upgrade pushes a ship's usable slot count past
