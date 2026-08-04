@@ -5,7 +5,6 @@ import type { EventId } from './events';
 import type { FrameId } from './frames';
 import type { CommanderId } from './commanders';
 import type { GameMap, MapPosition } from './map';
-import type { ActiveQuest } from './quests';
 import type { UpgradeId } from './upgrades';
 
 export type PartType = 'weapon' | 'computer' | 'shield' | 'hull' | 'drive' | 'cargo';
@@ -48,6 +47,11 @@ export interface Part {
   capacitorShield?: number; // shield capacitor: bonus shield, missile phase + first cannon round only
   cloak?: boolean; // cloaking field: untargetable unless every surviving player ship is also cloaked
   active?: boolean; // this part has a once-per-combat activated ability (id doubles as the ability id)
+  // Shield harmonic (iteration 23): a pure passive, no active button. While
+  // equipped anywhere in the fleet, adds this much shield to every ship's
+  // derived stats for the whole fight (folded in once at fleet-derive time
+  // — see ship.ts — not dynamically removed if the carrier dies mid-combat).
+  fleetShieldAura?: number;
 }
 
 export type PartId = string;
@@ -250,6 +254,7 @@ export type Phase =
   | 'repair'
   | 'event'
   | 'interlude'
+  | 'flagship-recovery'
   | 'victory'
   | 'defeat';
 
@@ -310,14 +315,13 @@ export interface RunState {
   bossRevealed: boolean; // the boss dossier has been bought
   visionCol: number; // fog of war high-water mark — node types in columns <= this are visible
   revealedNodes: MapPosition[]; // targeted reveals (deep scan) on top of the vision high-water mark
-  activeQuest?: ActiveQuest; // capped at 1
-  shopQuestOffer?: ActiveQuest; // this shop visit's job-board offer, if any
   commanderChoices: CommanderId[]; // 3 of 4, seeded at run start
   commanderId?: CommanderId; // chosen once, during the 'commander' phase
   currentEnemy?: EnemyDef; // picked once, when a combat/elite/boss node is entered
   combat?: CombatState; // in-progress or just-finished fight
   pendingReward?: RewardSummary;
   shopOffers?: PartId[]; // parts currently for sale
+  shopFrameOffers?: Exclude<FrameId, 'cruiser'>[]; // ships currently for sale — a random subset, drawn per visit
   currentEvent?: CurrentEventState;
   lastEventId?: EventId; // avoids repeating the same event back-to-back
   // Iteration 14.3: set by the defector's "take them aboard" choice. The
@@ -353,4 +357,16 @@ export interface RunState {
   dailyDate?: string; // the YYYY-MM-DD this daily was generated for
   shipsCommissioned?: number; // naming counter — ships ever created this run (not fleet size)
   runStats?: RunStats;
+  // Iteration 24 (Flagship recovery): the Flagship is the one hull that can
+  // never be rebought — losing it in a fight the fleet otherwise survives
+  // used to just mean it was gone for good. Now that gates whatever the
+  // fight's natural next phase would have been (reward/interlude/victory/
+  // map) behind a one-time salvage offer. `flagshipRecoveryResumePhase`
+  // is that natural next phase, restored once the offer resolves either way
+  // — every other field the natural transition would have set (fleet,
+  // credits, pendingReward, etc.) is already sitting on RunState by the
+  // time this gate applies, so resuming needs nothing more than swapping
+  // `phase` back.
+  pendingFlagshipRecovery?: { cost: number; shipName: string; kills: number; fightsSurvived: number };
+  flagshipRecoveryResumePhase?: Phase;
 }

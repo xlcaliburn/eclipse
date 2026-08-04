@@ -14,6 +14,7 @@ export const ENEMY_LORE: Record<string, string> = {
   'interceptor-swarm': 'Single-seat hulls with no life support to speak of. They are flown by pilots who were promised the salvage rights.',
   'plasma-tank': 'A mining rig with its cutting array pointed outward. Slow, patient, and carrying enough armor to outlast an argument.',
   sniper: 'It has been holding this position for eleven days, waiting for exactly one target to drift into its firing solution.',
+  'sniper-pair': 'The second one arrived after the first stopped missing. Now they take turns, so neither has to reload alone.',
   'missile-swarm': 'A launch cordon left over from a war nobody won. The tubes still cycle; the crews stopped asking why.',
   'ancient-guardian': 'It predates the shipping lanes it guards. Nothing aboard has spoken in centuries, and it has never once let anyone pass.',
   gcds: 'A Galactic Center Defense System, still executing standing orders from a government that dissolved generations ago.',
@@ -43,10 +44,10 @@ export const ENEMY_LORE: Record<string, string> = {
   pickets: 'Automated watchposts running their morning sweep. They are not expecting you, and it will not help them.',
 };
 
-// Ambush/bounty variants reuse a base enemy's stat block under a new id
-// (see enemies.ts's `hunterKillerForAmbush` and the pirate-captain bounty),
-// so strip those suffixes before looking the flavor up.
-const ID_SUFFIXES = ['-hunter', '-bounty'];
+// An ambush variant reuses a base enemy's stat block under a new id (see
+// enemies.ts's `hunterKillerForAmbush`), so strip the suffix before looking
+// the flavor up.
+const ID_SUFFIXES = ['-hunter'];
 
 export function getEnemyLore(id: string): string | undefined {
   for (const suffix of ID_SUFFIXES) {

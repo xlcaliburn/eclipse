@@ -18,43 +18,27 @@ export const COMMANDERS: Record<CommanderId, Commander> = {
   merchant: {
     id: 'merchant',
     name: 'The Merchant',
-    description:
-      '+2 credits per combat won. Shop rerolls cost 1 credit instead of 2. Carries 2 commodity lots instead of ' +
-      '1, buys them for 3 credits instead of 4, and hires mercenaries for 8 credits instead of 12. Doctrine: ' +
-      'buy power, don’t earn it — shop-to-shop, skip the marginal fights, arrive at the boss rich.',
+    description: 'Money is the doctrine — better prices everywhere, and a fleet that can simply buy its way through.',
   },
   engineer: {
     id: 'engineer',
     name: 'The Engineer',
-    description:
-      'Every surviving ship repairs 1 damage after each combat won (stacks with regenerative plating). Any ' +
-      'repair that heals past what a ship needs banks the excess as temporary armor for its next fight (cap 2 ' +
-      'per ship) — even a full heal at a repair yard banks a point. Doctrine: take the fights everyone else ' +
-      'routes around; the carryover spiral works for you instead of against you.',
+    description: 'The fleet quietly repairs past where it should stop — damage that should be fatal barely slows it down.',
   },
   warlord: {
     id: 'warlord',
     name: 'The Warlord',
-    description:
-      'The Flagship can hold 2 permanent upgrades instead of 1, starts with one already fitted, and the ' +
-      'Dreadnought costs 5 credits less. Doctrine: one terrifying capital ship. No screen to hide behind — focus ' +
-      'fire, missile alphas, and area weapons all hit harder against one or two hulls.',
+    description: 'Everything rides on one hull, built up past what a single ship should carry.',
   },
   spymaster: {
     id: 'spymaster',
     name: 'The Spymaster',
-    description:
-      'Vision extends 2 columns instead of 1. Every combat win uncovers something: a lane, the next enemy ' +
-      'upgrade, the boss ahead, or more of the chart. Salvage claims cost no heat — they know the patrol ' +
-      'schedules. Doctrine: fight the minimum, farm every wreck risk-free, arrive rich and unwatched.',
+    description: 'Sees further than anyone, and every wreck along the way is free money nobody notices.',
   },
   admiral: {
     id: 'admiral',
     name: 'The Admiral',
-    description:
-      'Starts with a free Interceptor (ion cannon fitted) — the fleet begins at 2 ships. Fleet cap raised to 5. ' +
-      'Ship frames cost 25% less. Any ship with 3 or more kills gains +1 initiative — an ace pilot. Doctrine: ' +
-      'cheap hulls early, elite nodes are food, and losing a veteran actually hurts.',
+    description: 'Starts wide with an extra hull already in formation — more ships, cheaper ships, and veterans who only get sharper.',
   },
 };
 

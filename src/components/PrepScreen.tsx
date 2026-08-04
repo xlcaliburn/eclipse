@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { deriveFleetStats, fleetHasOnlyMissiles, fleetHasWeapon } from '../game/ship';
 import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, getNode } from '../game/map';
-import { BOUNTY_BONUS_CREDITS, hasLineOfRetreat } from '../game/reducer';
+import { hasLineOfRetreat } from '../game/reducer';
 import type { RunAction } from '../game/reducer';
 import type { RunState } from '../game/types';
 import { EnemyPanel } from './EnemyPanel';
@@ -31,11 +31,6 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
   const canEngage = fleetHasWeapon(fleetStats);
   const missileOnlyWarning = fleetHasOnlyMissiles(fleetStats);
   const retreatable = hasLineOfRetreat(state);
-  const isBountyFight =
-    state.activeQuest?.archetype === 'bounty' &&
-    !!state.position &&
-    state.activeQuest.target.col === state.position.col &&
-    state.activeQuest.target.row === state.position.row;
   // 15.1: state it plainly — the same fog rule that lets the starchart show
   // the glyph already means the player is standing on the node, so there's
   // nothing left to hide here.
@@ -55,10 +50,6 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
           onSelectShip={setSelectedShipIndex}
           onEquip={(shipIndex, partId) => dispatch({ type: 'EQUIP', shipIndex, partId })}
           onUnequip={(shipIndex, partId) => dispatch({ type: 'UNEQUIP', shipIndex, partId })}
-          cargoCarrierIndex={
-            state.activeQuest?.archetype === 'delivery' ? state.activeQuest.carrierShipIndex : undefined
-          }
-          onMoveCargoPod={(toShipIndex) => dispatch({ type: 'MOVE_CARGO_POD', toShipIndex })}
           outspeedFastestEnemyInitiative={enemyFastestInitiative}
           collapsibleParts
           commanderId={state.commanderId}
@@ -71,12 +62,9 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
       </div>
 
       <div className="prep-screen__center">
-        {isBountyFight && (
-          <p className="hint">
-            Bounty target — win for +{BOUNTY_BONUS_CREDITS} credits and an upgrade pick, on top of the usual reward.
-          </p>
-        )}
-        {cargo && (
+        {/* Patrol carries no modifier — "Standard payout" told the player
+            nothing they could act on, so it's the one tag left unstated. */}
+        {cargo && cargo !== 'patrol' && (
           <p className="hint">
             {CARGO_LABEL[cargo]} — {CARGO_DESCRIPTION[cargo]}
           </p>

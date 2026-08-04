@@ -46,13 +46,12 @@ describe('enemy lore coverage', () => {
     expect(orphans).toEqual([]);
   });
 
-  it('resolves ambush and bounty variants back to their base enemy', () => {
-    // hunterKillerForAmbush and the pirate-captain bounty reuse a base stat
-    // block under a suffixed id — the flavor should follow.
+  it('resolves an ambush variant back to its base enemy', () => {
+    // hunterKillerForAmbush reuses a base stat block under a suffixed id —
+    // the flavor should follow.
     const base = getEnemyLore('sniper');
     expect(base).toBeTruthy();
     expect(getEnemyLore('sniper-hunter')).toBe(base);
-    expect(getEnemyLore('sniper-bounty')).toBe(base);
   });
 
   it('returns undefined for an unknown enemy rather than throwing', () => {

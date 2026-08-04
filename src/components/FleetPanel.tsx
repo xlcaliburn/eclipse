@@ -1,7 +1,7 @@
 import type { CommanderId } from '../game/commanders';
 import { qualifiesForOutspeed } from '../game/combatEngine';
 import { getFrame } from '../game/frames';
-import { CARGO_POD_PART_ID, getPart } from '../game/parts';
+import { getPart } from '../game/parts';
 import { deriveFleetStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
@@ -17,8 +17,6 @@ interface FleetPanelProps {
   onEquip: (shipIndex: number, partId: PartId) => void;
   onUnequip: (shipIndex: number, partId: PartId) => void;
   onSellPart?: (partId: PartId) => void; // shop only — sells an unequipped inventory part for floor(cost/2)
-  cargoCarrierIndex?: number; // ship carrying an active delivery quest's pod, if any
-  onMoveCargoPod?: (toShipIndex: number) => void;
   onScuttle?: (shipIndex: number) => void; // shop only — decommissions a non-Flagship ship (iteration 8)
   onPartHover?: (partId: PartId | null) => void; // prep only — feeds the forecast delta preview (iteration 12.3)
   // Iteration 17: the CURRENT enemy's fastest raw initiative, so each ship
@@ -49,8 +47,6 @@ export function FleetPanel({
   onEquip,
   onUnequip,
   onSellPart,
-  cargoCarrierIndex,
-  onMoveCargoPod,
   onScuttle,
   onPartHover,
   outspeedFastestEnemyInitiative,
@@ -67,15 +63,12 @@ export function FleetPanel({
 
   return (
     <section className="blueprint-panel">
-      <h2 className="panel-title">
-        Your fleet
-        {/* The instructions are onboarding: essential once, clutter every
-            fight after. Folded into the header so they're still one hover
-            (or tap) away without costing a permanent line. */}
-        <button type="button" className="info-dot" title={instructions} aria-label={instructions}>
-          i
-        </button>
-      </h2>
+      {/* The instructions are onboarding: essential once, clutter every
+          fight after — one hover (or tap) away instead of a permanent
+          header line. */}
+      <button type="button" className="info-dot" title={instructions} aria-label={instructions}>
+        i
+      </button>
 
       {fleet.map((ship, shipIndex) => {
         const stats = deriveFleetStats([ship], commanderId)[0];
@@ -143,17 +136,13 @@ export function FleetPanel({
             {(() => {
               const grid = (
                 <div className="slot-grid">
-                  {ship.equipped.map((partId, i) =>
-                    partId === CARGO_POD_PART_ID ? (
-                      <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
-                    ) : (
-                      <PartCard
-                        key={`${partId}-${i}`}
-                        part={getPart(partId)}
-                        onClick={() => onUnequip(shipIndex, partId)}
-                      />
-                    ),
-                  )}
+                  {ship.equipped.map((partId, i) => (
+                    <PartCard
+                      key={`${partId}-${i}`}
+                      part={getPart(partId)}
+                      onClick={() => onUnequip(shipIndex, partId)}
+                    />
+                  ))}
                   {Array.from({ length: emptySlots }).map((_, i) => (
                     <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty hardpoint" />
                   ))}
@@ -169,19 +158,6 @@ export function FleetPanel({
                 </details>
               );
             })()}
-            {cargoCarrierIndex === shipIndex && onMoveCargoPod && fleet.length > 1 && (
-              <div className="cargo-pod-mover" onClick={(e) => e.stopPropagation()}>
-                <span className="hint">Move cargo pod to:</span>
-                {fleet.map(
-                  (_, i) =>
-                    i !== shipIndex && (
-                      <button key={i} type="button" className="shop-button" onClick={() => onMoveCargoPod(i)}>
-                        {playerShipLabel(fleet, i)}
-                      </button>
-                    ),
-                )}
-              </div>
-            )}
           </div>
         );
       })}

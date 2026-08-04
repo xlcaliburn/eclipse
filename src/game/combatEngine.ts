@@ -35,6 +35,11 @@ export interface RoundModifiers {
   overrideShipIndices: number[]; // fire-control override active: these player ships reroll a missed die once
   evadingShipIndices: number[]; // emergency thrusters active: these player ships can't be targeted and don't fire
   chaffShipIndices: number[]; // chaff launcher active: natural 6s against these player ships resolve as normal rolls
+  // Iteration 23 (ECM pod / Shield disruptor): the first parts to touch the
+  // ENEMY side's effective stats instead of the player's own — everything
+  // above this line only ever modifies player ships.
+  enemyComputerPenalty: number;
+  enemyShieldPenalty: number;
 }
 
 // A plain, serializable snapshot of an in-progress (or finished) fight. The
@@ -258,7 +263,12 @@ function fireShip(
 
   const weapons = phase === 'missile' ? ship.stats.missiles : ship.stats.cannons;
 
-  const attackerComputer = ship.stats.computer + (ship.side === 'player' ? roundModifiers.computerBonus : 0);
+  // ECM pod (iteration 23): the enemy penalty applies only to enemy
+  // attackers, symmetric with how the player's own computerBonus (targeting
+  // uplink) only ever applies to player attackers.
+  const attackerComputer =
+    ship.stats.computer +
+    (ship.side === 'player' ? roundModifiers.computerBonus : -roundModifiers.enemyComputerPenalty);
 
   for (const weapon of weapons) {
     // Second volley doubles every player cannon die for the round.
@@ -301,7 +311,13 @@ function fireShip(
       // modulator active adds a flat bonus to the whole player fleet.
       const capacitorActive = phase === 'missile' || (phase === 'cannon' && round === 1);
       const modulatorBonus = target.side === 'player' ? roundModifiers.playerShieldBonus : 0;
-      const baseShield = target.stats.shield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus;
+      // Shield disruptor (iteration 23): the enemy penalty applies only to
+      // enemy defenders, symmetric with modulatorBonus applying only to
+      // player defenders. Folded in before the shield-pierce clamp below,
+      // same as every other shield modifier.
+      const disruptorPenalty = target.side === 'enemy' ? roundModifiers.enemyShieldPenalty : 0;
+      const baseShield =
+        target.stats.shield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus - disruptorPenalty;
       const effectiveShield = Math.max(
         0,
         baseShield - (ship.stats.shieldPierce ?? 0) - (weapon.shieldPierce ?? 0),
@@ -480,6 +496,8 @@ function freshRoundModifiers(): RoundModifiers {
     overrideShipIndices: [],
     evadingShipIndices: [],
     chaffShipIndices: [],
+    enemyComputerPenalty: 0,
+    enemyShieldPenalty: 0,
   };
 }
 
@@ -886,6 +904,55 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
         roundModifiers: {
           ...state.roundModifiers,
           chaffShipIndices: [...state.roundModifiers.chaffShipIndices, shipIndex],
+        },
+      };
+    // Iteration 23 (support hulls) below.
+    case 'tacrelay':
+      return {
+        ...state,
+        usedActives,
+        log: armed('Tactical relay armed — +1 computer and +1 initiative for your fleet this round.'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus + 1,
+          initiativeBonus: state.roundModifiers.initiativeBonus + 1,
+        },
+      };
+    case 'repairbay': {
+      const alive = state.playerShips.filter(isAlive);
+      if (alive.length === 0) return { ...state, usedActives, log: armed('Repair drone bay finds nothing to repair.') };
+      // Lowest remaining-HP fraction, not lowest raw HP — a hurt Dreadnought
+      // still outranks a barely-scratched Derelict.
+      const target = alive.reduce((worst, s) =>
+        remainingHp(s) / s.stats.hp < remainingHp(worst) / worst.stats.hp ? s : worst,
+      );
+      const playerShips = cloneShips(state.playerShips);
+      playerShips[target.index].damage = Math.max(0, playerShips[target.index].damage - 3);
+      return {
+        ...state,
+        usedActives,
+        playerShips,
+        log: armed("Repair drone bay repairs 3 damage on the fleet's most-damaged ship."),
+      };
+    }
+    case 'ecm':
+      return {
+        ...state,
+        usedActives,
+        log: armed("ECM pod armed — the enemy fleet's computer is reduced by 2 this round."),
+        roundModifiers: {
+          ...state.roundModifiers,
+          enemyComputerPenalty: state.roundModifiers.enemyComputerPenalty + 2,
+        },
+      };
+    case 'disruptor':
+      return {
+        ...state,
+        usedActives,
+        log: armed("Shield disruptor armed — the enemy fleet's shield is reduced by 2 this round."),
+        roundModifiers: {
+          ...state.roundModifiers,
+          enemyShieldPenalty: state.roundModifiers.enemyShieldPenalty + 2,
         },
       };
     default:

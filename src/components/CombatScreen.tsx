@@ -571,12 +571,12 @@ export function CombatScreen({
           }
         />
       </div>
-      {!finished && (
-        <p className="hint combat-priority-hint">
-          {effectivePriority != null
-            ? 'All guns locked on the marked ship — click it again to release.'
-            : 'Click an enemy ship to focus all fire on it.'}
-        </p>
+      {/* The static "click an enemy ship..." instruction is gone — onboarding
+          clutter every fight after the first. The clickable ship cards
+          themselves carry a hover title with the same info. This line now
+          only appears once it has real state to report. */}
+      {!finished && effectivePriority != null && (
+        <p className="hint combat-priority-hint">All guns locked on the marked ship — click it again to release.</p>
       )}
 
       {/* Round controls sit above the log — the most critical tap target

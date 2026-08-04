@@ -286,27 +286,61 @@ export const PARTS: Part[] = [
     shield: 1,
     active: true,
   },
+
+  // --- Support hulls (iteration 23): signature parts for five new frames.
+  // Each is also an ordinary shop-purchasable part, same as Bastion's lure
+  // — the frame just arrives pre-fitted with one. ---
+  {
+    id: 'tacrelay',
+    name: 'Tactical relay',
+    type: 'computer',
+    description: '+1 computer. Active (1/combat): this round, all allies gain +1 computer and +1 initiative.',
+    cost: 8,
+    computer: 1,
+    active: true,
+  },
+  {
+    id: 'shieldharmonic',
+    name: 'Shield harmonic',
+    type: 'shield',
+    description: 'While equipped, +1 shield to every ship in the fleet, for the whole fight.',
+    cost: 9,
+    fleetShieldAura: 1,
+  },
+  {
+    id: 'repairbay',
+    name: 'Repair drone bay',
+    type: 'hull',
+    description: "+1 HP. Active (1/combat): repairs 3 damage on the fleet's most-damaged ship.",
+    cost: 8,
+    hull: 1,
+    active: true,
+  },
+  {
+    id: 'ecm',
+    name: 'ECM pod',
+    type: 'computer',
+    description: "+1 computer. Active (1/combat): this round, the enemy fleet's computer is reduced by 2.",
+    cost: 8,
+    computer: 1,
+    active: true,
+  },
+  {
+    id: 'disruptor',
+    name: 'Shield disruptor',
+    type: 'shield',
+    description: "+1 shield. Active (1/combat): this round, the enemy fleet's shield is reduced by 2.",
+    cost: 8,
+    shield: 1,
+    active: true,
+  },
 ];
 
-// The delivery-quest cargo pod (iteration 6): a pseudo-part that occupies a
-// slot like any other, but is never sold and never unequips to inventory —
-// only moved directly between ships via MOVE_CARGO_POD. Kept out of `PARTS`
-// so the shop's random draw (`PARTS[i]`) never offers it for sale.
-export const CARGO_POD_PART_ID: PartId = 'cargo-pod';
-
-const CARGO_POD_PART: Part = {
-  id: CARGO_POD_PART_ID,
-  name: 'Cargo pod',
-  type: 'cargo',
-  description: 'Delivery quest cargo. Occupies a slot; move it between ships instead of unequipping it.',
-  cost: 0,
-};
-
-// The commodity lot (iteration 20): same pseudo-part shape as the cargo pod
-// above — occupies a slot, never sells, never unequips to inventory — but
-// bought and sold for real credits via BUY_COMMODITY_LOT/SELL_COMMODITY_LOT
-// instead of riding a delivery quest. Kept out of `PARTS` for the same
-// reason: the shop's random offer draw must never surface it.
+// The commodity lot (iteration 20): a pseudo-part that occupies a slot like
+// any other, but is never sold to the shop's random offer draw and never
+// unequips to inventory — bought and sold for real credits via
+// BUY_COMMODITY_LOT/SELL_COMMODITY_LOT instead. Kept out of `PARTS` so the
+// shop's random draw (`PARTS[i]`) never offers it for sale.
 export const COMMODITY_LOT_PART_ID: PartId = 'commodity-lot';
 
 const COMMODITY_LOT_PART: Part = {
@@ -317,9 +351,7 @@ const COMMODITY_LOT_PART: Part = {
   cost: 0,
 };
 
-const PARTS_BY_ID: Record<PartId, Part> = Object.fromEntries(
-  [...PARTS, CARGO_POD_PART, COMMODITY_LOT_PART].map((p) => [p.id, p]),
-);
+const PARTS_BY_ID: Record<PartId, Part> = Object.fromEntries([...PARTS, COMMODITY_LOT_PART].map((p) => [p.id, p]));
 
 export function getPart(id: PartId): Part {
   const part = PARTS_BY_ID[id];

@@ -63,6 +63,17 @@ function fastestInitiative(groups: EnemyGroup[]): number {
   return groups.reduce((best, g) => Math.max(best, g.stats.initiative), -Infinity);
 }
 
+// Replaces the old plain-name header: states what's actually in the fight
+// ("Missile swarm ×3") instead of a bare label the icon row below already
+// implies by count. Multi-group formations keep just the overall name here
+// — each group gets its own labeled sub-heading further down.
+function compositionSummary(enemy: EnemyDef): string {
+  if (enemy.groups.length === 1 && enemy.groups[0].count > 1) {
+    return `${enemy.name} ×${enemy.groups[0].count}`;
+  }
+  return enemy.name;
+}
+
 export function EnemyPanel({ enemy, fleetStats, fleet, commanderId }: EnemyPanelProps) {
   const enemyShield = highestShield(enemy.groups);
   const requiredComputer = enemyShield + 1;
@@ -94,7 +105,6 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId }: EnemyPanel
   // instead of the player having to work it out from the stat blocks.
   const targetIndex = openingTargetIndex(enemy);
   const groupStarts = groupStartIndices(enemy.groups);
-  const totalShips = enemy.groups.reduce((n, g) => n + g.count, 0);
   const lore = getEnemyLore(enemy.id);
 
   // Iteration 19 (telegraphs): the mirror of "where your fire opens" — the
@@ -126,9 +136,8 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId }: EnemyPanel
 
   return (
     <section className="enemy-panel">
-      <h2 className="panel-title">{enemy.name}</h2>
+      <p className="enemy-panel__blurb">{compositionSummary(enemy)}</p>
       {lore && <p className="enemy-panel__lore">{lore}</p>}
-      <p className="enemy-panel__blurb">{enemy.blurb}</p>
 
       {enemy.groups.map((group, i) => (
         <div key={i} className="enemy-panel__group">
@@ -156,10 +165,6 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId }: EnemyPanel
           <StatBar stats={group.stats} />
         </div>
       ))}
-
-      {totalShips > 1 && targetIndex >= 0 && (
-        <p className="hint">Highlighted — where your fire opens: the weakest hull first.</p>
-      )}
 
       {/* Iteration 19 (telegraphs): their side of the same story. */}
       {missileVolley && (

@@ -8,6 +8,7 @@ import { CombatScreen } from './components/CombatScreen';
 import { CommanderSelectScreen } from './components/CommanderSelectScreen';
 import { EndScreen } from './components/EndScreen';
 import { EventScreen } from './components/EventScreen';
+import { FlagshipRecoveryScreen } from './components/FlagshipRecoveryScreen';
 import { FleetOverlay, FleetScreen } from './components/FleetOverlay';
 import { InterludeScreen } from './components/InterludeScreen';
 import { LandingScreen } from './components/LandingScreen';
@@ -196,7 +197,6 @@ function App() {
       visionCol={state.visionCol}
       escalations={state.escalations}
       bossRevealed={state.bossRevealed}
-      activeQuest={state.activeQuest}
       onClose={isCompact ? undefined : () => setSurface('mission')}
       interactive={isCompact ? state.phase === 'map' : true}
       onPickNode={(row) => dispatch({ type: 'PICK_NODE', row })}
@@ -245,7 +245,7 @@ function App() {
           commanderId={state.commanderId}
           daily={state.mode === 'daily'}
           onViewMap={canPeekMap ? () => setSurface('chart') : undefined}
-          onOpenSettings={isCompact ? undefined : () => setSurface('settings')}
+          onOpenSettings={() => setSurface('settings')}
         />
       )}
       {savingUnavailable && <p className="warning">Saving unavailable — this run won't be saved if you close the tab.</p>}
@@ -279,7 +279,6 @@ function App() {
               visionCol={state.visionCol}
               escalations={state.escalations}
               bossRevealed={state.bossRevealed}
-              activeQuest={state.activeQuest}
               onViewFleet={() => setSurface('fleet')}
               onAbandon={handleAbandon}
               onPickNode={(row) => dispatch({ type: 'PICK_NODE', row })}
@@ -319,18 +318,15 @@ function App() {
             <ShopScreen
               credits={state.credits}
               offers={state.shopOffers}
+              frameOffers={state.shopFrameOffers}
               fleet={state.fleet}
               inventory={state.inventory}
-              shopQuestOffer={state.shopQuestOffer}
-              activeQuest={state.activeQuest}
               commanderId={state.commanderId}
               commodityLotSellable={commodityLotSellable}
               onBuyPart={(offerIndex) => dispatch({ type: 'BUY_PART', offerIndex })}
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}
               onBuyShip={(frameId) => dispatch({ type: 'BUY_SHIP', frameId })}
               onScuttle={(shipIndex) => dispatch({ type: 'SCUTTLE_SHIP', shipIndex })}
-              onAcceptQuest={(carrierShipIndex) => dispatch({ type: 'ACCEPT_QUEST', carrierShipIndex })}
-              onMoveCargoPod={(toShipIndex) => dispatch({ type: 'MOVE_CARGO_POD', toShipIndex })}
               onBuyCommodityLot={(shipIndex) => dispatch({ type: 'BUY_COMMODITY_LOT', shipIndex })}
               onSellCommodityLot={() => dispatch({ type: 'SELL_COMMODITY_LOT' })}
               onBuyMercenary={() => dispatch({ type: 'BUY_MERCENARY' })}
@@ -345,7 +341,16 @@ function App() {
           {state.phase === 'interlude' && (
             <InterludeScreen
               fleet={state.fleet}
-              onChoose={(index, shipIndex) => dispatch({ type: 'INTERLUDE_CHOOSE', index, shipIndex })}
+              onChoose={(shipIndex) => dispatch({ type: 'INTERLUDE_CHOOSE', shipIndex })}
+            />
+          )}
+
+          {state.phase === 'flagship-recovery' && state.pendingFlagshipRecovery && (
+            <FlagshipRecoveryScreen
+              shipName={state.pendingFlagshipRecovery.shipName}
+              cost={state.pendingFlagshipRecovery.cost}
+              credits={state.credits}
+              onResolve={(recover) => dispatch({ type: 'RESOLVE_FLAGSHIP_RECOVERY', recover })}
             />
           )}
 

@@ -1,3 +1,5 @@
+// 'settings' stays a valid surface (App.tsx still renders SettingsScreen for
+// it) — only the tab bar's own button for it is gone, per the change below.
 export type Surface = 'mission' | 'chart' | 'fleet' | 'settings';
 
 interface TabBarProps {
@@ -11,6 +13,10 @@ interface TabBarProps {
 // gate on width). Glyphs are code-authored inline SVG on the shared 0-100
 // viewBox used throughout (NodeGlyph, ShipSilhouette), tinted via
 // currentColor so the active tab just recolors — no separate art per state.
+//
+// Settings used to be a fourth tab here; it moved to the top HudBar's gear
+// button (already built for desktop) so mobile reaches it the same way —
+// one tap on a persistent icon, not a dedicated slot in the primary nav.
 function MissionGlyph() {
   return (
     <svg viewBox="0 0 100 100" width={20} height={20} aria-hidden="true">
@@ -38,33 +44,6 @@ function FleetGlyph() {
       <polygon points="50,6 66,28 66,72 50,94 34,72 34,28" fill="currentColor" />
       <polygon points="34,42 10,56 34,64" fill="currentColor" />
       <polygon points="66,42 90,56 66,64" fill="currentColor" />
-    </svg>
-  );
-}
-
-// Eight spokes on the same 0-100 viewBox — a gear reads as settings at 20px
-// where a more literal one would just be mush.
-function SettingsGlyph() {
-  return (
-    <svg viewBox="0 0 100 100" width={20} height={20} aria-hidden="true">
-      <circle cx="50" cy="50" r="20" fill="none" stroke="currentColor" strokeWidth="9" />
-      {Array.from({ length: 8 }, (_, i) => {
-        const a = (i * Math.PI) / 4;
-        const cos = Math.cos(a);
-        const sin = Math.sin(a);
-        return (
-          <line
-            key={i}
-            x1={50 + cos * 30}
-            y1={50 + sin * 30}
-            x2={50 + cos * 44}
-            y2={50 + sin * 44}
-            stroke="currentColor"
-            strokeWidth="9"
-            strokeLinecap="round"
-          />
-        );
-      })}
     </svg>
   );
 }
@@ -102,15 +81,6 @@ export function TabBar({ surface, onSelect }: TabBarProps) {
       >
         <FleetGlyph />
         <span className="tab-bar__label">Fleet</span>
-      </button>
-      <button
-        type="button"
-        className={cls('settings')}
-        aria-current={surface === 'settings' ? 'page' : undefined}
-        onClick={() => onSelect('settings')}
-      >
-        <SettingsGlyph />
-        <span className="tab-bar__label">Settings</span>
       </button>
     </nav>
   );

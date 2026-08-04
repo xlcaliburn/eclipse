@@ -39,7 +39,11 @@ describe('getCommander / COMMANDERS (iteration 21)', () => {
   it('the Warlord and Admiral are distinct commanders with distinct descriptions', () => {
     // The regression this guards: the Warlord's old (wide, free-ship) kit
     // must not still be its description now that the Admiral has that role.
-    expect(COMMANDERS.warlord.description).not.toContain('free Interceptor');
-    expect(COMMANDERS.admiral.description).toContain('free Interceptor');
+    // Descriptions are deliberately allusive, not mechanical (iteration 22
+    // simplification), so this checks the wide/tall framing survives rather
+    // than pinning an exact mechanical phrase.
+    expect(COMMANDERS.warlord.description).not.toEqual(COMMANDERS.admiral.description);
+    expect(COMMANDERS.warlord.description).not.toContain('wide');
+    expect(COMMANDERS.admiral.description).toContain('wide');
   });
 });

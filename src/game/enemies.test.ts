@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyVeterancy,
-  bountyEnemyForColumn,
   combatEnemyPool,
   eliteEnemyForColumn,
   eliteVariant,
@@ -104,7 +103,7 @@ describe('mixed formations (iteration 9)', () => {
   });
 });
 
-describe('eliteEnemyForColumn / bountyEnemyForColumn (act-aware)', () => {
+describe('eliteEnemyForColumn (act-aware)', () => {
   it('act 2 has no hand-tuned exceptions — always the hardest entry of the column pool, elite strength', () => {
     for (const col of [1, 5, 8]) {
       const pool = combatEnemyPool(2, col);
@@ -116,13 +115,6 @@ describe('eliteEnemyForColumn / bountyEnemyForColumn (act-aware)', () => {
         expect(g.stats.hp).toBe(hardest.groups[i].stats.hp + 2);
       });
     }
-  });
-
-  it('bountyEnemyForColumn draws from the correct act\'s pool', () => {
-    const act1Bounty = bountyEnemyForColumn(1, 1);
-    const act2Bounty = bountyEnemyForColumn(2, 1);
-    expect(EASY_POOL.some((e) => act1Bounty.id === `${e.id}-bounty`)).toBe(true);
-    expect(EASY_POOL_ACT2.some((e) => act2Bounty.id === `${e.id}-bounty`)).toBe(true);
   });
 
   it('hardestEnemyForAmbush draws from the correct act\'s band', () => {

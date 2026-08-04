@@ -97,8 +97,25 @@ function withAceBonus(stats: ShipStats, ship: PlayerShipState, commanderId: Comm
   return stats;
 }
 
+// Iteration 23 (Aegis Relay): a shield harmonic anywhere in the fleet adds
+// its bonus to EVERY ship's shield, for the whole fight — summed across
+// however many are carried (multiple stack). Folded in once here, at
+// fleet-derive time, the same place the ace-pilot bonus already folds in —
+// not a live combat-engine hook, so it doesn't vanish if the carrier dies
+// mid-fight (see iteration-23.md for why that's a deliberate trade).
+function fleetShieldAuraBonus(fleet: PlayerShipState[]): number {
+  return fleet.reduce(
+    (sum, ship) => sum + ship.equipped.reduce((s, id) => s + (getPart(id).fleetShieldAura ?? 0), 0),
+    0,
+  );
+}
+
 export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: CommanderId): ShipStats[] {
-  return fleet.map((ship) => withAceBonus(deriveStats(ship.frameId, ship.equipped, ship.upgrades), ship, commanderId));
+  const auraShield = fleetShieldAuraBonus(fleet);
+  return fleet.map((ship) => {
+    const stats = withAceBonus(deriveStats(ship.frameId, ship.equipped, ship.upgrades), ship, commanderId);
+    return auraShield > 0 ? { ...stats, shield: stats.shield + auraShield } : stats;
+  });
 }
 
 // The shape the combat engine needs: each ship's derived stats plus whatever
@@ -110,8 +127,10 @@ export function deriveFleetForCombat(
   fleet: PlayerShipState[],
   commanderId?: CommanderId,
 ): { stats: ShipStats; initialDamage: number }[] {
+  const auraShield = fleetShieldAuraBonus(fleet);
   return fleet.map((ship) => {
     const stats = withAceBonus(deriveStats(ship.frameId, ship.equipped, ship.upgrades), ship, commanderId);
+    if (auraShield > 0) stats.shield += auraShield;
     if (ship.overRepairBank) stats.ablative = (stats.ablative ?? 0) + ship.overRepairBank;
     return { stats, initialDamage: ship.damage };
   });

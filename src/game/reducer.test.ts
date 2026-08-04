@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { initCombat, runToEnd } from './combatEngine';
 import { shipName } from './shipNames';
 import { GAUNTLET, OPENER } from './enemies';
+import { getFrame, PURCHASABLE_FRAME_IDS } from './frames';
 import { MAX_HEAT } from './heat';
 import { BOSS_COLUMN } from './map';
 import type { CargoTag, GameMap, NodeType } from './map';
@@ -348,6 +349,40 @@ describe('EQUIP/UNEQUIP — works in both prep and shop phases', () => {
     state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'hull1' });
     expect(state.fleet[0].damage).toBe(0);
   });
+
+  // Re-tuned 2026-08-04: unequipping a hull part costs max HP, not current
+  // HP — a ship with damage headroom absorbs the reduction there first, and
+  // only a fully-healed ship drops current HP in lockstep with max.
+  it('a hull-1 part carries 1 point of damage headroom: 3/4 unequips to 3/3, not 2/3', () => {
+    // cruiser (Flagship): base HP 3, +1 from hull1 = 4 max, 1 damage -> 3/4.
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['ion', 'hull1'], damage: 1, upgrades: [] }];
+    let state: RunState = { ...initialRunState(), phase: 'prep', fleet };
+    state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'hull1' });
+    expect(state.fleet[0].equipped).not.toContain('hull1');
+    expect(state.fleet[0].damage).toBe(0); // 3/3, not 2/3 — the removed point came out of the existing damage
+  });
+
+  it('a fully-healed ship drops current HP in lockstep with max: 4/4 unequips to 3/3', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['ion', 'hull1'], damage: 0, upgrades: [] }];
+    let state: RunState = { ...initialRunState(), phase: 'prep', fleet };
+    state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'hull1' });
+    expect(state.fleet[0].damage).toBe(0); // still 0 damage, but max HP (and so current) is now 3 -> 3/3
+  });
+
+  it('re-equipping after either case lands back at full max HP: both 3/4 and 4/4 round-trip to 4/4', () => {
+    const damaged: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['ion', 'hull1'], damage: 1, upgrades: [] }];
+    let stateA: RunState = { ...initialRunState(), phase: 'prep', fleet: damaged, inventory: [] };
+    stateA = runReducer(stateA, { type: 'UNEQUIP', shipIndex: 0, partId: 'hull1' }); // 3/4 -> 3/3
+    stateA = runReducer(stateA, { type: 'EQUIP', shipIndex: 0, partId: 'hull1' }); // -> 4/4
+    expect(stateA.fleet[0].damage).toBe(0);
+    expect(stateA.fleet[0].equipped).toContain('hull1');
+
+    const full: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['ion', 'hull1'], damage: 0, upgrades: [] }];
+    let stateB: RunState = { ...initialRunState(), phase: 'prep', fleet: full, inventory: [] };
+    stateB = runReducer(stateB, { type: 'UNEQUIP', shipIndex: 0, partId: 'hull1' }); // 4/4 -> 3/3
+    stateB = runReducer(stateB, { type: 'EQUIP', shipIndex: 0, partId: 'hull1' }); // -> 4/4
+    expect(stateB.fleet[0].damage).toBe(0);
+  });
 });
 
 describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasable', () => {
@@ -412,6 +447,25 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
       state = runReducer(state, { type: 'EQUIP', shipIndex: 1, partId: 'plasma' });
     }
     expect(state.fleet[1].equipped).toHaveLength(4); // ion + 3 plasma fill all 4 slots, no weapon-cap refusal
+  });
+
+  // Iteration 23: the five support hulls each arrive pre-fitted with their
+  // one signature active/passive part.
+  it('the five support hulls (iteration 23) each arrive pre-fitted with their signature part', () => {
+    const cases: ['frigate' | 'aegis' | 'tender' | 'ew-cutter' | 'disruptor-cutter', string][] = [
+      ['frigate', 'tacrelay'],
+      ['aegis', 'shieldharmonic'],
+      ['tender', 'repairbay'],
+      ['ew-cutter', 'ecm'],
+      ['disruptor-cutter', 'disruptor'],
+    ];
+    for (const [frameId, partId] of cases) {
+      const state = stateWithMap('shop', { phase: 'shop', credits: 20 });
+      const result = runReducer(state, { type: 'BUY_SHIP', frameId });
+      expect(result.fleet).toHaveLength(2);
+      expect(result.fleet[1].frameId).toBe(frameId);
+      expect(result.fleet[1].equipped).toEqual([partId]);
+    }
   });
 
   // Iteration 21 (the Admiral, wide): every purchasable frame 25% off,
@@ -479,30 +533,6 @@ describe('SCUTTLE_SHIP (iteration 8, 8.7)', () => {
     expect(result.fleet).toHaveLength(1); // untouched — the fleet can never be emptied
   });
 
-  it('scuttling the delivery carrier fails the quest; scuttling a ship before the carrier re-indexes it', () => {
-    const fleet: PlayerShipState[] = [
-      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
-      { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] },
-      { frameId: 'bastion', equipped: ['cargo-pod'], damage: 0, upgrades: [] },
-    ];
-    const state: RunState = {
-      ...initialRunState(),
-      phase: 'shop',
-      fleet,
-      activeQuest: { archetype: 'delivery', target: { col: 4, row: 0 }, carrierShipIndex: 2 },
-    };
-    // Scuttle ship #1 (before the carrier) — the carrier is still alive but shifts to index 1.
-    const afterMidScuttle = runReducer(state, { type: 'SCUTTLE_SHIP', shipIndex: 1 });
-    expect(afterMidScuttle.activeQuest).toEqual({
-      archetype: 'delivery',
-      target: { col: 4, row: 0 },
-      carrierShipIndex: 1,
-    });
-
-    // Scuttling the carrier itself fails the quest.
-    const afterCarrierScuttle = runReducer(state, { type: 'SCUTTLE_SHIP', shipIndex: 2 });
-    expect(afterCarrierScuttle.activeQuest).toBeUndefined();
-  });
 });
 
 describe('cards — hand cap and PLAY_CARD (iteration 7: pool trimmed to {bulkheads, volley})', () => {
@@ -640,7 +670,7 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
     expect(result.fleet.some((s) => s.upgrades.includes('spine'))).toBe(false);
   });
 
-  it('winning the act-1 boss pays like an elite (no upgrade pick) and moves to the interlude, not victory', () => {
+  it('winning the act-1 boss pays elite credits (no pendingReward — the interlude carries the real reward) and moves to the interlude, not victory', () => {
     const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
     const combat = initCombat(
       [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
@@ -686,6 +716,192 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
     expect(result.pendingReward).toBeUndefined();
   });
 
+  // 2026-08-04: a boss fight — either act's — fully heals every surviving
+  // ship, with no shop between here and whatever comes next to otherwise
+  // repair that damage.
+  it('winning the act-1 boss fully heals every surviving ship', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: ['hull1'], damage: 3, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['ion'], damage: 1, upgrades: [] },
+    ];
+    const combat = initCombat(
+      [
+        { stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 3 },
+        { stats: { initiative: 0, hp: 3, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 1 },
+      ],
+      GAUNTLET[8],
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 10, row: 0 },
+      fleet,
+      combat: wonCombat,
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('interlude');
+    expect(result.fleet.every((s) => s.damage === 0)).toBe(true);
+  });
+
+  it('winning the final (act-2) boss fully heals every surviving ship', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['hull1'], damage: 3, upgrades: [] }];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 3 }],
+      GAUNTLET[8],
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      act: 2,
+      position: { col: 10, row: 0 },
+      fleet,
+      combat: wonCombat,
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('victory');
+    expect(result.fleet.every((s) => s.damage === 0)).toBe(true);
+  });
+});
+
+// 2026-08-04: the Flagship ('cruiser') can never be rebought — losing it in
+// a fight the fleet otherwise survives used to just mean it was gone for
+// good. Now that gates whatever the fight's natural next phase would have
+// been behind a one-time salvage offer.
+describe('flagship recovery (iteration 24)', () => {
+  function fleetWithDestroyedFlagship(): PlayerShipState[] {
+    return [
+      { frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [], name: 'ISV Dauntless', kills: 2, fightsSurvived: 3 },
+      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] },
+    ];
+  }
+
+  it('CONTINUE gates the win behind a recovery offer when the Flagship dies but the fleet survives', () => {
+    const combat = initCombat(
+      [
+        { stats: { initiative: 0, hp: 1, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 1 }, // Flagship destroyed
+        { stats: { initiative: 0, hp: 3, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 },
+      ],
+      GAUNTLET[0],
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 0, row: 0 },
+      fleet: fleetWithDestroyedFlagship(),
+      combat: wonCombat,
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('flagship-recovery');
+    expect(result.flagshipRecoveryResumePhase).toBe('reward'); // the natural outcome of a plain win
+    expect(result.pendingFlagshipRecovery).toEqual({
+      cost: getFrame('cruiser').cost,
+      shipName: 'ISV Dauntless',
+      kills: 2,
+      fightsSurvived: 3,
+    });
+    expect(result.fleet).toHaveLength(1); // the escort, alone, until this resolves
+    expect(result.fleet[0].frameId).toBe('interceptor');
+  });
+
+  it('does not gate a win where the Flagship survives', () => {
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      GAUNTLET[0],
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    const state: RunState = { ...stateWithMap('combat'), phase: 'combat', fleet, combat: wonCombat };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).not.toBe('flagship-recovery');
+  });
+
+  it('WITHDRAW gates too, when the Flagship dies mid-withdrawal but the fleet survives', () => {
+    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
+    const combat = initCombat(
+      [
+        { stats: { initiative: 0, hp: 1, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 1 }, // Flagship destroyed
+        { stats: { initiative: 0, hp: 3, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 },
+      ],
+      GAUNTLET[0],
+      1,
+    );
+    state = { ...state, phase: 'combat', fleet: fleetWithDestroyedFlagship(), combat: { ...combat, round: 1 } };
+    const result = runReducer(state, { type: 'WITHDRAW' });
+    expect(result.phase).toBe('flagship-recovery');
+    expect(result.flagshipRecoveryResumePhase).toBe('map');
+  });
+
+  it('RESOLVE_FLAGSHIP_RECOVERY(recover: true) rebuilds the Flagship — fresh loadout, same name and record — and deducts credits', () => {
+    const gated: RunState = {
+      ...initialRunState(),
+      phase: 'flagship-recovery',
+      flagshipRecoveryResumePhase: 'reward',
+      pendingFlagshipRecovery: { cost: 14, shipName: 'ISV Dauntless', kills: 2, fightsSurvived: 3 },
+      fleet: [{ frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] }],
+      credits: 20,
+    };
+    const result = runReducer(gated, { type: 'RESOLVE_FLAGSHIP_RECOVERY', recover: true });
+    expect(result.phase).toBe('reward');
+    expect(result.credits).toBe(6);
+    expect(result.fleet).toHaveLength(2);
+    expect(result.fleet[0]).toMatchObject({
+      frameId: 'cruiser',
+      equipped: [],
+      damage: 0,
+      upgrades: [],
+      name: 'ISV Dauntless',
+      kills: 2,
+      fightsSurvived: 3,
+    });
+    expect(result.pendingFlagshipRecovery).toBeUndefined();
+    expect(result.flagshipRecoveryResumePhase).toBeUndefined();
+  });
+
+  it('RESOLVE_FLAGSHIP_RECOVERY(recover: true) refuses without enough credits', () => {
+    const gated: RunState = {
+      ...initialRunState(),
+      phase: 'flagship-recovery',
+      flagshipRecoveryResumePhase: 'reward',
+      pendingFlagshipRecovery: { cost: 14, shipName: 'ISV Dauntless', kills: 0, fightsSurvived: 0 },
+      fleet: [{ frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] }],
+      credits: 5,
+    };
+    const result = runReducer(gated, { type: 'RESOLVE_FLAGSHIP_RECOVERY', recover: true });
+    expect(result).toBe(gated);
+  });
+
+  it('RESOLVE_FLAGSHIP_RECOVERY(recover: false) resumes without the Flagship, spending nothing', () => {
+    const gated: RunState = {
+      ...initialRunState(),
+      phase: 'flagship-recovery',
+      flagshipRecoveryResumePhase: 'reward',
+      pendingFlagshipRecovery: { cost: 14, shipName: 'ISV Dauntless', kills: 0, fightsSurvived: 0 },
+      fleet: [{ frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] }],
+      credits: 20,
+    };
+    const result = runReducer(gated, { type: 'RESOLVE_FLAGSHIP_RECOVERY', recover: false });
+    expect(result.phase).toBe('reward');
+    expect(result.credits).toBe(20);
+    expect(result.fleet).toHaveLength(1);
+    expect(result.pendingFlagshipRecovery).toBeUndefined();
+    expect(result.flagshipRecoveryResumePhase).toBeUndefined();
+  });
+
+  it('refuses RESOLVE_FLAGSHIP_RECOVERY outside the flagship-recovery phase', () => {
+    const state = { ...initialRunState(), phase: 'map' as const };
+    const result = runReducer(state, { type: 'RESOLVE_FLAGSHIP_RECOVERY', recover: false });
+    expect(result).toBe(state);
+  });
+});
+
+describe('CONTINUE — total defeat', () => {
   it('losing ends the run in defeat regardless of node type', () => {
     const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
     const combat = initCombat(
@@ -1288,207 +1504,6 @@ describe('fog of war + info broker (iteration 6)', () => {
   });
 });
 
-describe('quests (iteration 6)', () => {
-  function stateForQuestTest(overrides: Partial<RunState> = {}): RunState {
-    return {
-      ...initialRunState(),
-      phase: 'map',
-      position: { col: 0, row: 1 },
-      visited: [{ col: 0, row: 1 }],
-      visionCol: 1,
-      ...overrides,
-    };
-  }
-
-  it('ACCEPT_QUEST (recon/bounty) deducts the stake, reveals the target node, and sets activeQuest; refuses once cap reached', () => {
-    let state: RunState = {
-      ...initialRunState(),
-      phase: 'shop',
-      credits: 20,
-      shopQuestOffer: { archetype: 'recon', target: { col: 4, row: 0 } },
-    };
-    state = runReducer(state, { type: 'ACCEPT_QUEST' });
-    expect(state.activeQuest).toEqual({ archetype: 'recon', target: { col: 4, row: 0 } });
-    expect(state.credits).toBe(17); // 20 - recon's 3cr stake
-    expect(state.revealedNodes).toContainEqual({ col: 4, row: 0 });
-    expect(state.shopQuestOffer).toBeUndefined();
-
-    const again = runReducer(
-      { ...state, phase: 'shop', shopQuestOffer: { archetype: 'bounty', target: { col: 5, row: 0 } } },
-      { type: 'ACCEPT_QUEST' },
-    );
-    expect(again.activeQuest?.archetype).toBe('recon'); // refused — cap 1, unchanged
-    expect(again.credits).toBe(17); // refused — no stake taken
-  });
-
-  it('ACCEPT_QUEST refuses when the stake is unaffordable', () => {
-    const state: RunState = {
-      ...initialRunState(),
-      phase: 'shop',
-      credits: 2, // less than recon's 3cr stake
-      shopQuestOffer: { archetype: 'recon', target: { col: 4, row: 0 } },
-    };
-    const result = runReducer(state, { type: 'ACCEPT_QUEST' });
-    expect(result.activeQuest).toBeUndefined();
-    expect(result.credits).toBe(2);
-    expect(result.shopQuestOffer).toBeDefined(); // offer still stands
-  });
-
-  it('ACCEPT_QUEST (delivery) requires a carrier ship with room and fits the cargo pod', () => {
-    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }];
-    const state: RunState = {
-      ...initialRunState(),
-      phase: 'shop',
-      credits: 20,
-      fleet,
-      shopQuestOffer: { archetype: 'delivery', target: { col: 4, row: 0 } },
-    };
-    const withoutCarrier = runReducer(state, { type: 'ACCEPT_QUEST' });
-    expect(withoutCarrier.activeQuest).toBeUndefined(); // no carrierShipIndex given — refused
-
-    const withCarrier = runReducer(state, { type: 'ACCEPT_QUEST', carrierShipIndex: 0 });
-    expect(withCarrier.activeQuest).toEqual({ archetype: 'delivery', target: { col: 4, row: 0 }, carrierShipIndex: 0 });
-    expect(withCarrier.fleet[0].equipped).toContain('cargo-pod');
-    expect(withCarrier.credits).toBe(15); // 20 - delivery's 5cr stake
-  });
-
-  it('recon completion grants +2 vision plus two reveals, then clears the quest', () => {
-    let state = stateForQuestTest({
-      activeQuest: { archetype: 'recon', target: { col: 2, row: 1 } },
-      escalations: [
-        { id: 'hardened', act: 1, landsAfterColumn: 4, revealed: false },
-        { id: 'deflectors', act: 1, landsAfterColumn: 1, revealed: false },
-      ],
-      visionCol: 1,
-    });
-    state = { ...state, map: forceNodeType(state.map, 1, 1, 'shop') };
-    state = runReducer(state, { type: 'PICK_NODE', row: 1 }); // -> col1 (shop, so it resolves back to 'map')
-    expect(state.phase).toBe('shop');
-    state = runReducer(state, { type: 'LEAVE_SHOP' });
-    const before = state;
-    state = runReducer(state, { type: 'PICK_NODE', row: 1 }); // -> col2, the target
-
-    expect(state.activeQuest).toBeUndefined();
-    expect(state.visionCol).toBeGreaterThanOrEqual(before.visionCol + 1 + 2); // +1 arrival, +2 quest bundle
-
-    // Which two reveals land is a seeded draw over whatever is still unknown,
-    // so assert the payout in general terms: strictly more is known after.
-    const knowledge = (s: typeof state) =>
-      (s.bossRevealed ? 1 : 0) +
-      s.visionCol +
-      s.revealedNodes.length +
-      s.escalations.filter((e) => e.revealed).length;
-    expect(knowledge(state)).toBeGreaterThan(knowledge(before) + 2);
-  });
-
-  it('delivery completion pays credits + removes the pod, and clears the quest', () => {
-    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['ion', 'cargo-pod'], damage: 0, upgrades: [] }];
-    let state = stateForQuestTest({
-      fleet,
-      credits: 0,
-      activeQuest: { archetype: 'delivery', target: { col: 2, row: 1 }, carrierShipIndex: 0 },
-    });
-    state = { ...state, map: forceNodeType(state.map, 1, 1, 'shop') };
-    state = runReducer(state, { type: 'PICK_NODE', row: 1 });
-    state = runReducer(state, { type: 'LEAVE_SHOP' });
-    state = runReducer(state, { type: 'PICK_NODE', row: 1 });
-    expect(state.activeQuest).toBeUndefined();
-    expect(state.credits).toBe(15); // delivery's reward, stake already excluded from this fixture
-    expect(state.fleet[0].equipped).not.toContain('cargo-pod');
-  });
-
-  it('passive failure: advancing past the target column (or missing the row) ends the quest with no reward', () => {
-    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['ion', 'cargo-pod'], damage: 0, upgrades: [] }];
-    let state = stateForQuestTest({
-      fleet,
-      credits: 0,
-      activeQuest: { archetype: 'delivery', target: { col: 1, row: 2 }, carrierShipIndex: 0 }, // we'll go to row 1 instead
-    });
-    state = runReducer(state, { type: 'PICK_NODE', row: 1 }); // col1 row1 — misses the row-2 target in the same column
-    expect(state.activeQuest).toBeUndefined();
-    expect(state.credits).toBe(0); // no reward
-    expect(state.fleet[0].equipped).not.toContain('cargo-pod');
-  });
-
-  it('bounty: the target combat node hosts a named elite variant, and winning pays +18cr and an upgrade pick on top of the normal reward', () => {
-    let state = stateForQuestTest({ activeQuest: { archetype: 'bounty', target: { col: 1, row: 1 } } });
-    state = { ...state, map: forceNodeType(state.map, 1, 1, 'combat') };
-    state = runReducer(state, { type: 'PICK_NODE', row: 1 });
-    expect(state.phase).toBe('prep');
-    expect(state.currentEnemy!.id).toContain('-bounty');
-
-    const combat = initCombat(
-      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
-      state.currentEnemy!,
-      1,
-    );
-    state = { ...state, phase: 'combat', combat: { ...combat, winner: 'player' as const } };
-    const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.phase).toBe('reward');
-    expect(result.pendingReward?.credits).toBe(winReward(1) + 18);
-    expect(result.pendingReward?.upgradeOptions).toHaveLength(3);
-    expect(result.activeQuest).toBeUndefined();
-  });
-
-  it('withdrawing from a bounty fight fails the quest (the node is fled — the target is gone)', () => {
-    let state = stateForQuestTest({ activeQuest: { archetype: 'bounty', target: { col: 1, row: 1 } } });
-    state = { ...state, map: forceNodeType(state.map, 1, 1, 'combat') };
-    state = runReducer(state, { type: 'PICK_NODE', row: 1 });
-    state = runReducer(state, { type: 'ENGAGE' });
-    if (state.combat) state = { ...state, combat: { ...state.combat, round: 1 } };
-    state = runReducer(state, { type: 'WITHDRAW' });
-    expect(state.phase).toBe('map');
-    expect(state.activeQuest).toBeUndefined();
-  });
-
-  it('a delivery quest fails if its carrier ship is destroyed in any fight, not just at the target', () => {
-    const fleet: PlayerShipState[] = [
-      { frameId: 'interceptor', equipped: ['ion', 'cargo-pod'], damage: 0, upgrades: [] }, // destroyed
-    ];
-    const combat = initCombat(
-      [{ stats: { initiative: 0, hp: 1, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 1 }],
-      GAUNTLET[0],
-      1,
-    );
-    const state: RunState = {
-      ...stateWithMap('combat'),
-      phase: 'combat',
-      position: { col: 0, row: 0 },
-      fleet,
-      currentEnemy: GAUNTLET[0],
-      combat: { ...combat, winner: 'player' as const },
-      activeQuest: { archetype: 'delivery', target: { col: 5, row: 0 }, carrierShipIndex: 0 },
-    };
-    const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.activeQuest).toBeUndefined();
-    expect(result.inventory).not.toContain('cargo-pod'); // lost with the ship, not salvaged
-  });
-
-  it('MOVE_CARGO_POD relocates the pod to another ship and updates the carrier index', () => {
-    const fleet: PlayerShipState[] = [
-      { frameId: 'cruiser', equipped: ['ion', 'cargo-pod'], damage: 0, upgrades: [] },
-      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] },
-    ];
-    let state: RunState = {
-      ...initialRunState(),
-      phase: 'prep',
-      fleet,
-      activeQuest: { archetype: 'delivery', target: { col: 4, row: 0 }, carrierShipIndex: 0 },
-    };
-    state = runReducer(state, { type: 'MOVE_CARGO_POD', toShipIndex: 1 });
-    expect(state.fleet[0].equipped).not.toContain('cargo-pod');
-    expect(state.fleet[1].equipped).toContain('cargo-pod');
-    expect(state.activeQuest?.carrierShipIndex).toBe(1);
-  });
-
-  it('UNEQUIP refuses to remove the cargo pod to inventory', () => {
-    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['cargo-pod'], damage: 0, upgrades: [] }];
-    let state: RunState = { ...initialRunState(), phase: 'prep', fleet };
-    state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'cargo-pod' as PartId });
-    expect(state.fleet[0].equipped).toContain('cargo-pod');
-    expect(state.inventory).not.toContain('cargo-pod');
-  });
-});
 
 describe('BUY_COMMODITY_LOT / SELL_COMMODITY_LOT (iteration 20)', () => {
   it('loads the lot onto the chosen ship, charges 4cr, and records the global column bought at on that ship', () => {
@@ -1689,12 +1704,12 @@ describe('BUY_COMMODITY_LOT / SELL_COMMODITY_LOT (iteration 20)', () => {
 });
 
 describe('BUY_MERCENARY (iteration 20)', () => {
-  it('hires an Interceptor flagged mercenary, pre-fitted with an ion cannon, for 12cr', () => {
+  it('hires an Interceptor flagged mercenary, pre-fitted with an ion cannon, for 5cr', () => {
     let state = stateWithMap('shop', { phase: 'shop', credits: 20 });
     state = runReducer(state, { type: 'BUY_MERCENARY' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1]).toMatchObject({ frameId: 'interceptor', equipped: ['ion'], mercenary: true });
-    expect(state.credits).toBe(8);
+    expect(state.credits).toBe(15);
   });
 
   it('does not consume the ship-naming counter — a hire is not a commissioned ship', () => {
@@ -1704,10 +1719,16 @@ describe('BUY_MERCENARY (iteration 20)', () => {
     expect(state.shipsCommissioned).toBe(before);
   });
 
-  it('refuses without 12cr or at the fleet cap', () => {
-    const poor = stateWithMap('shop', { phase: 'shop', credits: 11 });
+  it('refuses without 5cr', () => {
+    const poor = stateWithMap('shop', { phase: 'shop', credits: 4 });
     expect(runReducer(poor, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(1);
+  });
 
+  // 2026-08-04: deliberately NOT capped by fleetCap — a mercenary is a
+  // one-fight rental (see BUY_MERCENARY's comment in reducer.ts), so it's
+  // the one purchase that stays available even at max fleet size, for
+  // every commander alike.
+  it('hires past the fleet cap — a mercenary is a rental, not a permanent addition', () => {
     const fullFleet: PlayerShipState[] = Array.from({ length: 4 }, () => ({
       frameId: 'interceptor' as const,
       equipped: [],
@@ -1715,35 +1736,14 @@ describe('BUY_MERCENARY (iteration 20)', () => {
       upgrades: [],
     }));
     const full = stateWithMap('shop', { phase: 'shop', credits: 100, fleet: fullFleet });
-    expect(runReducer(full, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(4);
+    const result = runReducer(full, { type: 'BUY_MERCENARY' });
+    expect(result.fleet).toHaveLength(5); // past the standard 4-ship cap
+    expect(result.fleet[4]).toMatchObject({ mercenary: true });
   });
 
-  it('the Merchant hires for 8cr instead of 12, and the fleet cap raise is Admiral-only', () => {
-    const merchant = stateWithMap('shop', { phase: 'shop', credits: 8, commanderId: 'merchant' });
+  it('the Merchant hires for 3cr instead of 5', () => {
+    const merchant = stateWithMap('shop', { phase: 'shop', credits: 3, commanderId: 'merchant' });
     expect(runReducer(merchant, { type: 'BUY_MERCENARY' }).credits).toBe(0);
-
-    const fullFleet: PlayerShipState[] = Array.from({ length: 4 }, () => ({
-      frameId: 'interceptor' as const,
-      equipped: [],
-      damage: 0,
-      upgrades: [],
-    }));
-    // A full-4 fleet still refuses a hire for the Merchant (cap unchanged)...
-    const merchantFull = stateWithMap('shop', {
-      phase: 'shop',
-      credits: 100,
-      commanderId: 'merchant',
-      fleet: fullFleet,
-    });
-    expect(runReducer(merchantFull, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(4);
-    // ...but the Admiral's raised cap (5) allows a 5th ship, hired or bought.
-    const admiralFull = stateWithMap('shop', {
-      phase: 'shop',
-      credits: 100,
-      commanderId: 'admiral',
-      fleet: fullFleet,
-    });
-    expect(runReducer(admiralFull, { type: 'BUY_MERCENARY' }).fleet).toHaveLength(5);
   });
 
   // A hired escort is good for exactly the next combat — these three cover
@@ -2058,6 +2058,41 @@ describe('shop rework (iteration 7): stratified draw + selling', () => {
   });
 });
 
+// Iteration 22.x: "Expand your fleet" used to always show every purchasable
+// frame — the same four ships on every visit. Ship offers are now a random
+// draw, same shape as the part-offer stratified draw above.
+describe('shop ship offers are a random draw (iteration 22.x)', () => {
+  it('PICK_NODE into a shop draws exactly 3 distinct, purchasable frames', () => {
+    const state = runReducer(stateWithMap('shop'), { type: 'PICK_NODE', row: 0 });
+    const offers = state.shopFrameOffers!;
+    expect(offers).toHaveLength(3);
+    expect(new Set(offers).size).toBe(3);
+    for (const id of offers) expect(PURCHASABLE_FRAME_IDS).toContain(id);
+    expect(offers).not.toContain('cruiser');
+  });
+
+  it('varies across visits — not the same fixed set every time', () => {
+    // stateWithMap seeds its map randomly per call (no fixed seed passed to
+    // initialRunState), so repeated fresh shop entries sample the real
+    // spread of the draw rather than one deterministic sequence.
+    const seen = new Set<string>();
+    for (let i = 0; i < 20; i++) {
+      const state = runReducer(stateWithMap('shop'), { type: 'PICK_NODE', row: 0 });
+      state.shopFrameOffers!.forEach((id) => seen.add(id));
+    }
+    // A real spread across many draws should surface more than just 3 —
+    // proof the offer isn't a hardcoded fixed set.
+    expect(seen.size).toBeGreaterThan(3);
+  });
+
+  it('LEAVE_SHOP clears the frame offers, same as the part offers', () => {
+    let state = runReducer(stateWithMap('shop'), { type: 'PICK_NODE', row: 0 });
+    expect(state.shopFrameOffers).toBeDefined();
+    state = runReducer(state, { type: 'LEAVE_SHOP' });
+    expect(state.shopFrameOffers).toBeUndefined();
+  });
+});
+
 // Iteration 21 (signature stock): the Engineer, Warlord, and Admiral each
 // always find their doctrine part in the shop, at a discount — the Merchant
 // and Spymaster have no signature part (their doctrines aren't part-based).
@@ -2166,48 +2201,43 @@ describe('iteration 8: the opener (act-1 column 0)', () => {
   });
 });
 
-describe('iteration 8: the interlude', () => {
+// 2026-08-04: the interlude used to offer a 3-way choice (Refit / War
+// chest / Field promotion) — CONTINUE now heals the fleet and pays credits
+// automatically before this phase is even reached (see the boss-fight
+// auto-heal tests below), so the only thing INTERLUDE_CHOOSE still does is
+// attach a guaranteed upgrade to whichever ship the player picks.
+describe('iteration 8/24: the interlude (guaranteed field promotion)', () => {
   function stateAtInterlude(overrides: Partial<RunState> = {}): RunState {
     return { ...initialRunState(), phase: 'interlude', ...overrides };
   }
 
-  it('Refit fully repairs every ship, then moves into act 2', () => {
-    const fleet: PlayerShipState[] = [
-      { frameId: 'cruiser', equipped: ['hull1'], damage: 3, upgrades: [] },
-      { frameId: 'interceptor', equipped: ['ion'], damage: 1, upgrades: [] },
-    ];
-    const result = runReducer(stateAtInterlude({ fleet }), { type: 'INTERLUDE_CHOOSE', index: 0 });
-    expect(result.fleet.every((s) => s.damage === 0)).toBe(true);
+  it('attaches exactly one upgrade to the chosen ship, then moves into act 2', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    const result = runReducer(stateAtInterlude({ fleet }), { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
+    expect(result.fleet[0].upgrades).toHaveLength(1);
     expect(result.phase).toBe('map');
     expect(result.act).toBe(2);
   });
 
-  it('War chest grants +15 credits and nothing else', () => {
-    const before = stateAtInterlude({ credits: 10 });
-    const result = runReducer(before, { type: 'INTERLUDE_CHOOSE', index: 1 });
-    expect(result.credits).toBe(25);
-    expect(result.fleet).toEqual(before.fleet);
-  });
-
-  it('Field promotion attaches exactly one upgrade to the chosen ship', () => {
-    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
-    const result = runReducer(stateAtInterlude({ fleet }), { type: 'INTERLUDE_CHOOSE', index: 2, shipIndex: 0 });
-    expect(result.fleet[0].upgrades).toHaveLength(1);
-  });
-
-  it('Field promotion replaces an existing upgrade rather than stacking (addendum A.4)', () => {
+  it('replaces an existing upgrade rather than stacking (addendum A.4)', () => {
     // The drawn upgrade is real (uncontrolled) randomness at this call site,
     // so the only assertable invariant here is "never more than 1" — the
     // exact-replacement case is covered deterministically by the PICK_UPGRADE
     // test above, which can force a different draw.
     const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: ['spine'] }];
-    const result = runReducer(stateAtInterlude({ fleet }), { type: 'INTERLUDE_CHOOSE', index: 2, shipIndex: 0 });
+    const result = runReducer(stateAtInterlude({ fleet }), { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
     expect(result.fleet[0].upgrades).toHaveLength(1);
+  });
+
+  it('refuses without a valid shipIndex', () => {
+    const state = stateAtInterlude();
+    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', shipIndex: 5 });
+    expect(result).toBe(state);
   });
 
   it('refuses INTERLUDE_CHOOSE outside the interlude phase', () => {
     const state = { ...initialRunState(), phase: 'map' as const };
-    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', index: 1 });
+    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
     expect(result).toBe(state);
   });
 
@@ -2220,7 +2250,7 @@ describe('iteration 8: the interlude', () => {
       revealedNodes: [{ col: 5, row: 0 }],
       bossRevealed: true,
     });
-    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', index: 1 });
+    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
     expect(result.act).toBe(2);
     expect(result.position).toBeNull();
     expect(result.visited).toEqual([]);
@@ -2493,7 +2523,7 @@ describe('heat track', () => {
 
   it('the interlude resets heat to 0', () => {
     const state: RunState = { ...initialRunState(), phase: 'interlude', heat: 3 };
-    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', index: 1 });
+    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
     expect(result.heat).toBe(0);
   });
 });

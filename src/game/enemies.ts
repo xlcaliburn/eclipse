@@ -190,7 +190,13 @@ const byId = (id: string): EnemyDef => {
 };
 
 export const EASY_POOL: EnemyDef[] = [byId('scout-pack'), byId('missile-frigate'), byId('missile-swarm')];
-export const MID_POOL: EnemyDef[] = [byId('shield-cruiser'), byId('interceptor-swarm'), byId('sniper')];
+// The plain 'sniper' GAUNTLET entry stays solo — it's also the base for the
+// col-3 elite (eliteEnemyForColumn), which is deliberately tuned around a
+// single ship (see that function's comment). The mid-pool encounter gets
+// its own two-ship variant instead of reusing that entry directly, so
+// buffing this doesn't also double the early col-3 elite's firepower — see
+// SNIPER_PAIR, pushed in below.
+export const MID_POOL: EnemyDef[] = [byId('shield-cruiser'), byId('interceptor-swarm')];
 export const HARD_POOL: EnemyDef[] = [byId('plasma-tank'), byId('ancient-guardian')];
 export const BOSS: EnemyDef = byId('gcds');
 
@@ -322,6 +328,26 @@ const ESCORTED_SNIPER: EnemyDef = {
   ],
 };
 
+// Re-tuned 2026-08-04: the mid-pool's plain sniper (a lone computer-3 ship)
+// measured too weak by column 7 — a second sniper doubles both the threat
+// and the HP pool without changing the fight's shape (still "bring
+// computer or eat hits"). Same per-ship stats as GAUNTLET's solo 'sniper',
+// duplicated rather than shared so that entry (the col-3 elite's base) stays
+// untouched.
+const SNIPER_PAIR: EnemyDef = {
+  id: 'sniper-pair',
+  name: 'Sniper pair',
+  blurb: 'Shields blunt high computers — twice over.',
+  groups: solo('sniper', 2, {
+    initiative: 2,
+    hp: 2,
+    computer: 3,
+    shield: 0,
+    cannons: [{ diceCount: 1, damage: 2 }],
+    missiles: [],
+  }),
+};
+
 const CARRIER_GROUP: EnemyDef = {
   id: 'carrier-group',
   name: 'Carrier group',
@@ -351,6 +377,7 @@ const COMMAND_WING: EnemyDef = {
 };
 
 HARD_POOL.push(ESCORTED_SNIPER); // act-1 hard
+MID_POOL.push(SNIPER_PAIR); // act-1 mid
 MID_POOL_ACT2.push(CARRIER_GROUP); // act-2 mid
 HARD_POOL_ACT2.push(COMMAND_WING); // act-2 hard
 
@@ -430,15 +457,6 @@ export function eliteEnemyForColumn(act: 1 | 2, col: number, rng: () => number):
   return eliteVariant(hardestInPool(combatEnemyPool(2, col)));
 }
 
-// The named elite variant placed at a bounty quest's target combat node
-// (iteration 6): the hardest enemy in that column's normal pool, at elite
-// (+2 HP) strength — "the Pirate Captain."
-export function bountyEnemyForColumn(act: 1 | 2, col: number): EnemyDef {
-  const hardest = hardestInPool(combatEnemyPool(act, col));
-  const elite = eliteVariant(hardest);
-  return { ...elite, id: `${hardest.id}-bounty`, name: `The Pirate Captain (${hardest.name})` };
-}
-
 // The enemy an `ancient-cache` ambush attracts, scaled to the current
 // column's depth band — exactly as hard as a normal fight there, never a
 // spike the player had no way to prepare for. Act 1 keeps its hand-picked
@@ -457,9 +475,8 @@ export function hardestEnemyForAmbush(act: 1 | 2, col: number): EnemyDef {
 // Iteration 15.2: the fight that replaces a shop/repair/event node's content
 // when heat is armed (4, "Hunted") — same difficulty as `hardestEnemyForAmbush`
 // at this spot, reflavored as the pursuit finally catching up. The id suffix
-// is deliberately not '-elite' (no elite reward pipeline here) and not
-// '-bounty' (no bounty bonus) — just a normal winReward(col) fight wearing a
-// different face.
+// is deliberately not '-elite' (no elite reward pipeline here) — just a
+// normal winReward(col) fight wearing a different face.
 export function hunterKillerForAmbush(act: 1 | 2, col: number): EnemyDef {
   const base = hardestEnemyForAmbush(act, col);
   return {
@@ -513,8 +530,7 @@ export function applyVeterancy(enemy: EnemyDef, col: number): EnemyDef {
 //     guardian, taking the act-1 column-9 elite from 94cr / 29% win to
 //     160cr / 0% against a full-budget fleet. See scripts/enemyValue.ts.
 //
-// Ids here are the hand-tuned boss trios, which are never elite- or
-// bounty-suffixed.
+// Ids here are the hand-tuned boss trios, which are never elite-suffixed.
 function isFormationCenterpiece(enemy: EnemyDef, groupIndex: number): boolean {
   if (groupIndex !== 0) return false;
   const isBoss =

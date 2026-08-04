@@ -14,9 +14,9 @@ interface HudBarProps {
   // Omitted wherever a map peek makes no sense (on the map itself, or once
   // the run is over) — the button simply isn't rendered.
   onViewMap?: () => void;
-  // Desktop only. Mobile reaches settings through the tab bar, so it omits
-  // this and the gear isn't rendered — same optional-prop pattern as
-  // onViewMap above.
+  // Iteration 22.6-ui: mobile also reaches settings through this gear now
+  // (moved off the bottom tab bar) — same button on both, not a
+  // desktop-only affordance anymore.
   onOpenSettings?: () => void;
 }
 

@@ -5,7 +5,6 @@ import { getBoss, getFinalBoss } from '../game/enemies';
 import { visibleNodeType } from '../game/fog';
 import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, reachableNodes } from '../game/map';
 import type { CargoTag, GameMap, MapNode, MapPosition, NodeType } from '../game/map';
-import type { ActiveQuest } from '../game/quests';
 import { sectorName } from '../game/sectorName';
 import { NodeGlyph } from './NodeGlyph';
 import { usePrefersReducedMotion } from './useReducedMotion';
@@ -20,7 +19,6 @@ interface MapScreenProps {
   visionCol: number;
   escalations: ScheduledEscalation[];
   bossRevealed: boolean;
-  activeQuest?: ActiveQuest;
   onViewFleet?: () => void;
   onClose?: () => void; // set when this is a read-only peek from a shop/event, not the live map phase
   onAbandon?: () => void; // iteration 9.2 — live map only, never on the peek overlay
@@ -32,12 +30,6 @@ interface MapScreenProps {
   // so a read-only tab doesn't look actionable.
   interactive?: boolean;
 }
-
-const QUEST_MARKER_LABEL: Record<ActiveQuest['archetype'], string> = {
-  bounty: 'Bounty',
-  delivery: 'Delivery',
-  recon: 'Recon',
-};
 
 const NODE_LABEL: Record<NodeType, string> = {
   opener: 'Combat',
@@ -59,8 +51,9 @@ const CARGO_GLYPH: Record<CargoTag, string> = {
 };
 
 // Common-to-rare, matching map.ts's CARGO_WEIGHTS order — the legend reads
-// as "what you'll see most" first.
-const CARGO_TAGS: CargoTag[] = ['patrol', 'convoy', 'wreck', 'command'];
+// as "what you'll see most" first. Patrol is left off: it carries no
+// modifier, so "Standard payout" told the player nothing they could act on.
+const CARGO_TAGS: CargoTag[] = ['convoy', 'wreck', 'command'];
 
 function isVisited(visited: MapPosition[], col: number, row: number): boolean {
   return visited.some((p) => p.col === col && p.row === row);
@@ -119,7 +112,6 @@ export function MapScreen({
   visionCol,
   escalations,
   bossRevealed,
-  activeQuest,
   onViewFleet,
   onClose,
   onAbandon,
@@ -152,8 +144,6 @@ export function MapScreen({
   // Only decrypted escalations are listed — an undecrypted one is a threat
   // you have no information about, so a placeholder row just adds noise.
   const revealedEscalations = escalations.filter((esc) => esc.act === act && esc.revealed);
-  const isQuestTarget = (col: number, row: number) =>
-    !!activeQuest && activeQuest.target.col === col && activeQuest.target.row === row;
 
   return (
     <div className="map-screen">
@@ -207,10 +197,10 @@ export function MapScreen({
       </details>
 
       {/* Iteration 13: legible copy, 1-indexed columns everywhere (players
-          count columns from 1; the quest badge already did). "From column
-          N" = the first column whose fights carry the buff. */}
+          count columns from 1). "From column N" = the first column whose
+          fights carry the buff. */}
       <div className="map-screen__escalations">
-        {(revealedEscalations.length > 0 || activeQuest) && (
+        {revealedEscalations.length > 0 && (
           <span className="map-screen__escalations-title">Sector threats</span>
         )}
         {revealedEscalations.map((esc, i) => (
@@ -219,15 +209,6 @@ export function MapScreen({
             {getEscalation(esc.id).description}
           </span>
         ))}
-        {activeQuest && (
-          <span
-            className="escalation-badge escalation-badge--quest"
-            title="Your active job — route through the marked node to complete it."
-          >
-            {QUEST_MARKER_LABEL[activeQuest.archetype]} quest target: column {activeQuest.target.col + 1}, lane{' '}
-            {activeQuest.target.row + 1} (★ on the chart)
-          </span>
-        )}
       </div>
 
       {(() => {
@@ -274,7 +255,6 @@ export function MapScreen({
                   const visitedHere = isVisited(visited, node.col, node.row);
                   const fledHere = isFled(node.col, node.row);
                   const isCurrent = samePos(position, node);
-                  const isQuestHere = isQuestTarget(node.col, node.row);
                   const canPick = canPickAt(node);
                   const type = visibleNodeType(fogState, node);
                   const classNames = [
@@ -284,7 +264,6 @@ export function MapScreen({
                     fledHere ? 'map-node--fled' : '',
                     isCurrent ? 'map-node--current' : '',
                     canPick ? 'map-node--reachable' : '',
-                    isQuestHere ? 'map-node--quest' : '',
                   ]
                     .filter(Boolean)
                     .join(' ');
@@ -310,13 +289,11 @@ export function MapScreen({
                       title={fledHere ? 'Fled — cannot return' : undefined}
                     >
                       <NodeGlyph type={type} size={type === 'boss' ? 26 : 18} />
-                      <span className="map-node__label">
-                        {fledHere ? `${label} (fled)` : isQuestHere ? `${label} ★` : label}
-                      </span>
+                      <span className="map-node__label">{fledHere ? `${label} (fled)` : label}</span>
                       {cargo && (
                         <span
                           className={`map-node__cargo map-node__cargo--${cargo}`}
-                          title={`${CARGO_LABEL[cargo]} — ${CARGO_DESCRIPTION[cargo]}`}
+                          title={cargo !== 'patrol' ? `${CARGO_LABEL[cargo]} — ${CARGO_DESCRIPTION[cargo]}` : undefined}
                         >
                           {CARGO_GLYPH[cargo]}
                         </span>

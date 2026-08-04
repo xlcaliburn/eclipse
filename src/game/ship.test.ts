@@ -100,3 +100,37 @@ describe('deriveFleetForCombat: over-repair bank becomes ablative HP', () => {
     expect(stats.ablative ?? 0).toBe(0);
   });
 });
+
+// Iteration 23 (Aegis Relay): a shieldharmonic anywhere in the fleet adds
+// its bonus to EVERY ship's shield, folded in once at fleet-derive time —
+// covers both deriveFleetStats (UI display) and deriveFleetForCombat (the
+// actual fight), which must agree since that was the whole point.
+describe('shield harmonic aura (Aegis Relay)', () => {
+  it('adds the aura to every ship in the fleet, including the carrier itself', () => {
+    const fleet = [ship({ equipped: ['shieldharmonic'] }), ship()];
+    const stats = deriveFleetStats(fleet);
+    expect(stats[0].shield).toBe(1);
+    expect(stats[1].shield).toBe(1);
+  });
+
+  it('stacks additively when carried by more than one ship', () => {
+    const fleet = [ship({ equipped: ['shieldharmonic'] }), ship({ equipped: ['shieldharmonic'] })];
+    const stats = deriveFleetStats(fleet);
+    expect(stats[0].shield).toBe(2);
+    expect(stats[1].shield).toBe(2);
+  });
+
+  it('does nothing when no ship carries it', () => {
+    const stats = deriveFleetStats([ship(), ship()]);
+    expect(stats[0].shield).toBe(0);
+    expect(stats[1].shield).toBe(0);
+  });
+
+  it('agrees with deriveFleetForCombat (UI display and the real fight see the same bonus)', () => {
+    const fleet = [ship({ equipped: ['shieldharmonic'] }), ship()];
+    const combatStats = deriveFleetForCombat(fleet).map((f) => f.stats);
+    const displayStats = deriveFleetStats(fleet);
+    expect(combatStats[0].shield).toBe(displayStats[0].shield);
+    expect(combatStats[1].shield).toBe(displayStats[1].shield);
+  });
+});

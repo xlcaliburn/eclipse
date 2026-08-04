@@ -294,6 +294,79 @@ describe('active parts (iteration 7)', () => {
   });
 });
 
+describe('support hulls (iteration 23)', () => {
+  it('tacrelay: +1 computer and +1 initiative for the whole fleet, for exactly one round', () => {
+    const fleet = [{ stats: blankStats({ hp: 5, actives: ['tacrelay'] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 3);
+    state = useActive(state, 0, 0);
+    expect(state.roundModifiers.computerBonus).toBe(1);
+    expect(state.roundModifiers.initiativeBonus).toBe(1);
+    state = advanceRound(state);
+    expect(state.roundModifiers.computerBonus).toBe(0);
+    expect(state.roundModifiers.initiativeBonus).toBe(0);
+  });
+
+  it('repairbay: repairs 3 damage on the fleet\'s most-damaged ship BY PERCENTAGE, not this ship', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 10, actives: ['repairbay'] }), initialDamage: 2 }, // 80% remaining
+      { stats: blankStats({ hp: 10 }), initialDamage: 8 }, // 20% remaining — worse off
+    ];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1);
+    state = useActive(state, 0, 0);
+    expect(state.playerShips[0].damage).toBe(2); // untouched — it wasn't the worst off
+    expect(state.playerShips[1].damage).toBe(5); // 8 - 3
+  });
+
+  it('repairbay: heals itself when it IS the most-damaged ship', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 10, actives: ['repairbay'] }), initialDamage: 9 }, // 10% remaining — worst
+      { stats: blankStats({ hp: 10 }), initialDamage: 1 }, // 90% remaining
+    ];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1);
+    state = useActive(state, 0, 0);
+    expect(state.playerShips[0].damage).toBe(6); // 9 - 3
+    expect(state.playerShips[1].damage).toBe(1); // untouched
+  });
+
+  it('ecm: enemy computer -2 for exactly one round, player computer untouched', () => {
+    const fleet = [{ stats: blankStats({ hp: 5, computer: 3, actives: ['ecm'] }), initialDamage: 0 }];
+    const foe = enemy({}, { initiative: 5, computer: 3, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile (no-op) — round modifiers reset here, so trigger the active AFTER
+    state = useActive(state, 0, 0);
+    expect(state.roundModifiers.enemyComputerPenalty).toBe(2);
+    state = advanceRound(state); // cannon round 1
+    const enemyRoll = state.log.find((e) => e.kind === 'roll' && e.side === 'enemy') as { computer: number };
+    expect(enemyRoll.computer).toBe(1); // 3 - 2
+
+    state = advanceRound(state); // cannon round 2 — ecm gone
+    const enemyRoll2 = state.log.find(
+      (e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 2 && e.side === 'enemy',
+    ) as { computer: number } | undefined;
+    expect(enemyRoll2?.computer).toBe(3);
+  });
+
+  it('disruptor: enemy shield -2 for exactly one round, player shield untouched', () => {
+    const fleet = [
+      {
+        stats: blankStats({ hp: 10, cannons: [{ diceCount: 1, damage: 1 }], actives: ['disruptor'] }),
+        initialDamage: 0,
+      },
+    ];
+    const foe = enemy({}, { hp: 10, shield: 3 });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile (no-op) — round modifiers reset here, so trigger the active AFTER
+    state = useActive(state, 0, 0);
+    expect(state.roundModifiers.enemyShieldPenalty).toBe(2);
+    state = advanceRound(state); // cannon round 1
+    const playerRoll = state.log.find((e) => e.kind === 'roll' && e.side === 'player') as { shield: number };
+    expect(playerRoll.shield).toBe(1); // 3 - 2
+  });
+});
+
 describe('hasMissilePhase', () => {
   it('is false when neither fleet has a missile weapon', () => {
     const fleet = [{ stats: blankStats({ cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];

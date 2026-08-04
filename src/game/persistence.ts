@@ -136,6 +136,12 @@ function isValidRunState(state: RunState): boolean {
       return Array.isArray(state.repairUpgradeOptions);
     case 'event':
       return !!state.currentEvent;
+    // Iteration 24: a flagship-recovery save needs both the offer itself
+    // and the phase to resume into once it's resolved — either missing
+    // means CONTINUE/WITHDRAW never actually finished computing the state
+    // this save claims to be in.
+    case 'flagship-recovery':
+      return !!state.pendingFlagshipRecovery && !!state.flagshipRecoveryResumePhase;
     default:
       return true;
   }

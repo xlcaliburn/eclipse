@@ -897,10 +897,6 @@ h1, h2, h3 {
   background: radial-gradient(circle at 50% 50%, var(--player-tint), var(--bg-1) 75%);
 }
 
-.map-node--quest {
-  box-shadow: 0 0 0 2px var(--warning) inset;
-}
-
 /* Repair yards read as lighthouses — always visible, gently pulsing. */
 .map-node--repair {
   animation: node-beacon 2s ease-in-out infinite;
@@ -1016,11 +1012,6 @@ h1, h2, h3 {
   animation: none;
 }
 
-.escalation-badge--quest {
-  border-color: var(--warning);
-  color: var(--warning);
-}
-
 /* Reaction cards */
 .combat-hand {
   margin: 16px 0;
@@ -1111,18 +1102,6 @@ h1, h2, h3 {
   font-size: 11px;
 }
 
-.cargo-pod-mover {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-
-.cargo-pod-mover .shop-button {
-  padding: 4px 8px;
-  font-size: 11px;
-}
 
 .modal-backdrop {
   position: fixed;
@@ -2670,6 +2649,23 @@ h1, h2, h3 {
 
 .interlude-screen__ship-picks {
   margin-top: 16px;
+}
+
+/* Flagship recovery (iteration 24) */
+.flagship-recovery-screen {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.flagship-recovery-screen__options {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 16px 0;
 }
 
 /* Landing screen (iteration 9.2) */

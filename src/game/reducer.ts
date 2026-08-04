@@ -18,7 +18,6 @@ import type { CommanderId } from './commanders';
 import {
   applyEscalations,
   applyVeterancy,
-  bountyEnemyForColumn,
   combatEnemyPool,
   eliteEnemyForColumn,
   getBoss,
@@ -29,15 +28,13 @@ import {
 import { drawEscalationSchedule } from './escalations';
 import { drawEvent, getEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
 import type { EventId } from './events';
-import { getFrame, MAX_FLEET_SIZE } from './frames';
+import { getFrame, MAX_FLEET_SIZE, PURCHASABLE_FRAME_IDS } from './frames';
 import type { FrameId } from './frames';
 import { addHeat, MAX_HEAT } from './heat';
 import { actColumns, BOSS_COLUMN, generateMap, getNode, globalColumn, LANE_COLUMNS, reachableNodes } from './map';
-import type { CargoTag, GameMap, MapNode, MapPosition } from './map';
+import type { CargoTag, GameMap, MapPosition } from './map';
 export { globalColumn } from './map';
-import { CARGO_POD_PART_ID, COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
-import { generateQuestOffer } from './quests';
-import type { ActiveQuest } from './quests';
+import { COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
 import { randomSeed, resumeRng } from './rng';
 import type { RngFn } from './rng';
 import {
@@ -74,14 +71,13 @@ export type RunAction =
   | { type: 'WITHDRAW' }
   | { type: 'PICK_UPGRADE'; upgradeId: UpgradeId; shipIndex: number }
   | { type: 'LEAVE_REWARD' }
-  | { type: 'INTERLUDE_CHOOSE'; index: 0 | 1 | 2; shipIndex?: number }
+  | { type: 'INTERLUDE_CHOOSE'; shipIndex: number }
+  | { type: 'RESOLVE_FLAGSHIP_RECOVERY'; recover: boolean }
   | { type: 'BUY_PART'; offerIndex: number }
   | { type: 'SELL_PART'; partId: PartId }
-  | { type: 'BUY_SHIP'; frameId: 'interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser' } // the Flagship is never purchasable
+  | { type: 'BUY_SHIP'; frameId: Exclude<FrameId, 'cruiser'> } // the Flagship is never purchasable
   | { type: 'SCUTTLE_SHIP'; shipIndex: number }
   | { type: 'SET_TARGETING_STANCE'; stance: TargetingStance }
-  | { type: 'ACCEPT_QUEST'; carrierShipIndex?: number }
-  | { type: 'MOVE_CARGO_POD'; toShipIndex: number }
   // Iteration 20 (commodity runs): buy loads the lot onto the chosen ship;
   // sell removes whichever ship currently carries it (there is never more
   // than one lot in the fleet at a time — see RunState.commodityLotBought-
@@ -110,19 +106,9 @@ export type RunAction =
 
 export const SHOP_OFFER_COUNT = 6;
 export const REROLL_COST = 2;
-// Addendum A.2 (iteration 8): every job now costs an upfront stake, forfeit
-// on failure (passive lapse, fled bounty node, dead cargo carrier) — with no
-// stake, accepting was never a real decision. Rewards raised to ~3x stake.
-export const QUEST_STAKE: Record<ActiveQuest['archetype'], number> = { bounty: 6, delivery: 5, recon: 3 };
-export const BOUNTY_BONUS_CREDITS = 18;
-export const DELIVERY_REWARD_CREDITS = 15;
-export const DELIVERY_FALLBACK_CREDITS = 4;
 // How many columns beyond the current vision high-water mark a long-range
 // sweep reveals.
 const SECTOR_SCAN_DEPTH = 2;
-
-// How many separate reveals a completed recon job hands over.
-export const RECON_REVEALS = 2;
 
 // The starting cruiser is fitted out from a fixed credit budget rather than
 // a free pick of parts — sized to match the original reference loadout
@@ -137,14 +123,22 @@ export const SETUP_ALLOWED_PARTS: PartId[] = ['ion', 'hull1', 'shield1', 'comp1'
 // A purchased ship arrives pre-fitted with one signature part, like the
 // Flagship's own starting loadout — an Interceptor with an ion cannon, a
 // Bastion with the lure beacon its whole role depends on, a Cruiser with
-// the same ion cannon (its identity is having no gimmick). The Dreadnought
-// has no signature identity part — it's a blank slate for whatever the
-// fleet needs at that point in the run.
-const STARTING_FIT: Record<'interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser', PartId[]> = {
+// the same ion cannon (its identity is having no gimmick). The Dreadnought,
+// Freighter, and Derelict have no signature identity part — blank slates
+// for whatever the fleet needs at that point in the run (or, for the
+// Derelict, simply too cheap to arrive with anything at all).
+const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   interceptor: ['ion'],
   bastion: ['lure'],
   dreadnought: [],
   'light-cruiser': ['ion'],
+  freighter: [],
+  derelict: [],
+  frigate: ['tacrelay'],
+  aegis: ['shieldharmonic'],
+  tender: ['repairbay'],
+  'ew-cutter': ['ecm'],
+  'disruptor-cutter': ['disruptor'],
 };
 
 function setupSpent(equipped: PartId[]): number {
@@ -168,12 +162,15 @@ export function commodityLotCap(commanderId: CommanderId | undefined): number {
   return commanderId === 'merchant' ? MERCHANT_COMMODITY_LOT_CAP : BASE_COMMODITY_LOT_CAP;
 }
 
-// Iteration 20 (war assets): a one-fight escort, priced above a real
-// Interceptor (8cr) since it costs nothing but credits and never has to
-// survive past the fight it's hired for. The Merchant's discount (iteration
-// 21) still prices it above the real Interceptor.
-const BASE_MERCENARY_COST = 12;
-const MERCHANT_MERCENARY_COST = 8;
+// Re-priced 2026-08-04: originally priced ABOVE a real Interceptor (the
+// stated reasoning was that a one-fight rental "costs nothing but credits"
+// and should pay a premium for that) — but a permanent Interceptor is 6cr
+// and strictly more ship for the money (unlimited fights, can be equipped
+// and carried forward) than a one-fight rental, so charging more for less
+// never made sense. Priced below the permanent frame instead, same
+// buy-power-cheap logic as the rest of the Merchant's kit.
+const BASE_MERCENARY_COST = 5;
+const MERCHANT_MERCENARY_COST = 3;
 export function mercenaryCost(commanderId: CommanderId | undefined): number {
   return commanderId === 'merchant' ? MERCHANT_MERCENARY_COST : BASE_MERCENARY_COST;
 }
@@ -231,6 +228,34 @@ export function eliteReward(col: number): number {
 
 function bossEnemyForAct(map: GameMap, act: 1 | 2): EnemyDef {
   return act === 1 ? getBoss(map.act1BossId) : getFinalBoss(map.act2BossId);
+}
+
+// Iteration 24 (Flagship recovery): the Flagship ('cruiser') is the one hull
+// that can never be rebought — losing it in a fight the rest of the fleet
+// survives used to just mean it was gone for good, permanently. This wraps
+// whatever a fight's natural next state would have been (a won fight's
+// reward/interlude/victory, or a withdrawal's return to the map) behind a
+// one-time salvage offer when that's exactly what happened. Every field the
+// natural transition already set (fleet, credits, pendingReward, etc.)
+// stays on `next` untouched — only `phase` is swapped out and restored by
+// RESOLVE_FLAGSHIP_RECOVERY, so this needs no duplicate branch logic at any
+// of its four call sites.
+function withFlagshipRecoveryGate(originalFleet: PlayerShipState[], next: RunState): RunState {
+  if (next.fleet.length === 0) return next; // total wipe — 'defeat' is a separate, earlier return; not reachable here
+  if (next.fleet.some((s) => s.frameId === 'cruiser')) return next; // Flagship survived — nothing to gate
+  const lostFlagship = originalFleet.find((s) => s.frameId === 'cruiser');
+  if (!lostFlagship) return next; // no Flagship was in this fight to begin with
+  return {
+    ...next,
+    phase: 'flagship-recovery',
+    flagshipRecoveryResumePhase: next.phase,
+    pendingFlagshipRecovery: {
+      cost: getFrame('cruiser').cost,
+      shipName: lostFlagship.name ?? 'the Flagship',
+      kills: lostFlagship.kills ?? 0,
+      fightsSurvived: lostFlagship.fightsSurvived ?? 0,
+    },
+  };
 }
 
 // Iteration 9: every in-run draw (shop stock, enemy picks, event/card/
@@ -426,12 +451,11 @@ function removeOnce<T>(list: T[], item: T): T[] {
   return copy;
 }
 
-// Neither pseudo-part is real equipment — a cargo pod is failed quest
-// freight, a commodity lot is unrealized profit. Both are lost outright
-// with a destroyed/scuttled ship rather than salvaged to inventory; shared
-// here so every salvage site excludes both without repeating the list.
+// A commodity lot isn't real equipment — unrealized profit, not a part —
+// and is lost outright with a destroyed/scuttled ship rather than salvaged
+// to inventory; shared here so every salvage site excludes it the same way.
 function isSalvageablePart(partId: PartId): boolean {
-  return partId !== CARGO_POD_PART_ID && partId !== COMMODITY_LOT_PART_ID;
+  return partId !== COMMODITY_LOT_PART_ID;
 }
 
 // Iteration 7: a flat uniform draw over ~30 parts can no longer reliably
@@ -503,6 +527,20 @@ function drawShopOffers(rng: RngFn, commanderId?: CommanderId): PartId[] {
   const signatureSlot = commanderId ? SIGNATURE_SLOT[commanderId] : undefined;
   if (signaturePart && signatureSlot !== undefined && !offers.includes(signaturePart)) {
     offers[signatureSlot] = signaturePart;
+  }
+  return offers;
+}
+
+// Re-tuned 2026-08-04: the "Expand your fleet" section used to always show
+// every purchasable frame — the same four ships, every single visit. 3 of
+// the (now 6) purchasable frames instead, drawn fresh per shop visit, no
+// commander-signature guarantee (frames aren't commander-specific gear the
+// way parts are — every commander benefits from a wide roster showing up).
+function drawFrameOffers(rng: RngFn): Exclude<FrameId, 'cruiser'>[] {
+  const pool = [...PURCHASABLE_FRAME_IDS];
+  const offers: Exclude<FrameId, 'cruiser'>[] = [];
+  for (let i = 0; i < 3 && pool.length > 0; i++) {
+    offers.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
   }
   return offers;
 }
@@ -591,25 +629,6 @@ function everyShipAtUpgradeCap(fleet: PlayerShipState[], commanderId: CommanderI
 
 function samePosition(a: MapPosition, b: MapPosition): boolean {
   return a.col === b.col && a.row === b.row;
-}
-
-// A delivery quest's cargo pod is a real (slot-consuming) part on its
-// carrier ship — this strips it back out wherever the quest ends (success,
-// passive failure, or carrier loss), so the player is never left with a
-// permanently dead slot.
-function removeCargoPod(fleet: PlayerShipState[], carrierShipIndex: number | undefined): PlayerShipState[] {
-  if (carrierShipIndex === undefined) return fleet;
-  return fleet.map((s, i) =>
-    i === carrierShipIndex ? { ...s, equipped: removeOnce(s.equipped, CARGO_POD_PART_ID) } : s,
-  );
-}
-
-// Whether arriving at `node` (having not hit the quest's target there)
-// means the quest's target column has been passed for good — the map only
-// moves forward one column at a time, so once true it can never revisit.
-function questMissed(quest: ActiveQuest, node: MapNode): boolean {
-  if (node.col > quest.target.col) return true;
-  return node.col === quest.target.col && node.row !== quest.target.row;
 }
 
 // The position the run reverts to if the current node is fled — the node
@@ -741,37 +760,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // Arriving anywhere reveals your next set of choices (fog of war,
       // iteration 6) — a high-water mark, so retreating never un-reveals.
       const visionCol = Math.max(state.visionCol, node.col + visionStep(state));
-      let base: RunState = { ...state, position, visited, visionCol };
-
-      // Quest resolution (iteration 6). Bounty completion happens on combat
-      // *win* (CONTINUE), not on arrival — so it's left alone here except
-      // for the passive-failure check shared with the other archetypes.
-      const quest = state.activeQuest;
-      if (quest) {
-        const atTarget = samePosition(quest.target, position);
-        if (atTarget && quest.archetype === 'recon') {
-          // A recon job pays in intelligence itself now that there is no
-          // intel currency: extra vision plus a couple of free reveals,
-          // available to every commander (this is the job, not a perk).
-          let reconState: RunState = { ...base, visionCol: base.visionCol + 2 };
-          for (let i = 0; i < RECON_REVEALS; i++) {
-            reconState = grantIntel(reconState, rng).state;
-          }
-          base = { ...reconState, activeQuest: undefined };
-        } else if (atTarget && quest.archetype === 'delivery') {
-          const handFull = state.hand.length >= MAX_HAND_SIZE;
-          const cardId = handFull ? undefined : drawRandomCard(rng);
-          base = {
-            ...base,
-            credits: base.credits + DELIVERY_REWARD_CREDITS + (handFull ? DELIVERY_FALLBACK_CREDITS : 0),
-            hand: cardId ? [...base.hand, cardId] : base.hand,
-            fleet: removeCargoPod(base.fleet, quest.carrierShipIndex),
-            activeQuest: undefined,
-          };
-        } else if (!atTarget && questMissed(quest, node)) {
-          base = { ...base, fleet: removeCargoPod(base.fleet, quest.carrierShipIndex), activeQuest: undefined };
-        }
-      }
+      const base: RunState = { ...state, position, visited, visionCol };
 
       if (node.type === 'opener') {
         // The act-1 opener: fixed enemy, no escalations (none are scheduled
@@ -797,10 +786,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       }));
       const globalCol = globalColumn(state.act, node.col);
       if (node.type === 'combat') {
-        const isBountyTarget = base.activeQuest?.archetype === 'bounty' && samePosition(base.activeQuest.target, position);
-        const rawEnemy = isBountyTarget
-          ? bountyEnemyForColumn(state.act, node.col)
-          : pickFromPool(combatEnemyPool(state.act, node.col), rng);
+        const rawEnemy = pickFromPool(combatEnemyPool(state.act, node.col), rng);
         const enemy = applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations);
         return {
           ...base,
@@ -856,7 +842,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           ...base,
           phase: 'shop',
           shopOffers: drawShopOffers(rng, state.commanderId),
-          shopQuestOffer: generateQuestOffer(columns, node, rng) ?? undefined,
+          shopFrameOffers: drawFrameOffers(rng),
           heat,
           rngCounter: nextCounter(),
         };
@@ -908,16 +894,23 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'UNEQUIP': {
       if (state.phase !== 'prep' && state.phase !== 'shop') return state;
-      if (action.partId === CARGO_POD_PART_ID) return state; // moved via MOVE_CARGO_POD, never unequipped to inventory
       if (action.partId === COMMODITY_LOT_PART_ID) return state; // sold via SELL_COMMODITY_LOT, never unequipped to inventory
       const ship = state.fleet[action.shipIndex];
       if (!ship || !ship.equipped.includes(action.partId)) return state;
       const equipped = removeOnce(ship.equipped, action.partId);
-      // Removing a hull part lowers max HP — never let that drop a ship's
-      // carried damage below survivable (this is an equipment change, not
-      // combat; it should never destroy the ship).
+      // Re-tuned 2026-08-04: removing a hull part should cost max HP, not
+      // current HP — a ship sitting on damage should absorb the reduction
+      // out of that headroom first (3/4 -> 3/3, not 2/3), and only a
+      // FULLY healed ship drops in lockstep (4/4 -> 3/3, since there's no
+      // headroom to absorb it from). Re-equipping never restores damage on
+      // its own (EQUIP just adds the part back), so a full unequip/re-equip
+      // round trip lands back at max/max either way — that's the point:
+      // swapping a hull part is an equipment change, not free healing, but
+      // it should also never cost you HP you hadn't actually lost yet.
+      const oldHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades).hp;
       const newHp = deriveStats(ship.frameId, equipped, ship.upgrades).hp;
-      const damage = Math.min(ship.damage, newHp - 1);
+      const hullReduction = Math.max(0, oldHp - newHp);
+      const damage = Math.min(Math.max(0, ship.damage - hullReduction), Math.max(0, newHp - 1));
       const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? { ...s, equipped, damage } : s));
       return { ...state, fleet, inventory: [...state.inventory, action.partId] };
     }
@@ -1001,7 +994,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const salvagedParts: PartId[] = [];
       const lostShips: string[] = [];
       const survivingFleet: PlayerShipState[] = [];
-      let carrierDestroyed = false;
       state.fleet.forEach((ship, i) => {
         // A hired mercenary is good for exactly this one fight — it leaves
         // the fleet the moment combat resolves regardless of outcome, with
@@ -1012,15 +1004,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         if (shipOutcome.destroyed) {
           // Parts salvage back to inventory; upgrades are lost with the
           // ship — that's what makes a capital ship's upgrades feel earned.
-          // Cargo pods and commodity lots are not real parts — lost with
-          // the ship, not salvaged.
+          // A commodity lot is not a real part — lost with the ship, not
+          // salvaged.
           const salvage = ship.equipped.filter(isSalvageablePart);
           inventory = [...inventory, ...salvage];
           salvagedParts.push(...salvage);
           lostShips.push(playerShipLabel(state.fleet, i));
-          if (state.activeQuest?.archetype === 'delivery' && state.activeQuest.carrierShipIndex === i) {
-            carrierDestroyed = true;
-          }
         } else {
           survivingFleet.push({
             ...ship,
@@ -1039,10 +1028,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         damageDealt: baseStats.damageDealt + fightStats.damageDealt,
         damageTaken: baseStats.damageTaken + fightStats.damageTaken,
       };
-      // A delivery quest's carrier dying fails the quest silently — the pod
-      // (and any reward) goes down with the ship, no separate penalty.
-      const activeQuestAfterFight = carrierDestroyed ? undefined : state.activeQuest;
-
       const col = state.position?.col ?? 0;
       const globalCol = globalColumn(state.act, col);
       const isBoss = state.position?.col === BOSS_COLUMN;
@@ -1052,51 +1037,50 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // found you either way; the track restarts clean).
       const heatAfterWin = state.interceptionActive ? 0 : addHeat(state.heat, -1);
 
+      // 2026-08-04: a boss fight — either one — fully heals the fleet on
+      // the way out. There's no shop between here and whatever comes next
+      // (the interlude, or the run's end), so a battered survivor would
+      // otherwise carry that damage somewhere it can never be repaired.
+      const bossHealedFleet = survivingFleet.map((s) => ({ ...s, damage: 0 }));
+
       if (isBoss && state.act === 2) {
-        return {
+        return withFlagshipRecoveryGate(state.fleet, {
           ...state,
           phase: 'victory',
-          fleet: survivingFleet,
+          fleet: bossHealedFleet,
           inventory,
           combat: undefined,
-          activeQuest: activeQuestAfterFight,
           pendingAmbushBonus: undefined,
           heat: heatAfterWin,
           interceptionActive: undefined,
           runStats: runStatsAfterWin,
           rngCounter: nextCounter(),
-        };
+        });
       }
       if (isBoss && state.act === 1) {
         // The act-1 boss pays like an elite at its column — the only boss
-        // that pays, since the run continues — but is not an elite for
-        // reward-screen purposes: no card, no upgrade pick, straight into
-        // the interlude (no shop between acts).
+        // that pays, since the run continues. 2026-08-04: the interlude's
+        // guaranteed upgrade pick (INTERLUDE_CHOOSE) is now the actual
+        // reward for beating it, on top of these credits — a boss kill
+        // used to be worth nothing more than a slightly bigger paycheck.
         const creditsEarned = eliteReward(globalCol);
-        return {
+        return withFlagshipRecoveryGate(state.fleet, {
           ...state,
           phase: 'interlude',
-          fleet: survivingFleet,
+          fleet: bossHealedFleet,
           inventory,
           credits: state.credits + creditsEarned,
           hand: [...state.hand, ...returnedCards],
           combat: undefined,
           currentEnemy: undefined,
-          activeQuest: activeQuestAfterFight,
           pendingAmbushBonus: undefined,
           heat: heatAfterWin, // moot — INTERLUDE_CHOOSE resets to 0 regardless, kept for consistency
           interceptionActive: undefined,
           runStats: runStatsAfterWin,
           rngCounter: nextCounter(),
-        };
+        });
       }
 
-      const isBounty = !!(
-        state.activeQuest &&
-        state.activeQuest.archetype === 'bounty' &&
-        state.position &&
-        samePosition(state.activeQuest.target, state.position)
-      );
       const isElite = state.currentEnemy?.id.endsWith('-elite') ?? false;
       // Cargo tags (15.1) only ever land on plain 'combat' nodes — elites,
       // the boss, the opener, and a heat-4 interception's stand-in fight
@@ -1146,13 +1130,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         return { ...ship, damage: Math.max(0, ship.damage - totalHeal) };
       });
 
-      const bountyBonus = isBounty ? BOUNTY_BONUS_CREDITS : 0;
       const merchantBonus = state.commanderId === 'merchant' ? 2 : 0;
       const ambushBonusCredits = ambushBonus?.credits ?? 0;
-      const creditsEarned =
-        baseReward + bountyBonus + merchantBonus + (cardInsteadCredits ?? 0) + salvageTotal + ambushBonusCredits;
+      const creditsEarned = baseReward + merchantBonus + (cardInsteadCredits ?? 0) + salvageTotal + ambushBonusCredits;
       const credits = state.credits + creditsEarned;
-      const upgradeOptions = isElite || isBounty ? randomUpgradeIds(3, rng) : undefined;
+      const upgradeOptions = isElite ? randomUpgradeIds(3, rng) : undefined;
 
       // The Spymaster's free intelligence, drawn from the same rng stream so
       // the whole run stays reproducible from its seed.
@@ -1169,7 +1151,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         upgradeOptions,
       };
 
-      return {
+      return withFlagshipRecoveryGate(state.fleet, {
         ...intelDraw.state,
         phase: 'reward',
         fleet: healedFleet,
@@ -1180,12 +1162,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         currentEnemy: undefined,
         pendingReward,
         pendingAmbushBonus: undefined,
-        activeQuest: isBounty ? undefined : activeQuestAfterFight,
         heat: heatAfterWin,
         interceptionActive: undefined,
         runStats: runStatsAfterWin,
         rngCounter: nextCounter(),
-      };
+      });
     }
 
     case 'WITHDRAW': {
@@ -1203,7 +1184,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       let inventory = [...state.inventory];
       const survivingFleet: PlayerShipState[] = [];
       const lostShips: string[] = [];
-      let carrierDestroyed = false;
       state.fleet.forEach((ship, i) => {
         // Same rule as a resolved combat (CONTINUE): a mercenary leaves the
         // fleet the moment this fight is over, win, loss, or — here —
@@ -1215,9 +1195,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         if (destroyed) {
           inventory = [...inventory, ...ship.equipped.filter(isSalvageablePart)];
           lostShips.push(playerShipLabel(state.fleet, i));
-          if (state.activeQuest?.archetype === 'delivery' && state.activeQuest.carrierShipIndex === i) {
-            carrierDestroyed = true;
-          }
         } else {
           survivingFleet.push({
             ...ship,
@@ -1242,24 +1219,13 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const position = revertedPosition(state);
       const visited = state.visited.slice(0, -1);
 
-      // Withdrawing from a bounty fight fails the quest — the node is fled,
-      // the target is gone. A delivery carrier destroyed this round also
-      // fails its quest, same as any other combat.
-      const isBountyHere = !!(
-        state.activeQuest &&
-        state.activeQuest.archetype === 'bounty' &&
-        state.position &&
-        samePosition(state.activeQuest.target, state.position)
-      );
-      const activeQuest = isBountyHere || carrierDestroyed ? undefined : state.activeQuest;
-
       // 15.2: withdrawing costs heat too (they watched you run) — except an
       // interception, which always resets to 0 regardless of outcome: they
       // found you either way, so the track restarts clean rather than
       // stepping up from an already-armed 4.
       const heat = state.interceptionActive ? 0 : addHeat(state.heat, 1);
 
-      return {
+      return withFlagshipRecoveryGate(state.fleet, {
         ...state,
         phase: 'map',
         fleet: survivingFleet,
@@ -1270,12 +1236,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         fled,
         position,
         visited,
-        activeQuest,
         heat,
         interceptionActive: undefined,
         runStats,
         pendingAmbushBonus: undefined, // withdrawing from an event ambush forfeits any win-conditional bonus
-      };
+      });
     }
 
     case 'PICK_UPGRADE': {
@@ -1301,44 +1266,64 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'INTERLUDE_CHOOSE': {
       if (state.phase !== 'interlude') return state;
+      if (!state.fleet[action.shipIndex]) return state;
       const { rng, nextCounter } = runRng(state);
-      let fleet = state.fleet;
-      let credits = state.credits;
-      if (action.index === 0) {
-        // Refit: fully repair every ship.
-        fleet = state.fleet.map((s) => ({ ...s, damage: 0 }));
-      } else if (action.index === 1) {
-        // War chest.
-        credits = state.credits + 15;
-      } else if (action.index === 2) {
-        // Field promotion: 1 random elite-pool upgrade, attached to a ship
-        // of the player's choice.
-        if (action.shipIndex === undefined || !state.fleet[action.shipIndex]) return state;
-        const upgradeId = randomUpgradeIds(1, rng)[0];
-        fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, upgradeId, state.commanderId) : s));
-      } else {
-        return state;
-      }
+      // 2026-08-04: the boss's actual reward — the fleet is already fully
+      // healed by CONTINUE before this phase is even reached (see the boss
+      // branches above), and credits were already paid then too. The one
+      // thing still pending here is which ship gets it: a guaranteed random
+      // elite-pool upgrade, no longer one option competing against a heal
+      // or a flat credit bonus that used to make boss kills feel optional
+      // to actually build around.
+      const upgradeId = randomUpgradeIds(1, rng)[0];
+      const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, upgradeId, state.commanderId) : s));
       // Into act 2: a fresh sector — position/visited/fled/fog reset, the
-      // boss dossier resets (a second reveal purchase awaits), any leftover
-      // quest is dropped (act-1 quests always resolve by the boss, since
-      // their targets can never reach column 10 — this is just a backstop).
+      // boss dossier resets (a second reveal purchase awaits).
       return {
         ...state,
         phase: 'map',
         act: 2,
         fleet,
-        credits,
         position: null,
         visited: [],
         fled: [],
         visionCol: 0,
         revealedNodes: [],
         bossRevealed: false,
-        activeQuest: undefined,
-        shopQuestOffer: undefined,
         heat: 0, // 15.2: crossing the sector border shakes pursuit, same as the fog reset
         rngCounter: nextCounter(),
+      };
+    }
+
+    case 'RESOLVE_FLAGSHIP_RECOVERY': {
+      if (state.phase !== 'flagship-recovery' || !state.pendingFlagshipRecovery || !state.flagshipRecoveryResumePhase) {
+        return state;
+      }
+      const { cost, shipName, kills, fightsSurvived } = state.pendingFlagshipRecovery;
+      const resumePhase = state.flagshipRecoveryResumePhase;
+      if (!action.recover) {
+        return { ...state, phase: resumePhase, pendingFlagshipRecovery: undefined, flagshipRecoveryResumePhase: undefined };
+      }
+      if (state.credits < cost) return state; // can't afford — UI should already disable this
+      // Salvage crews rebuild the hull, not what was riding on it: fresh
+      // (empty) loadout, no upgrade — but the same name and combat record,
+      // since it's the same ship, recovered, not a replacement.
+      const recovered: PlayerShipState = {
+        frameId: 'cruiser',
+        equipped: [],
+        damage: 0,
+        upgrades: [],
+        name: shipName,
+        kills,
+        fightsSurvived,
+      };
+      return {
+        ...state,
+        phase: resumePhase,
+        fleet: [recovered, ...state.fleet],
+        credits: state.credits - cost,
+        pendingFlagshipRecovery: undefined,
+        flagshipRecoveryResumePhase: undefined,
       };
     }
 
@@ -1400,16 +1385,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (!ship || ship.frameId === 'cruiser') return state;
       const salvage = ship.equipped.filter(isSalvageablePart);
       const fleet = state.fleet.filter((_, i) => i !== action.shipIndex);
-      const quest = state.activeQuest;
-      let activeQuest = quest;
-      if (quest?.archetype === 'delivery' && quest.carrierShipIndex !== undefined) {
-        if (quest.carrierShipIndex === action.shipIndex) {
-          activeQuest = undefined; // the carrier is gone — the pod (and reward) go with it
-        } else if (quest.carrierShipIndex > action.shipIndex) {
-          activeQuest = { ...quest, carrierShipIndex: quest.carrierShipIndex - 1 }; // re-index past the removed ship
-        }
-      }
-      return { ...state, fleet, inventory: [...state.inventory, ...salvage], activeQuest };
+      return { ...state, fleet, inventory: [...state.inventory, ...salvage] };
     }
 
     case 'SET_TARGETING_STANCE': {
@@ -1419,55 +1395,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return { ...state, targetingStance: action.stance };
     }
 
-    case 'ACCEPT_QUEST': {
-      if (state.phase !== 'shop' || !state.shopQuestOffer) return state;
-      if (state.activeQuest) return state; // cap 1 active
-      const offer = state.shopQuestOffer;
-      const stake = QUEST_STAKE[offer.archetype];
-      if (state.credits < stake) return state; // can't afford the stake
-      const credits = state.credits - stake;
-      if (offer.archetype === 'delivery') {
-        const idx = action.carrierShipIndex;
-        if (idx === undefined) return state;
-        const ship = state.fleet[idx];
-        if (!ship) return state;
-        if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades)) return state;
-        const fleet = state.fleet.map((s, i) =>
-          i === idx ? { ...s, equipped: [...s.equipped, CARGO_POD_PART_ID] } : s,
-        );
-        return {
-          ...state,
-          fleet,
-          credits,
-          activeQuest: { ...offer, carrierShipIndex: idx },
-          revealedNodes: [...state.revealedNodes, offer.target],
-          shopQuestOffer: undefined,
-        };
-      }
-      return {
-        ...state,
-        credits,
-        activeQuest: offer,
-        revealedNodes: [...state.revealedNodes, offer.target],
-        shopQuestOffer: undefined,
-      };
-    }
-
-    case 'MOVE_CARGO_POD': {
-      if (state.phase !== 'prep' && state.phase !== 'shop') return state;
-      if (!state.activeQuest || state.activeQuest.archetype !== 'delivery') return state;
-      const fromIndex = state.activeQuest.carrierShipIndex;
-      if (fromIndex === undefined || fromIndex === action.toShipIndex) return state;
-      const toShip = state.fleet[action.toShipIndex];
-      if (!toShip) return state;
-      if (toShip.equipped.length >= effectiveSlots(toShip.frameId, toShip.upgrades)) return state;
-      const fleet = state.fleet.map((s, i) => {
-        if (i === fromIndex) return { ...s, equipped: removeOnce(s.equipped, CARGO_POD_PART_ID) };
-        if (i === action.toShipIndex) return { ...s, equipped: [...s.equipped, CARGO_POD_PART_ID] };
-        return s;
-      });
-      return { ...state, fleet, activeQuest: { ...state.activeQuest, carrierShipIndex: action.toShipIndex } };
-    }
 
     case 'BUY_COMMODITY_LOT': {
       if (state.phase !== 'shop') return state;
@@ -1520,7 +1447,14 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'BUY_MERCENARY': {
       if (state.phase !== 'shop') return state;
-      if (state.fleet.length >= fleetCap(state.commanderId)) return state;
+      // Deliberately NOT capped by fleetCap (2026-08-04) — a mercenary is a
+      // one-fight rental, not a permanent addition to the roster (it's
+      // already excluded from shipsCommissioned above, and every mustering-
+      // out path — CONTINUE, WITHDRAW, the act-1/2 boundary — drops it
+      // regardless of fleet size). A player already at the cap is exactly
+      // who most wants a temporary extra hull for one hard fight; blocking
+      // that made the cap punish the one purchase it can't actually
+      // overcrowd anything with.
       const cost = mercenaryCost(state.commanderId);
       if (state.credits < cost) return state;
       return {
@@ -1572,7 +1506,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         ...state,
         phase: 'map',
         shopOffers: undefined,
-        shopQuestOffer: undefined,
+        shopFrameOffers: undefined,
         currentEnemy: undefined,
       };
     }
