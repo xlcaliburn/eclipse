@@ -8,6 +8,9 @@ import '@fontsource/jetbrains-mono/600.css'
 import './tokens.css'
 import './index.css'
 import App from './App.tsx'
+import { initPwaUpdate } from './pwaUpdate.ts'
+
+initPwaUpdate()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

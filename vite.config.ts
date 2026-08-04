@@ -22,6 +22,11 @@ export default defineConfig({
     // config value here.
     VitePWA({
       registerType: 'autoUpdate',
+      // The default auto-injected script only calls register() once on
+      // page load, which a resumed (not reloaded) home-screen app may
+      // never do again — src/pwaUpdate.ts registers manually so it can
+      // also poll on visibility change and reload once an update lands.
+      injectRegister: false,
       includeAssets: ['favicon.svg', 'icon.svg', 'icons.svg'],
       manifest: {
         name: 'Eclipse Roguelike',
