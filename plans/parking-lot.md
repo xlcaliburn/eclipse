@@ -11,7 +11,8 @@
   cut from iteration 7 for overlap with antimatter and Targeting uplink;
   revisit if the arsenal wants more timing texture.
 - **Trader mini-shop rework** (`wandering-trader` still retired from the
-  event pool).
+  event pool). Partially superseded by iteration 20's commodity runs —
+  revisit only if shops still feel flat after 20 ships.
 - **Audio pass** (deliberately not a rider on iteration 10's visual
   overhaul): a small set of synthesized/bundled SFX for the combat
   theater's event replay (shots, hits, destruction, warp), mute by
@@ -60,4 +61,6 @@
 - **Officers** — a named officer per ship granting a perk, ranking up with
   kills. Overlaps the one-upgrade-per-ship identity; if ever done,
   consider reflavoring upgrades *as* officers rather than adding a second
-  attachment system.
+  attachment system. Iteration 21's Admiral ace-pilots (+1 init at 3
+  kills) is the cheap version of this — full officers stay parked unless
+  aces prove the appetite.

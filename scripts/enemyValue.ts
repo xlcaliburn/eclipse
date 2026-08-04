@@ -13,7 +13,7 @@ import { ESCALATIONS } from '../src/game/escalations';
 import { initCombat, runToEnd } from '../src/game/combatEngine';
 import { deriveFleetForCombat } from '../src/game/ship';
 import type { EnemyDef, PlayerShipState, ShipStats } from '../src/game/types';
-import type { ScheduledEscalation } from '../src/game/escalations';
+import type { EscalationId, ScheduledEscalation } from '../src/game/escalations';
 
 // Prices an enemy composition in credits, using the player's own shop as the
 // yardstick — "what would it cost to buy this ship's capability out of the
@@ -131,9 +131,33 @@ function row(label: string, enemy: EnemyDef, budget: number): string {
   ].join(' ');
 }
 
-// Every escalation live at once — the worst case a late column can present.
-function allEscalations(act: 1 | 2): ScheduledEscalation[] {
-  return ESCALATIONS.map((e) => ({ id: e.id, act, landsAfterColumn: -1 }) as ScheduledEscalation);
+// A run schedules 4 escalations without replacement: 2 land in act 1 (after
+// local columns 3 and 6) and 2 more in act 2. Because the reducer rebases
+// them onto global columns, act-1's pair is still live during act 2 — so a
+// late act-1 fight faces 2, and a late act-2 fight faces all 4. Modelling
+// "every escalation at once" would overstate act 1 by more than double.
+const LIVE_ESCALATIONS: Record<1 | 2, number> = { 1: 2, 2: 4 };
+
+function scheduled(ids: EscalationId[], act: 1 | 2): ScheduledEscalation[] {
+  return ids.map((id) => ({ id, act, landsAfterColumn: -1 }) as ScheduledEscalation);
+}
+
+function combinations<T>(items: T[], k: number): T[][] {
+  if (k === 0) return [[]];
+  if (items.length < k) return [];
+  const [head, ...rest] = items;
+  return [...combinations(rest, k - 1).map((c) => [head, ...c]), ...combinations(rest, k)];
+}
+
+// The worst escalation draw a run can actually deal at this act, by value.
+function worstRealisticEscalations(act: 1 | 2, enemy: EnemyDef, col: number): { ids: EscalationId[]; enemy: EnemyDef } {
+  const all = ESCALATIONS.map((e) => e.id);
+  let worst: { ids: EscalationId[]; enemy: EnemyDef } | null = null;
+  for (const combo of combinations(all, LIVE_ESCALATIONS[act])) {
+    const escalated = applyEscalations(enemy, col, scheduled(combo, act));
+    if (!worst || enemyValue(escalated) > enemyValue(worst.enemy)) worst = { ids: combo, enemy: escalated };
+  }
+  return worst!;
 }
 
 function report() {
@@ -157,16 +181,18 @@ function report() {
       console.log(row(`c${col} ELITE: ${elite.name}`, elite, budget));
     }
 
-    // The specific late-game case: the last elite with every escalation live.
+    // The specific late-game case: the last elite under the worst escalation
+    // draw the schedule can actually produce for this act.
     const lastCol = 9;
     const budget = playerBudget(act, lastCol);
-    const worst = applyEscalations(
+    const { ids, enemy: worst } = worstRealisticEscalations(
+      act,
       applyVeterancy(eliteEnemyForColumn(act, lastCol, () => 0.99), lastCol),
       lastCol,
-      allEscalations(act),
     );
     console.log('');
-    console.log(row(`c${lastCol} ELITE + all escalations`, worst, budget));
+    console.log(row(`c${lastCol} ELITE + worst draw (${LIVE_ESCALATIONS[act]} live)`, worst, budget));
+    console.log(`      escalations: ${ids.join(', ')}`);
     console.log(`      composition: ${composition(worst)}`);
   }
 
@@ -203,31 +229,41 @@ function simulate(fleet: PlayerShipState[], enemy: EnemyDef, sims = 2000): numbe
   return Math.round((wins / sims) * 100);
 }
 
+// What a fleet's parts would cost at shop prices — so a win rate can be read
+// against the column's budget instead of taken on faith.
+function fleetPartsCost(fleet: PlayerShipState[]): number {
+  return fleet.reduce((sum, s) => sum + s.equipped.reduce((n, id) => n + (PART_COST.get(id) ?? 0), 0), 0);
+}
+
 function simulationCheck() {
-  console.log('\n\n=== SIMULATED WIN RATE (late act-1 reference fleet) ===');
+  console.log('\n\n=== SIMULATED WIN RATE (act-1 column 9) ===');
   const col = 9;
   const base = applyVeterancy(eliteEnemyForColumn(1, col, () => 0.99), col);
-  const squadronsOnly = applyEscalations(base, col, [
-    { id: 'squadrons', act: 1, landsAfterColumn: -1 } as ScheduledEscalation,
-  ]);
-  const everything = applyEscalations(base, col, allEscalations(1));
+  const squadronsOnly = applyEscalations(base, col, scheduled(['squadrons'], 1));
+  // The real worst case in act 1: squadrons plus one more, not all five.
+  const everything = worstRealisticEscalations(1, base, col).enemy;
 
-  // A deliberately over-budget fleet too: if even this can't win, the fight
-  // isn't "hard", it's arithmetically closed.
+  // A fleet spending near the full column budget: if even this can't win, the
+  // fight isn't "hard", it's arithmetically closed.
   const OVERBUILT: PlayerShipState[] = [
     { frameId: 'cruiser', equipped: ['antimatter', 'plasma', 'comp3', 'hull2', 'shield2', 'init3'], upgrades: [], damage: 0 },
     { frameId: 'interceptor', equipped: ['plasma', 'comp2', 'hull1'], upgrades: [], damage: 0 },
     { frameId: 'interceptor', equipped: ['plasma', 'comp2', 'hull1'], upgrades: [], damage: 0 },
   ];
 
-  console.log(`${''.padEnd(26)} ${'value'.padStart(7)}  ${'composition'.padEnd(28)} ${'ref'.padStart(5)} ${'overbuilt'.padStart(10)}`);
+  console.log(
+    `Column-9 budget is ${playerBudget(1, 9).toFixed(0)}cr. ` +
+      `"lean" fleet = ${fleetPartsCost(LATE_ACT1_FLEET)}cr of parts (under-spent, a floor); ` +
+      `"rich" = ${fleetPartsCost(OVERBUILT)}cr (about what a clean run can field).\n`,
+  );
+  console.log(`${''.padEnd(26)} ${'value'.padStart(7)}  ${'composition'.padEnd(28)} ${'lean'.padStart(5)} ${'rich'.padStart(6)}`);
   for (const [label, enemy] of [
     ['elite, no escalations', base],
     ['elite + squadrons only', squadronsOnly],
-    ['elite + all escalations', everything],
+    ['elite + worst act-1 draw', everything],
   ] as const) {
     console.log(
-      `${label.padEnd(26)} ${`${enemyValue(enemy).toFixed(0)}cr`.padStart(7)}  ${composition(enemy).padEnd(28)} ${`${simulate(LATE_ACT1_FLEET, enemy)}%`.padStart(5)} ${`${simulate(OVERBUILT, enemy)}%`.padStart(10)}`,
+      `${label.padEnd(26)} ${`${enemyValue(enemy).toFixed(0)}cr`.padStart(7)}  ${composition(enemy).padEnd(28)} ${`${simulate(LATE_ACT1_FLEET, enemy)}%`.padStart(5)} ${`${simulate(OVERBUILT, enemy)}%`.padStart(6)}`,
     );
   }
 }

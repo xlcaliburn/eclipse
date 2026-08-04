@@ -92,6 +92,29 @@ describe('applyEscalations', () => {
     expect(mainGroup(result).count).toBeGreaterThanOrEqual(2);
   });
 
+  it('reinforces an elite formation\'s screen without cloning its centerpiece', () => {
+    // Regression (2026-08-03): the centerpiece exemption used to be
+    // boss-only, so squadrons doubled Ancient guardian's lone guardian. That
+    // took the act-1 column-9 elite to 0% win against a full-budget fleet —
+    // an unwinnable node. Its frigate screen must still reinforce, so the
+    // escalation keeps its teeth and still earns its badge.
+    const guardian = findEnemy('ancient-guardian');
+    const reinforced = applyEscalations(guardian, 1, squadronsOnly);
+
+    expect(reinforced.groups[0].label).toBe('guardian');
+    expect(reinforced.groups[0].count).toBe(1); // NOT doubled
+    expect(reinforced.groups[1].count).toBe(guardian.groups[1].count + 1); // screen grows
+    expect(reinforced.appliedEscalations).toContain('squadrons');
+  });
+
+  it('still gives a genuinely solo enemy a wingman', () => {
+    // The centerpiece rule keys off being group 0 of a *multi-group*
+    // formation, so a single-group enemy is untouched by it.
+    const solo = applyEscalations(findEnemy('missile-frigate'), 1, squadronsOnly);
+    expect(solo.groups).toHaveLength(1);
+    expect(solo.groups[0].count).toBe(2);
+  });
+
   it('reinforces a boss escort screen without cloning the boss itself', () => {
     const titan = getFinalBoss('titan');
     const reinforced = applyEscalations(titan, 1, squadronsOnly);

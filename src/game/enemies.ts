@@ -142,13 +142,20 @@ export const GAUNTLET: EnemyDef[] = [
   {
     id: 'gcds',
     name: 'GCDS',
+    // Nerfed 2026-08-03: was shield 2 / 4 cannon dice, which made act 1 a
+    // gate rather than a climb — every reference fleet below "strong" won
+    // 0% of the time, and the realistic end-of-run fleet (which spends ~66
+    // of the ~68 credits a full clear earns) only managed 59%. Real runs
+    // spend on repairs and field less than that. Shield 2 -> 1 so mid-tier
+    // computers aren't hard-walled, and one cannon die removed to cut the
+    // incoming alpha. See scripts/actRun.ts for the end-to-end clear rate.
     blurb: 'The final stat wall.',
     groups: solo('gcds', 1, {
       initiative: 0,
       hp: 7,
       computer: 2,
-      shield: 2,
-      cannons: [{ diceCount: 4, damage: 2 }],
+      shield: 1,
+      cannons: [{ diceCount: 3, damage: 2 }],
       missiles: [{ diceCount: 2, damage: 1 }],
     }),
   },
@@ -388,8 +395,16 @@ export function combatEnemyPool(act: 1 | 2, col: number): EnemyDef[] {
 export function eliteEnemyForColumn(act: 1 | 2, col: number, rng: () => number): EnemyDef {
   if (act === 1) {
     if (col === 3) return eliteVariant(byId('sniper'), 1);
-    if (col === 5) return eliteVariant(rng() < 0.5 ? byId('plasma-tank') : byId('ancient-guardian'));
-    return eliteVariant(byId('ancient-guardian'));
+    // Rebalanced 2026-08-03: every other column used to return an elite
+    // Ancient guardian outright — the hardest enemy in the act, at column 1
+    // as readily as column 9. Run simulation put ~40% of all act-1 deaths on
+    // elite nodes, because no fleet a player can field mid-act beats it (0-1%
+    // win for every reference fleet below "strong"). Elites now scale with
+    // their column's pool, which is the rule act 2 has always used; Ancient
+    // guardian still shows up as the elite once the hard band starts, where
+    // it belongs.
+    if (col === 5) return eliteVariant(rng() < 0.5 ? byId('plasma-tank') : hardestInPool(combatEnemyPool(1, col)));
+    return eliteVariant(hardestInPool(combatEnemyPool(1, col)));
   }
   return eliteVariant(hardestInPool(combatEnemyPool(2, col)));
 }
@@ -461,12 +476,26 @@ export function applyVeterancy(enemy: EnemyDef, col: number): EnemyDef {
 // changes what you can do about it beforehand. Applies to every group
 // (iteration 9) — a formation's screen gets exactly as hardened as its
 // centerpiece.
-// A boss's own hull is always group 0 (see the boss/final-boss definitions);
-// later groups are its escorts. Ids here are the hand-tuned boss trios,
-// which are never elite- or bounty-suffixed.
-function isBossCenterpiece(enemyId: string, groupIndex: number): boolean {
+// Group 0 is always the centerpiece: a boss's own hull, or the real threat a
+// mixed formation screens for. Later groups are its escorts. Squadrons must
+// never clone a centerpiece — see the call site for why.
+//
+// Two ways to qualify, and both are needed:
+//   - a boss, even a solo one. GCDS and the Dreadnought have no escorts, so
+//     a "multi-group only" test would let squadrons mint a second boss.
+//   - group 0 of any multi-group formation. This half was added 2026-08-03:
+//     the boss-only rule let squadrons double Ancient guardian's lone
+//     guardian, taking the act-1 column-9 elite from 94cr / 29% win to
+//     160cr / 0% against a full-budget fleet. See scripts/enemyValue.ts.
+//
+// Ids here are the hand-tuned boss trios, which are never elite- or
+// bounty-suffixed.
+function isFormationCenterpiece(enemy: EnemyDef, groupIndex: number): boolean {
   if (groupIndex !== 0) return false;
-  return (BOSS_IDS as readonly string[]).includes(enemyId) || (FINAL_BOSS_IDS as readonly string[]).includes(enemyId);
+  const isBoss =
+    (BOSS_IDS as readonly string[]).includes(enemy.id) ||
+    (FINAL_BOSS_IDS as readonly string[]).includes(enemy.id);
+  return isBoss || enemy.groups.length > 1;
 }
 
 export function applyEscalations(enemy: EnemyDef, col: number, escalations: ScheduledEscalation[]): EnemyDef {
@@ -502,10 +531,16 @@ export function applyEscalations(enemy: EnemyDef, col: number, escalations: Sche
         case 'squadrons': {
           // Reinforced squadrons always leaves a real squadron behind: a
           // lone ship gains a wingman rather than being skipped, so the
-          // badge never appears over a single hull. The one exception is a
-          // boss's centerpiece (always group 0) — two Titans is a different
-          // fight, not an escalated one; its escorts still reinforce.
-          if (isBossCenterpiece(enemy.id, i)) break;
+          // badge never appears over a single hull.
+          //
+          // The exception is a formation's centerpiece (always group 0).
+          // The floor above *doubles* a count-1 group, and a centerpiece is
+          // the most expensive ship in the fight by design — cloning it adds
+          // far more than "one more ship" is worth, which is how the act-1
+          // guardian elite became mathematically unwinnable. Its screen
+          // still reinforces, so the escalation keeps its teeth (and its
+          // badge) without minting a second boss.
+          if (isFormationCenterpiece(enemy, i)) break;
           const reinforced = Math.max(2, g.count + 1);
           if (reinforced !== g.count) {
             g.count = reinforced;
