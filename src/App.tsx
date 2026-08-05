@@ -22,6 +22,7 @@ import { Starfield } from './components/Starfield';
 import { HudBar } from './components/HudBar';
 import { SettingsOverlay, SettingsScreen } from './components/SettingsScreen';
 import { TabBar } from './components/TabBar';
+import { TutorialOverlay } from './components/TutorialOverlay';
 import type { Surface } from './components/TabBar';
 import { useIsCompact } from './components/useIsCompact';
 import { usePrefersReducedMotion } from './components/useReducedMotion';
@@ -76,6 +77,14 @@ function App() {
     setSurface('mission');
   }, [state.phase]);
   const isCompact = useIsCompact();
+
+  // Iteration 25: the "How to play" overlay. Deliberately NOT part of
+  // `surface` — it's a dismiss-and-forget reference, not a persistent tab,
+  // and it needs to be reachable from the landing screen too (before the
+  // phase machine / HUD even exist), so a plain boolean that overlays
+  // whatever's currently rendered is simpler than routing it through the
+  // surface state machine.
+  const [tutorialOpen, setTutorialOpen] = useState(false);
 
   // Autosave after every reducer action, once the landing screen (if any)
   // has been resolved — never while it's still deciding, so a "New run"
@@ -168,8 +177,10 @@ function App() {
             dailyResult={todayRecord?.outcome ? todayRecord : null}
             onStartDaily={handleStartDaily}
             onContinueDaily={handleContinueDaily}
+            onOpenTutorial={() => setTutorialOpen(true)}
           />
         </div>
+        {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}
       </>
     );
   }
@@ -211,6 +222,7 @@ function App() {
           <HudBar credits={state.credits} heat={state.heat} daily={state.mode === 'daily'} />
           {chartSurface}
         </div>
+        {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}
       </>
     );
   }
@@ -246,6 +258,7 @@ function App() {
           daily={state.mode === 'daily'}
           onViewMap={canPeekMap ? () => setSurface('chart') : undefined}
           onOpenSettings={() => setSurface('settings')}
+          onOpenTutorial={() => setTutorialOpen(true)}
         />
       )}
       {savingUnavailable && <p className="warning">Saving unavailable — this run won't be saved if you close the tab.</p>}
@@ -411,6 +424,7 @@ function App() {
       {!isCompact && surface === 'settings' && <SettingsOverlay onClose={() => setSurface('mission')} />}
     </div>
     {isCompact && showHud && <TabBar surface={surface} onSelect={setSurface} />}
+    {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}
     </>
   );
 }

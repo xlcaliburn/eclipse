@@ -18,6 +18,10 @@ interface HudBarProps {
   // (moved off the bottom tab bar) — same button on both, not a
   // desktop-only affordance anymore.
   onOpenSettings?: () => void;
+  // Iteration 25: a quick-reference for the combat math (dice, computer,
+  // shield, initiative) — same optional-prop-gated pattern as the other HUD
+  // buttons, so it simply isn't rendered wherever it wouldn't make sense.
+  onOpenTutorial?: () => void;
 }
 
 // Iteration 10.6: a persistent top-bar HUD readout, always visible once a
@@ -26,7 +30,7 @@ interface HudBarProps {
 // Iteration 15.2: joined by the heat track — kept quiet by design (a bare
 // 4-pip gauge, no number), with the tier word and "Hunted" warning only
 // surfacing in the tooltip/pip tint.
-export function HudBar({ credits, heat, commanderId, daily, onViewMap, onOpenSettings }: HudBarProps) {
+export function HudBar({ credits, heat, commanderId, daily, onViewMap, onOpenSettings, onOpenTutorial }: HudBarProps) {
   const tier = heatTier(heat);
   const armed = heat >= MAX_HEAT;
   const commander = commanderId ? getCommander(commanderId) : null;
@@ -55,6 +59,17 @@ export function HudBar({ credits, heat, commanderId, daily, onViewMap, onOpenSet
           <CommanderCrest commanderId={commander.id} size={18} />
           <span className="hud-bar__commander-name">{commander.name}</span>
         </span>
+      )}
+      {onOpenTutorial && (
+        <button
+          type="button"
+          className="hud-bar__settings-button"
+          onClick={onOpenTutorial}
+          title="How to play"
+          aria-label="How to play"
+        >
+          ?
+        </button>
       )}
       {onOpenSettings && (
         <button

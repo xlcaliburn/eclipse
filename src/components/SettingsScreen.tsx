@@ -1,10 +1,18 @@
 import { setMotionSetting } from '../motionPreference';
+import { setSoundSetting } from '../soundPreference';
+import { playSfx } from '../audio';
 import { useMotionSetting } from './useReducedMotion';
+import { useSoundSetting } from './useSoundSetting';
 
 // The settings body, shared by the mobile tab and the desktop modal below —
 // same reasoning (and same shape) as FleetOverlay/FleetScreen.
 function settingsBody() {
-  return <MotionSetting />;
+  return (
+    <>
+      <MotionSetting />
+      <SoundSetting />
+    </>
+  );
 }
 
 // Motion lived in the HUD bar until it was moved here: it's a preference set
@@ -38,6 +46,43 @@ function MotionSetting() {
         }
       >
         {reduced ? 'Off' : 'On'}
+      </button>
+    </div>
+  );
+}
+
+// Kept as its own preference rather than tied to Motion — a player might
+// want combat sound with animations off, or the reverse.
+function SoundSetting() {
+  const sound = useSoundSetting();
+  const on = sound === 'on';
+
+  function toggle() {
+    const next = on ? 'off' : 'on';
+    setSoundSetting(next);
+    // Play the cue on the same click that turns it on, so switching it on
+    // confirms itself immediately instead of waiting for the next fight.
+    if (next === 'on') playSfx('effect');
+  }
+
+  return (
+    <div className="settings-row">
+      <div className="settings-row__text">
+        <h3 className="settings-row__label">Sound</h3>
+        <p className="settings-row__hint">
+          {on
+            ? 'Combat plays short procedural cues — hits, misses, kills, victory/defeat.'
+            : 'Sound effects are off.'}
+        </p>
+      </div>
+      <button
+        type="button"
+        className="settings-row__toggle"
+        onClick={toggle}
+        aria-pressed={on}
+        title={on ? 'Sound effects are on. Click to turn them off.' : 'Sound effects are off. Click to turn them on.'}
+      >
+        {on ? 'On' : 'Off'}
       </button>
     </div>
   );

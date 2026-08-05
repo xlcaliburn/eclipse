@@ -14,6 +14,7 @@ import { TheaterFxLayer } from './TheaterFx';
 import type { FxItem, FxSpawn } from './TheaterFx';
 import { usePrefersReducedMotion } from './useReducedMotion';
 import { countRevealSteps, revealStepEnd } from './replaySteps';
+import { playSfx } from '../audio';
 
 // ~1.5s replay budget per round (10.5) — spread evenly across however many
 // events landed this round, clamped so a single-event round doesn't linger
@@ -417,6 +418,7 @@ export function CombatScreen({
         if (event.hit) {
           push({ kind: 'tracer', x1: from.x, y1: from.y, x2: to.x, y2: to.y, side: event.side, missile, veer: false }, 650);
           if (event.damage > 0) badgeOnCard(targetSide, event.targetIndex, `−${event.damage}`, 'damage');
+          playSfx(event.side === 'player' ? 'hitDealt' : 'hitTaken');
         } else if (dodged) {
           // The shot is thrown wide by the dodge, and the card says so.
           const dx = to.x - from.x;
@@ -426,6 +428,7 @@ export function CombatScreen({
             650,
           );
           badgeOnCard(targetSide, event.targetIndex, 'DODGED', 'dodge');
+          playSfx('dodge');
         } else if (event.raw === 1) {
           // Natural 1 (or a jink) — the shot veers wide past the card.
           const dx = to.x - from.x;
@@ -434,20 +437,24 @@ export function CombatScreen({
             { kind: 'tracer', x1: from.x, y1: from.y, x2: to.x + dx * 0.3, y2: to.y + dy * 0.3 - 44, side: event.side, missile, veer: true },
             650,
           );
+          playSfx('miss');
         } else {
           // Blocked by shields/evasion — tracer lands, shield ripple blooms.
           push({ kind: 'tracer', x1: from.x, y1: from.y, x2: to.x, y2: to.y, side: event.side, missile, veer: false }, 650);
           push({ kind: 'ripple', x: to.x, y: to.y }, 700);
+          playSfx('block');
         }
       }
     } else if (event.kind === 'destroyed') {
       const at = centerOf(event.side, event.shipIndex);
       if (at) push({ kind: 'shards', x: at.x, y: at.y }, 1100);
+      playSfx(event.side === 'player' ? 'shipLost' : 'kill');
     } else if (event.kind === 'card' || event.kind === 'part-effect') {
       // The jink gets a badge on the dodging card instead of a top banner —
       // it belongs to one ship, not the whole fight.
       if (!(event.kind === 'part-effect' && event.text.includes('jinks'))) {
         push({ kind: 'banner', text: event.text }, 1500);
+        playSfx('effect');
       }
     } else if (event.kind === 'outspeed') {
       // Iteration 17: a top banner, same wording as the log line — this is
@@ -455,6 +462,7 @@ export function CombatScreen({
       // something that belongs on just one card the way a dodge does.
       const text = describeEvent(event, enemy, playerLabels);
       if (text) push({ kind: 'banner', text }, 1600);
+      playSfx('outspeed');
     }
     }
 

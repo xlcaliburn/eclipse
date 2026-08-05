@@ -317,6 +317,58 @@ h1, h2, h3 {
   border-color: var(--border);
 }
 
+/* Tutorial overlay (iteration 25) — read-only rows, same left-aligned
+   label+hint shape as .settings-row but no toggle. */
+.tutorial-overlay {
+  max-width: 560px;
+}
+
+.tutorial-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 4px 0 12px;
+}
+
+.tutorial-row {
+  text-align: left;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.tutorial-row:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.tutorial-row__label {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.tutorial-row__hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.tutorial-row__hint:last-child {
+  margin-bottom: 0;
+}
+
+.tutorial-row__formula {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  display: inline-block;
+}
+
 /* Warp-streak phase transition (iteration 10.6) */
 .warp-transition {
   position: fixed;
@@ -2677,6 +2729,50 @@ h1, h2, h3 {
   text-align: center;
 }
 
+/* Install-as-app hint (iteration 25) — phone-width viewports only, until
+   dismissed or the page is already running installed. */
+.install-hint {
+  position: relative;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 14px 32px 14px 14px;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.install-hint__title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.install-hint__body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.install-hint__dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.install-hint__dismiss:hover {
+  color: var(--text);
+}
+
 .landing-screen__pitch {
   max-width: 480px;
   margin: 10px auto 0;
@@ -2690,6 +2786,24 @@ h1, h2, h3 {
   gap: 12px;
   justify-content: center;
   margin-top: 16px;
+}
+
+/* Same quiet-text-link treatment as .setup-screen__customize-link — a
+   secondary path, not competing with the primary run buttons above it. */
+.landing-screen__tutorial-link {
+  display: block;
+  margin: 12px auto 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.landing-screen__tutorial-link:hover {
+  color: var(--text);
 }
 
 /* Daily run (iteration 18) */

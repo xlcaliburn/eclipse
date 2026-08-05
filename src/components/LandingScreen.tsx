@@ -1,5 +1,36 @@
 import { useState } from 'react';
 import type { DailyRecord } from '../game/persistence';
+import { useIsCompact } from './useIsCompact';
+
+// Iteration 25: a phone browser tab is not the same thing as an installed
+// app — no offline play, no home-screen icon, no full-screen chrome — even
+// though the PWA machinery for all of that has been in place since
+// iteration 16.3. Neither mobile OS exposes a one-tap install trigger to a
+// web page (iOS Safari has no `beforeinstallprompt` at all; Android Chrome's
+// version is real but unreliable enough not to build a whole flow around),
+// so this is just the plain-text instructions for both platforms — shown
+// once per browser, on phone-width viewports only (`useIsCompact` mirrors
+// the same ≤720px breakpoint the rest of the mobile shell uses), and never
+// once the page is already running installed.
+const INSTALL_HINT_DISMISSED_KEY = 'eclipse.installHintDismissed.v1';
+
+function isRunningInstalled(): boolean {
+  if (typeof window === 'undefined') return false;
+  // Android/desktop PWAs report this via the standard media query; iOS
+  // Safari never matches it and instead sets `navigator.standalone` once
+  // launched from a home-screen icon.
+  const standaloneMedia = window.matchMedia?.('(display-mode: standalone)').matches ?? false;
+  const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return standaloneMedia || iosStandalone;
+}
+
+function wasInstallHintDismissed(): boolean {
+  try {
+    return localStorage.getItem(INSTALL_HINT_DISMISSED_KEY) === '1';
+  } catch {
+    return false; // privacy mode / storage disabled — just show it every time rather than crash
+  }
+}
 
 interface LandingScreenProps {
   hasSave: boolean;
@@ -14,6 +45,7 @@ interface LandingScreenProps {
   dailyResult: DailyRecord | null;
   onStartDaily: () => void;
   onContinueDaily: () => void;
+  onOpenTutorial: () => void;
 }
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -36,8 +68,13 @@ export function LandingScreen({
   dailyResult,
   onStartDaily,
   onContinueDaily,
+  onOpenTutorial,
 }: LandingScreenProps) {
   const [copied, setCopied] = useState(false);
+  const [installHintDismissed, setInstallHintDismissed] = useState(
+    () => isRunningInstalled() || wasInstallHintDismissed(),
+  );
+  const isCompact = useIsCompact();
 
   function copyResult() {
     if (!dailyResult?.shareText) return;
@@ -47,8 +84,36 @@ export function LandingScreen({
       .catch(() => setCopied(false));
   }
 
+  function dismissInstallHint() {
+    setInstallHintDismissed(true);
+    try {
+      localStorage.setItem(INSTALL_HINT_DISMISSED_KEY, '1');
+    } catch {
+      // privacy mode / storage disabled — the dismissal just won't stick between visits
+    }
+  }
+
   return (
     <div className="landing-screen">
+      {isCompact && !installHintDismissed && (
+        <div className="install-hint">
+          <button
+            type="button"
+            className="install-hint__dismiss"
+            onClick={dismissInstallHint}
+            aria-label="Dismiss install instructions"
+          >
+            ×
+          </button>
+          <p className="install-hint__title">📱 Play as an app — works offline, no browser chrome</p>
+          <p className="install-hint__body">
+            <strong>iPhone/iPad:</strong> tap Share <span aria-hidden="true">⬆️</span>, then "Add to Home Screen".
+            <br />
+            <strong>Android:</strong> tap the menu <span aria-hidden="true">⋮</span>, then "Install app" (or "Add to
+            Home screen").
+          </p>
+        </div>
+      )}
       <h1>Eclipse Roguelike</h1>
       <p className="landing-screen__pitch">
         Command a small fleet through a two-act star sector. Fit your ships,
@@ -68,6 +133,9 @@ export function LandingScreen({
           {hasSave ? 'New run' : 'Start run'}
         </button>
       </div>
+      <button type="button" className="landing-screen__tutorial-link" onClick={onOpenTutorial}>
+        How to play — dice, computers, shields
+      </button>
 
       {/* Iteration 18: the daily — same sector for everyone today, one
           attempt. Starting it consumes the attempt even if abandoned. */}

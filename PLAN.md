@@ -53,6 +53,7 @@ Rules for working with these files:
 | [22](plans/iteration-22.md) | The column-4 wall: de-stack the pool/veterancy/escalation triple cliff, guarantee the first shop, mid-pool + GCDS re-tune, then close the gap via reward economy + fight-count + policy-bug fixes — the measured fix for 20's and 21's failed clear-rate gates (supersedes the parked "poolBand" follow-up) | **implemented (baseline 0.2%→3.8%, 19×; every commander non-zero, best case 20.8%); 40% gate still NOT met but only ~2× short now (was ~6×) — see status notes for what's left** |
 | [23](plans/iteration-23.md) | Support hulls: 5 new purchasable frames (buffer, passive aura, repair, 2× enemy-debuffer) — first parts to target a single other ally or affect the enemy side directly | implemented |
 | [24](plans/iteration-24.md) | Boss closure + the Flagship comes back: boss fights auto-heal the fleet, the boss reward is a guaranteed upgrade (interlude simplified from a 3-way choice), and losing the Flagship while the fleet survives now offers a one-time paid recovery instead of losing it forever | implemented |
+| [25](plans/iteration-25.md) | Sound effects (procedural Web Audio cues, no assets) + a how-to-play tutorial covering the dice/computer/shield/initiative math | implemented |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes

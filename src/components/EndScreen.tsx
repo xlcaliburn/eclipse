@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { playSfx } from '../audio';
 import { playerShipLabel } from '../game/ship';
 import type { PlayerShipState, RunStats } from '../game/types';
 import { FrameSilhouette } from './ShipSilhouette';
@@ -30,6 +31,12 @@ export function EndScreen({
 }: EndScreenProps) {
   const won = outcome === 'victory';
   const [copied, setCopied] = useState(false);
+
+  // Once per mount — this screen only ever renders once per run's end, so
+  // there's no risk of the cue re-firing on an unrelated re-render.
+  useEffect(() => {
+    playSfx(won ? 'victory' : 'defeat');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- fires exactly once, on mount
 
   // The run's most decorated surviving hull — no MVP line when nothing
   // survived or nobody scored a kill.
