@@ -180,22 +180,30 @@ export function ShopScreen({
       </div>
 
       <h3>Expand your fleet</h3>
-      {fleetFull ? (
-        <p className="hint">Fleet is at maximum size ({currentFleetCap} ships).</p>
-      ) : !frameOffers || frameOffers.length === 0 ? (
+      {/* 2026-08-06: what's for sale used to disappear entirely once the
+          fleet hit its cap — a player at cap could never see (let alone
+          plan around) what was in dock this visit, even though scuttling
+          a ship below would have freed a slot for exactly one of these.
+          Offers now always show; only the buy action itself is gated. */}
+      {fleetFull && (
+        <p className="warning">Fleet is at maximum size ({currentFleetCap} ships) — scuttle one below to make room.</p>
+      )}
+      {!frameOffers || frameOffers.length === 0 ? (
         <p className="hint">No hulls in dock this visit.</p>
       ) : (
         <div className="shop-screen__frames">
           {frameOffers.map((frameId) => {
             const frame = FRAMES[frameId];
             const cost = frameCost(frame.cost, frameId, commanderId, protocols);
+            const disabled = fleetFull || credits < cost;
             return (
               <button
                 key={frame.id}
                 type="button"
                 className="frame-card"
                 onClick={() => onBuyShip(frameId)}
-                disabled={credits < cost}
+                disabled={disabled}
+                title={fleetFull ? `Fleet is full — scuttle a ship below first.` : undefined}
               >
                 <FrameSilhouette frameId={frame.id} size={40} />
                 <span className="frame-card__name">{frame.name}</span>

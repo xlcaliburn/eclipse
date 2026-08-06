@@ -39,10 +39,23 @@ export function getUpgrade(id: UpgradeId): Upgrade {
   return upgrade;
 }
 
+// Draws WITHOUT replacement — a 3-option upgrade pick (the elite reward
+// screen, the boss interlude, a repair-yard overhaul) used to roll each
+// slot independently from the full 9-entry pool, so the same upgrade could
+// (and, ~31% of the time for 3 draws, did) show up twice or three times in
+// one draw. Bug report: "giving me multiple of the same options" — a
+// screenshot of 3x "Regenerative plating" in one pick. Mirrors
+// escalations.ts's drawEscalationSchedule (splice from a copy of the pool).
+// `count` is always <= UPGRADES.length in practice (1 or 3 of 9); the
+// modulo guard just keeps this correct rather than throwing if that
+// assumption ever breaks.
 export function randomUpgradeIds(count: number, rng: () => number): UpgradeId[] {
+  const pool = [...UPGRADES];
   const picks: UpgradeId[] = [];
   for (let i = 0; i < count; i++) {
-    picks.push(UPGRADES[Math.floor(rng() * UPGRADES.length)].id);
+    if (pool.length === 0) pool.push(...UPGRADES); // only reachable if count > UPGRADES.length
+    const index = Math.floor(rng() * pool.length);
+    picks.push(pool.splice(index, 1)[0].id);
   }
   return picks;
 }

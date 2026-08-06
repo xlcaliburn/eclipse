@@ -57,6 +57,7 @@ Rules for working with these files:
 | [26](plans/iteration-26.md) | Act-1 mid-boss re-tune (GCDS + Dreadnought, driven by "the boss two-shots me every run" — added a `col10 solid fleet` balance.ts fixture to catch it) + fix a card-trade event that could hand back the exact card just traded in | implemented |
 | [27](plans/iteration-27.md) | Seed sharing (Slay-the-Spire-style): a 7-character code round-trips a run's seed via `seedCode.ts`, enterable on the landing screen, copyable from Settings and the end screen (found + fixed a wrap-around decode bug along the way) | implemented |
 | [28](plans/iteration-28.md) | Protocols: the act-1 boss reward gains a 1-of-3 augment draft spanning three tiers (silver stat value / gold build-arounds / prismatic rule-breakers with stated costs) — once per run, act-2-only power, seeded offers | implemented |
+| [29](plans/iteration-29.md) | "Shield" renamed to "Piloting" (display text only), the combat log now shows the computer-vs-piloting math behind every roll (and calls out when piloting fully nullifies computer), and the on-demand tutorial is supplemented with 3 contextual first-run popups (dice roll, missiles, piloting) | **specced 2026-08-06, not implemented** |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes
