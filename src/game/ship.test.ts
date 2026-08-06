@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { qualifiesForOutspeed } from './combatEngine';
-import { applyRepairBanking, deriveFleetForCombat, deriveFleetStats } from './ship';
+import { applyRepairBanking, deriveFleetForCombat, deriveFleetStats, deriveStats, effectiveSlots } from './ship';
 import type { PlayerShipState } from './types';
 
 function ship(overrides: Partial<PlayerShipState> = {}): PlayerShipState {
@@ -132,5 +132,71 @@ describe('shield harmonic aura (Aegis Relay)', () => {
     const displayStats = deriveFleetStats(fleet);
     expect(combatStats[0].shield).toBe(displayStats[0].shield);
     expect(combatStats[1].shield).toBe(displayStats[1].shield);
+  });
+});
+
+// Iteration 28 (Protocols) — the stat/build hooks folded into
+// deriveStats/effectiveSlots. The draft/reducer flow is covered in
+// reducer.test.ts; these exercise the pure stat math directly.
+describe('protocols — stat and build hooks', () => {
+  it('Reinforced bulkheads adds +1 max HP to every ship, current and future', () => {
+    const base = deriveStats('cruiser', []).hp;
+    const withProtocol = deriveStats('cruiser', [], [], ['reinforced-bulkheads']).hp;
+    expect(withProtocol).toBe(base + 1);
+    const interceptorBase = deriveStats('interceptor', []).hp;
+    const interceptorWith = deriveStats('interceptor', [], [], ['reinforced-bulkheads']).hp;
+    expect(interceptorWith).toBe(interceptorBase + 1);
+  });
+
+  it('Twin-linked mounts adds +1 die to the FIRST equipped weapon only', () => {
+    const stats = deriveStats('cruiser', ['ion', 'plasma'], [], ['twin-linked-mounts']);
+    const plain = deriveStats('cruiser', ['ion', 'plasma']);
+    expect(stats.cannons[0].diceCount).toBe(plain.cannons[0].diceCount + 1);
+    expect(stats.cannons[1].diceCount).toBe(plain.cannons[1].diceCount); // second weapon untouched
+  });
+
+  it('Twin-linked mounts does nothing to a ship with no weapons', () => {
+    const stats = deriveStats('cruiser', ['hull1'], [], ['twin-linked-mounts']);
+    expect(stats.cannons).toHaveLength(0);
+    expect(stats.missiles).toHaveLength(0);
+  });
+
+  it('Bastion doctrine adds +1 shield to a taunting ship, and nothing to a non-taunting one', () => {
+    const taunter = deriveStats('bastion', ['lure'], [], ['bastion-doctrine']);
+    const taunterPlain = deriveStats('bastion', ['lure']);
+    expect(taunter.shield).toBe(taunterPlain.shield + 1);
+    const nonTaunter = deriveStats('cruiser', ['ion'], [], ['bastion-doctrine']);
+    const nonTaunterPlain = deriveStats('cruiser', ['ion']);
+    expect(nonTaunter.shield).toBe(nonTaunterPlain.shield);
+  });
+
+  it('Ace pipeline generalizes the Admiral-only ace bonus to any commander', () => {
+    const base = deriveFleetStats([ship({ kills: 3 })], undefined)[0].initiative;
+    const withProtocol = deriveFleetStats([ship({ kills: 3 })], undefined, ['ace-pipeline'])[0].initiative;
+    const belowThreshold = deriveFleetStats([ship({ kills: 2 })], undefined, ['ace-pipeline'])[0].initiative;
+    expect(withProtocol).toBe(base + 1);
+    expect(belowThreshold).toBe(base); // still gated on the same 3-kill threshold
+  });
+
+  it('Lone flagship gives the Flagship (cruiser frame) +2 max HP and +2 slots, no other frame', () => {
+    const cruiserBase = deriveStats('cruiser', []).hp;
+    const cruiserWith = deriveStats('cruiser', [], [], ['lone-flagship']).hp;
+    expect(cruiserWith).toBe(cruiserBase + 2);
+    const interceptorBase = deriveStats('interceptor', []).hp;
+    const interceptorWith = deriveStats('interceptor', [], [], ['lone-flagship']).hp;
+    expect(interceptorWith).toBe(interceptorBase); // untouched — not the Flagship frame
+
+    const cruiserSlotsBase = effectiveSlots('cruiser', []);
+    const cruiserSlotsWith = effectiveSlots('cruiser', [], ['lone-flagship']);
+    expect(cruiserSlotsWith).toBe(cruiserSlotsBase + 2);
+    const interceptorSlotsBase = effectiveSlots('interceptor', []);
+    const interceptorSlotsWith = effectiveSlots('interceptor', [], ['lone-flagship']);
+    expect(interceptorSlotsWith).toBe(interceptorSlotsBase);
+  });
+
+  it('protocols with no relevant hook leave stats untouched', () => {
+    const base = deriveStats('cruiser', ['ion']);
+    const withUnrelated = deriveStats('cruiser', ['ion'], [], ['salvage-rigs', 'overspeed-protocols']);
+    expect(withUnrelated).toEqual(base);
   });
 });

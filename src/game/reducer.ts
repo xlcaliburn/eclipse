@@ -35,6 +35,8 @@ import { actColumns, BOSS_COLUMN, generateMap, getNode, globalColumn, LANE_COLUM
 import type { CargoTag, GameMap, MapPosition } from './map';
 export { globalColumn } from './map';
 import { COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
+import { drawProtocolOffers, hasProtocol } from './protocols';
+import type { ProtocolId } from './protocols';
 import { randomSeed, resumeRng } from './rng';
 import type { RngFn } from './rng';
 import {
@@ -72,6 +74,9 @@ export type RunAction =
   | { type: 'PICK_UPGRADE'; upgradeId: UpgradeId; shipIndex: number }
   | { type: 'LEAVE_REWARD' }
   | { type: 'INTERLUDE_CHOOSE'; shipIndex: number }
+  // Iteration 28 (Protocols): resolves the act-1 boss's one-time augment
+  // draft — `index` picks one of the 3 offers on RunState.protocolOffers.
+  | { type: 'PROTOCOL_CHOOSE'; index: 0 | 1 | 2 }
   | { type: 'RESOLVE_FLAGSHIP_RECOVERY'; recover: boolean }
   | { type: 'BUY_PART'; offerIndex: number }
   | { type: 'SELL_PART'; partId: PartId }
@@ -177,9 +182,20 @@ export function mercenaryCost(commanderId: CommanderId | undefined): number {
 const MERCENARY_SHIP_NAME = 'Mercenary escort';
 
 // Iteration 21 (the Admiral, wide): fleet cap 5 instead of the standard 4.
+// Iteration 28: two prismatic protocols change this further — Armada
+// mandate (+2, its whole benefit) and Lone flagship (hard-set to 1, its
+// whole cost). Lone flagship wins if somehow both are ever held (not
+// currently reachable — only one prismatic can be drafted per run — but
+// this is the sane precedence if that ever changes: the protocol whose
+// entire premise is "exactly one ship" should never be silently
+// overridden by a flat +2).
 const ADMIRAL_FLEET_CAP = 5;
-export function fleetCap(commanderId: CommanderId | undefined): number {
-  return commanderId === 'admiral' ? ADMIRAL_FLEET_CAP : MAX_FLEET_SIZE;
+const ARMADA_MANDATE_BONUS = 2;
+const LONE_FLAGSHIP_CAP = 1;
+export function fleetCap(commanderId: CommanderId | undefined, protocols?: ProtocolId[]): number {
+  if (hasProtocol(protocols, 'lone-flagship')) return LONE_FLAGSHIP_CAP;
+  const base = commanderId === 'admiral' ? ADMIRAL_FLEET_CAP : MAX_FLEET_SIZE;
+  return base + (hasProtocol(protocols, 'armada-mandate') ? ARMADA_MANDATE_BONUS : 0);
 }
 
 // Iteration 21: purchasable-frame pricing for the two ship-doctrine
@@ -191,15 +207,22 @@ export function fleetCap(commanderId: CommanderId | undefined): number {
 // resolve. The Flagship is never purchasable, so it never reaches this.
 const ADMIRAL_FRAME_MULTIPLIER = 0.75; // 25% off
 const WARLORD_DREADNOUGHT_DISCOUNT = 5;
-export function frameCost(baseCost: number, frameId: FrameId, commanderId: CommanderId | undefined): number {
+// Iteration 28 (Armada mandate): a further 50% off every purchasable
+// frame, stacking multiplicatively after any commander discount already
+// applied (same "rounds in the player's favor, final price floored"
+// discipline as the Admiral's own multiplier below).
+const ARMADA_MANDATE_FRAME_MULTIPLIER = 0.5;
+export function frameCost(baseCost: number, frameId: FrameId, commanderId: CommanderId | undefined, protocols?: ProtocolId[]): number {
   // Rounds the FINAL price down (not the discount amount down before
   // subtracting) — Math.floor(cost * 0.75), not cost - Math.floor(cost *
   // 0.25). The two differ whenever cost is odd (6cr: 4cr either way is
   // fine, but 7cr gives 5cr vs. 6cr) and "rounds in the player's favor" is
   // the more natural reading of a discount, so this is deliberate.
-  if (commanderId === 'admiral') return Math.floor(baseCost * ADMIRAL_FRAME_MULTIPLIER);
-  if (commanderId === 'warlord' && frameId === 'dreadnought') return Math.max(0, baseCost - WARLORD_DREADNOUGHT_DISCOUNT);
-  return baseCost;
+  let cost = baseCost;
+  if (commanderId === 'admiral') cost = Math.floor(cost * ADMIRAL_FRAME_MULTIPLIER);
+  else if (commanderId === 'warlord' && frameId === 'dreadnought') cost = Math.max(0, cost - WARLORD_DREADNOUGHT_DISCOUNT);
+  if (hasProtocol(protocols, 'armada-mandate')) cost = Math.floor(cost * ARMADA_MANDATE_FRAME_MULTIPLIER);
+  return cost;
 }
 
 // Credits earned for winning a combat node at the given column.
@@ -507,13 +530,24 @@ const SIGNATURE_SLOT: Partial<Record<CommanderId, number>> = {
   admiral: 4, // uplink2: computer + active -> the computer/drive slot
 };
 
-export function partCost(partId: PartId, commanderId: CommanderId | undefined): number {
-  const base = getPart(partId).cost;
-  if (commanderId && SIGNATURE_PART[commanderId] === partId) return Math.max(0, base - SIGNATURE_DISCOUNT);
-  return base;
+// Iteration 28 (Munitions contracts): a flat -2cr on every part in every
+// shop, floored at 1cr (never free) — stacks with the signature discount
+// above (both are flat, so they simply add).
+const MUNITIONS_CONTRACTS_DISCOUNT = 2;
+export function partCost(partId: PartId, commanderId: CommanderId | undefined, protocols?: ProtocolId[]): number {
+  let cost = getPart(partId).cost;
+  if (commanderId && SIGNATURE_PART[commanderId] === partId) cost -= SIGNATURE_DISCOUNT;
+  if (hasProtocol(protocols, 'munitions-contracts')) cost -= MUNITIONS_CONTRACTS_DISCOUNT;
+  return Math.max(1, cost);
 }
 
-function drawShopOffers(rng: RngFn, commanderId?: CommanderId): PartId[] {
+// Iteration 28 (Armada mandate): shops stock one fewer part — the offer's
+// last slot (the active-part slot) is dropped. That slot is also where the
+// Engineer's signature part (dcbay) gets force-inserted (see SIGNATURE_SLOT
+// below); with Armada mandate active, that insertion simply has nowhere to
+// land and is skipped — a deliberate, documented overlap between two
+// separate systems, not a bug.
+function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: ProtocolId[]): PartId[] {
   const taken = new Set<PartId>();
   const offers = [
     drawUniqueFrom(WEAPON_POOL, taken, rng),
@@ -523,12 +557,13 @@ function drawShopOffers(rng: RngFn, commanderId?: CommanderId): PartId[] {
     drawUniqueFrom(COMPUTER_DRIVE_POOL, taken, rng),
     drawUniqueFrom(ACTIVE_POOL, taken, rng),
   ];
+  const trimmed = hasProtocol(protocols, 'armada-mandate') ? offers.slice(0, SHOP_OFFER_COUNT - 1) : offers;
   const signaturePart = commanderId ? SIGNATURE_PART[commanderId] : undefined;
   const signatureSlot = commanderId ? SIGNATURE_SLOT[commanderId] : undefined;
-  if (signaturePart && signatureSlot !== undefined && !offers.includes(signaturePart)) {
-    offers[signatureSlot] = signaturePart;
+  if (signaturePart && signatureSlot !== undefined && signatureSlot < trimmed.length && !trimmed.includes(signaturePart)) {
+    trimmed[signatureSlot] = signaturePart;
   }
-  return offers;
+  return trimmed;
 }
 
 // Re-tuned 2026-08-04: the "Expand your fleet" section used to always show
@@ -841,7 +876,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         return {
           ...base,
           phase: 'shop',
-          shopOffers: drawShopOffers(rng, state.commanderId),
+          shopOffers: drawShopOffers(rng, state.commanderId, state.protocols),
           shopFrameOffers: drawFrameOffers(rng),
           heat,
           rngCounter: nextCounter(),
@@ -852,11 +887,19 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // repair vs. overhaul next (REPAIR_CHOOSE). The 3 overhaul options
         // are drawn now regardless of which way they'll go, so a single
         // later dispatch can carry the pick without a second rng step.
+        //
+        // Iteration 28 (Ghost fleet protocol's cost): repairs are never
+        // credit-priced in this game (a yard heals or overhauls for free),
+        // so "every repair costs double" is paid in the currency a yard
+        // visit actually has a price in — pursuit heat. One extra point on
+        // top of the arrival cost every fight's-worth CONTINUE branch
+        // normally already vents.
+        const repairHeat = hasProtocol(state.protocols, 'ghost-fleet-protocol') ? addHeat(heat, 1) : heat;
         return {
           ...base,
           phase: 'repair',
           repairUpgradeOptions: randomUpgradeIds(3, rng),
-          heat,
+          heat: repairHeat,
           rngCounter: nextCounter(),
         };
       }
@@ -917,13 +960,16 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'ENGAGE': {
       if (state.phase !== 'prep' || !state.currentEnemy || state.currentCombatSeed === undefined) return state;
-      const fleetStats = deriveFleetStats(state.fleet, state.commanderId);
+      const fleetStats = deriveFleetStats(state.fleet, state.commanderId, state.protocols);
       if (!fleetHasWeapon(fleetStats)) return state;
 
-      const fleetInput = deriveFleetForCombat(state.fleet, state.commanderId);
+      const fleetInput = deriveFleetForCombat(state.fleet, state.commanderId, state.protocols);
       // The combat seed was already drawn (and stored) when this fight was
       // set up, not now — a reload before Engage can never reroll it (9.1).
-      let combat = initCombat(fleetInput, state.currentEnemy, state.currentCombatSeed, state.targetingStance);
+      let combat = initCombat(fleetInput, state.currentEnemy, state.currentCombatSeed, state.targetingStance, {
+        overspeedProtocols: hasProtocol(state.protocols, 'overspeed-protocols'),
+        alphaDoctrine: hasProtocol(state.protocols, 'alpha-doctrine'),
+      });
       // Neither fleet has a missile weapon — round 0 is a guaranteed no-op,
       // so skip straight past it rather than making the player click through.
       if (!hasMissilePhase(combat)) combat = advanceRound(combat);
@@ -994,6 +1040,16 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const salvagedParts: PartId[] = [];
       const lostShips: string[] = [];
       const survivingFleet: PlayerShipState[] = [];
+      // Iteration 28 (Ghost fleet protocol): a ship that would be destroyed
+      // withdraws instead — no resolver change needed, since this is purely
+      // a reinterpretation of the fight's already-computed outcome: it
+      // simply doesn't take the "destroyed" branch below, and lands at 1
+      // HP (critically damaged, not gone) instead. Its parts/upgrades are
+      // untouched (it never actually died), unlike a real destruction's
+      // salvage-and-lose. The cost (repairs cost double, see the repair
+      // yard case) is what keeps this from being a strictly better outcome
+      // than surviving cleanly.
+      const ghostFleet = hasProtocol(state.protocols, 'ghost-fleet-protocol');
       state.fleet.forEach((ship, i) => {
         // A hired mercenary is good for exactly this one fight — it leaves
         // the fleet the moment combat resolves regardless of outcome, with
@@ -1001,7 +1057,15 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // anything beyond that.
         if (ship.mercenary) return;
         const shipOutcome = outcome.playerShips[i];
-        if (shipOutcome.destroyed) {
+        if (shipOutcome.destroyed && ghostFleet) {
+          const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, state.protocols).hp;
+          survivingFleet.push({
+            ...ship,
+            damage: Math.max(0, maxHp - 1),
+            kills: (ship.kills ?? 0) + fightStats.kills[i],
+            fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
+          });
+        } else if (shipOutcome.destroyed) {
           // Parts salvage back to inventory; upgrades are lost with the
           // ship — that's what makes a capital ship's upgrades feel earned.
           // A commodity lot is not a real part — lost with the ship, not
@@ -1063,7 +1127,15 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // guaranteed upgrade pick (INTERLUDE_CHOOSE) is now the actual
         // reward for beating it, on top of these credits — a boss kill
         // used to be worth nothing more than a slightly bigger paycheck.
-        const creditsEarned = eliteReward(globalCol);
+        const salvageRigsBonus = hasProtocol(state.protocols, 'salvage-rigs') ? 2 : 0;
+        const creditsEarned = eliteReward(globalCol) + salvageRigsBonus;
+        // Iteration 28 (Protocols): the act-1 boss's one-time augment draft
+        // — drawn right here, the moment the boss is actually beaten (same
+        // 9.1 discipline as a combat seed: a reload before the draft is
+        // resolved can never reroll the offers). Continues through
+        // withFlagshipRecoveryGate untouched if a recovery offer intervenes
+        // first — every field on `next` besides `phase` survives that gate.
+        const protocolOffers = drawProtocolOffers(rng, state.commanderId, bossHealedFleet);
         return withFlagshipRecoveryGate(state.fleet, {
           ...state,
           phase: 'interlude',
@@ -1078,6 +1150,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           interceptionActive: undefined,
           runStats: runStatsAfterWin,
           rngCounter: nextCounter(),
+          protocolOffers,
         });
       }
 
@@ -1132,7 +1205,13 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
       const merchantBonus = state.commanderId === 'merchant' ? 2 : 0;
       const ambushBonusCredits = ambushBonus?.credits ?? 0;
-      const creditsEarned = baseReward + merchantBonus + (cardInsteadCredits ?? 0) + salvageTotal + ambushBonusCredits;
+      // Iteration 28 (Salvage rigs): +2cr flat on every combat won, this
+      // fleet-won branch included (elite kills already earn eliteReward
+      // here via `baseReward` above — this stacks on top the same way
+      // merchantBonus does).
+      const salvageRigsBonus = hasProtocol(state.protocols, 'salvage-rigs') ? 2 : 0;
+      const creditsEarned =
+        baseReward + merchantBonus + (cardInsteadCredits ?? 0) + salvageTotal + ambushBonusCredits + salvageRigsBonus;
       const credits = state.credits + creditsEarned;
       const upgradeOptions = isElite ? randomUpgradeIds(3, rng) : undefined;
 
@@ -1278,10 +1357,13 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const upgradeId = randomUpgradeIds(1, rng)[0];
       const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, upgradeId, state.commanderId) : s));
       // Into act 2: a fresh sector — position/visited/fled/fog reset, the
-      // boss dossier resets (a second reveal purchase awaits).
+      // boss dossier resets (a second reveal purchase awaits). Iteration
+      // 28: the protocol draft (offers already drawn, back at CONTINUE)
+      // comes next, not the map directly — it's a second boss-reward step,
+      // not a replacement for this one.
       return {
         ...state,
-        phase: 'map',
+        phase: 'protocol-draft',
         act: 2,
         fleet,
         position: null,
@@ -1293,6 +1375,48 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         heat: 0, // 15.2: crossing the sector border shakes pursuit, same as the fog reset
         rngCounter: nextCounter(),
       };
+    }
+
+    case 'PROTOCOL_CHOOSE': {
+      if (state.phase !== 'protocol-draft' || !state.protocolOffers) return state;
+      const chosen = state.protocolOffers[action.index];
+      if (!chosen) return state;
+      const protocols = [...(state.protocols ?? []), chosen];
+
+      // Lone flagship's immediate effect: scrap every escort right now, for
+      // half its frame value — the permanent +2 slots/+2 HP on the Flagship
+      // itself is a passive derive-time bonus (see ship.ts), not applied
+      // here. No mercenaries can be present at this point (they're always
+      // stripped from the fleet by the end of the fight that led here — see
+      // CONTINUE/WITHDRAW) but the filter stays explicit rather than
+      // assumed, matching the "mercenaries are never touched by a protocol"
+      // rule stated in plans/iteration-28.md.
+      if (chosen === 'lone-flagship') {
+        const escorts = state.fleet.filter((s) => s.frameId !== 'cruiser' && !s.mercenary);
+        const scrapValue = escorts.reduce((sum, s) => sum + Math.floor(getFrame(s.frameId).cost / 2), 0);
+        const fleet = state.fleet.filter((s) => s.frameId === 'cruiser' || s.mercenary);
+        return {
+          ...state,
+          phase: 'map',
+          protocols,
+          protocolOffers: undefined,
+          fleet,
+          credits: state.credits + scrapValue,
+        };
+      }
+
+      // Deep-space relays' immediate effect: the fog high-water mark jumps
+      // straight to the far end of act 2 — every node type from here to the
+      // boss is visible from this moment on.
+      if (chosen === 'deep-space-relays') {
+        return { ...state, phase: 'map', protocols, protocolOffers: undefined, visionCol: LANE_COLUMNS };
+      }
+
+      // Every other protocol (silver stat value, or a gold/prismatic whose
+      // whole effect is a passive stat/pricing/combat hook read off
+      // RunState.protocols elsewhere) needs nothing more than recording the
+      // pick.
+      return { ...state, phase: 'map', protocols, protocolOffers: undefined };
     }
 
     case 'RESOLVE_FLAGSHIP_RECOVERY': {
@@ -1331,7 +1455,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'shop' || !state.shopOffers) return state;
       const partId = state.shopOffers[action.offerIndex];
       if (!partId) return state;
-      const cost = partCost(partId, state.commanderId);
+      const cost = partCost(partId, state.commanderId, state.protocols);
       if (state.credits < cost) return state;
       const shopOffers = [...state.shopOffers];
       shopOffers.splice(action.offerIndex, 1);
@@ -1351,9 +1475,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'BUY_SHIP': {
       if (state.phase !== 'shop') return state;
-      if (state.fleet.length >= fleetCap(state.commanderId)) return state;
+      if (state.fleet.length >= fleetCap(state.commanderId, state.protocols)) return state;
       const frame = getFrame(action.frameId); // the Flagship ('cruiser') is never purchasable
-      const cost = frameCost(frame.cost, action.frameId, state.commanderId);
+      const cost = frameCost(frame.cost, action.frameId, state.commanderId, state.protocols);
       if (state.credits < cost) return state;
       const commissioned = state.shipsCommissioned ?? state.fleet.length;
       return {
@@ -1495,7 +1619,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return {
         ...state,
         credits: state.credits - cost,
-        shopOffers: drawShopOffers(rng, state.commanderId),
+        shopOffers: drawShopOffers(rng, state.commanderId, state.protocols),
         rngCounter: nextCounter(),
       };
     }
@@ -1519,7 +1643,14 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'repair' || state.repairSummary !== undefined) return state;
 
       if (action.choice === 'full') {
-        const { fleet, totalRepaired } = repairFleet(state.fleet, state.commanderId === 'engineer');
+        // Iteration 28 (Rapid drydocks): grants the same flat +1 over-repair
+        // bank the Engineer doctrine gets — reuses that exact mechanism
+        // (applyRepairBanking's `flatBank` path) rather than inventing a
+        // second one; the two stack if somehow both are ever true (an
+        // Engineer who also drafts this protocol just banks from two
+        // sources that both cap at the same OVER_REPAIR_CAP).
+        const bankFlat = state.commanderId === 'engineer' || hasProtocol(state.protocols, 'rapid-drydocks');
+        const { fleet, totalRepaired } = repairFleet(state.fleet, bankFlat);
         return { ...state, fleet, repairSummary: repairSummaryText(totalRepaired, state.fleet.length) };
       }
 

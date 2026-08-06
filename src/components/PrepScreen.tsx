@@ -18,8 +18,8 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
   const safeSelectedIndex = Math.min(selectedShipIndex, state.fleet.length - 1);
 
   const fleetStats = useMemo(
-    () => deriveFleetStats(state.fleet, state.commanderId),
-    [state.fleet, state.commanderId],
+    () => deriveFleetStats(state.fleet, state.commanderId, state.protocols),
+    [state.fleet, state.commanderId, state.protocols],
   );
   // Iteration 17: the enemy's fastest raw initiative, for the FleetPanel's
   // per-ship Outspeed badge — computed once here rather than duplicated
@@ -53,12 +53,19 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
           outspeedFastestEnemyInitiative={enemyFastestInitiative}
           collapsibleParts
           commanderId={state.commanderId}
+          protocols={state.protocols}
         />
       </div>
 
       {/* Credits/intel live in the persistent HUD bar — no per-screen copy. */}
       <div className="prep-screen__enemy">
-        <EnemyPanel enemy={enemy} fleetStats={fleetStats} fleet={state.fleet} commanderId={state.commanderId} />
+        <EnemyPanel
+          enemy={enemy}
+          fleetStats={fleetStats}
+          fleet={state.fleet}
+          commanderId={state.commanderId}
+          protocols={state.protocols}
+        />
       </div>
 
       <div className="prep-screen__center">

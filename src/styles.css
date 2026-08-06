@@ -297,6 +297,16 @@ h1, h2, h3 {
   color: var(--text-dim);
 }
 
+/* Seed sharing (iteration 26) — the copyable code itself, set apart from
+   the hint text above it. */
+.settings-row__seed-code {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--text);
+}
+
 .settings-row__toggle {
   flex: 0 0 auto;
   min-width: 64px;
@@ -2703,6 +2713,120 @@ h1, h2, h3 {
   margin-top: 16px;
 }
 
+/* Protocol draft (iteration 28) — three tier-accented cards, always one per
+   tier. Silver/gold/prismatic don't have dedicated tokens.css entries (this
+   is the one screen that needs them) — silver reuses --text-dim's cool
+   gray, gold reuses --warning (already the app's "valuable/attention"
+   amber), prismatic gets a distinct violet since it's neither of the
+   existing signal colors and needs to read as a third, rarer tier. */
+.protocol-draft-screen {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.protocol-draft-screen__offers {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+
+.protocol-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 220px;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+.protocol-card:hover {
+  border-color: var(--border-strong);
+}
+
+.protocol-card__tier {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.protocol-card__name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.protocol-card__desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.protocol-card__cost {
+  font-size: 12px;
+  color: var(--warning);
+  line-height: 1.4;
+}
+
+.protocol-card--silver {
+  border-color: #8b96ad;
+}
+.protocol-card--silver .protocol-card__tier {
+  color: #b7c0d4;
+}
+
+.protocol-card--gold {
+  border-color: var(--warning);
+}
+.protocol-card--gold .protocol-card__tier {
+  color: var(--warning);
+}
+
+.protocol-card--prismatic {
+  border-color: #c792ea;
+  box-shadow: 0 0 10px rgba(199, 146, 234, 0.25);
+}
+.protocol-card--prismatic .protocol-card__tier {
+  color: #c792ea;
+}
+.protocol-card--prismatic .protocol-card__cost {
+  color: var(--danger);
+}
+
+/* The Settings screen's permanent readout for a held protocol (same tiers,
+   same colors as the draft card, just laid out as a settings-row). */
+.protocol-row {
+  border-left: 3px solid transparent;
+  padding-left: 12px;
+}
+.protocol-row--silver {
+  border-left-color: #8b96ad;
+}
+.protocol-row--gold {
+  border-left-color: var(--warning);
+}
+.protocol-row--prismatic {
+  border-left-color: #c792ea;
+}
+.protocol-row__tier {
+  color: var(--text-dim);
+  font-weight: normal;
+  text-transform: capitalize;
+}
+.protocol-row__cost {
+  color: var(--danger);
+}
+
 /* Flagship recovery (iteration 24) */
 .flagship-recovery-screen {
   background: var(--panel);
@@ -2806,6 +2930,51 @@ h1, h2, h3 {
   color: var(--text);
 }
 
+/* Seed sharing (iteration 26) */
+.landing-screen__seed {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.landing-screen__seed-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+}
+
+.landing-screen__seed-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.landing-screen__seed-input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  width: 140px;
+  text-align: center;
+}
+
+.landing-screen__seed-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.landing-screen__seed-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
 /* Daily run (iteration 18) */
 .landing-screen__daily {
   margin-top: 24px;
@@ -2874,6 +3043,16 @@ h1, h2, h3 {
 
 .end-screen__daily {
   margin: 12px 0;
+}
+
+/* Seed sharing (iteration 27) — same shape as .end-screen__daily. */
+.end-screen__seed {
+  margin: 12px 0;
+}
+
+.end-screen__seed .settings-row__seed-code {
+  font-size: 18px;
+  margin: 4px 0 10px;
 }
 
 /* --- Telegraphs (iteration 19) -------------------------------------------- */

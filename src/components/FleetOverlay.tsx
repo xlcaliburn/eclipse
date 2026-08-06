@@ -1,4 +1,5 @@
 import { getPart } from '../game/parts';
+import type { ProtocolId } from '../game/protocols';
 import { deriveStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
@@ -8,6 +9,7 @@ interface FleetOverlayProps {
   fleet: PlayerShipState[];
   inventory: PartId[];
   credits: number;
+  protocols?: ProtocolId[];
   onClose: () => void;
 }
 
@@ -15,12 +17,12 @@ interface FleetOverlayProps {
 // desktop modal (below) and the mobile Fleet tab (FleetScreen, iteration
 // 16.1) render identical content from one place. Not a component (no hooks
 // inside), just a JSX-returning function, called directly.
-function fleetBody(fleet: PlayerShipState[], inventory: PartId[]) {
+function fleetBody(fleet: PlayerShipState[], inventory: PartId[], protocols?: ProtocolId[]) {
   return (
     <>
       {fleet.map((ship, shipIndex) => {
-        const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades);
-        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades) - ship.equipped.length;
+        const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols);
+        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols) - ship.equipped.length;
         return (
           <div key={shipIndex} className="ship-card">
             <div className="ship-card__header">
@@ -68,7 +70,7 @@ function fleetBody(fleet: PlayerShipState[], inventory: PartId[]) {
 // A read-only snapshot of the fleet + inventory,
 // viewable as a popup from the map, a shop, or an event — so the player can
 // check "what do I have" without leaving whatever they're doing.
-export function FleetOverlay({ fleet, inventory, onClose }: FleetOverlayProps) {
+export function FleetOverlay({ fleet, inventory, protocols, onClose }: FleetOverlayProps) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
@@ -77,7 +79,7 @@ export function FleetOverlay({ fleet, inventory, onClose }: FleetOverlayProps) {
           {/* Credits live in the persistent HUD bar — no per-screen copy. */}
         </div>
 
-        {fleetBody(fleet, inventory)}
+        {fleetBody(fleet, inventory, protocols)}
 
         <button type="button" className="continue-button" onClick={onClose}>
           Close
@@ -91,11 +93,11 @@ export function FleetOverlay({ fleet, inventory, onClose }: FleetOverlayProps) {
 // promoted to a full screen instead of a modal (desktop keeps the modal
 // above). No Close button: once the tab bar exists, it's the way out, same
 // reasoning as the Chart tab.
-export function FleetScreen({ fleet, inventory }: Omit<FleetOverlayProps, 'onClose' | 'credits'>) {
+export function FleetScreen({ fleet, inventory, protocols }: Omit<FleetOverlayProps, 'onClose' | 'credits'>) {
   return (
     <div className="fleet-screen">
       <h2>Your fleet</h2>
-      {fleetBody(fleet, inventory)}
+      {fleetBody(fleet, inventory, protocols)}
     </div>
   );
 }

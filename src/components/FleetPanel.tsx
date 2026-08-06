@@ -1,7 +1,9 @@
 import type { CommanderId } from '../game/commanders';
-import { qualifiesForOutspeed } from '../game/combatEngine';
+import { OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
 import { getFrame } from '../game/frames';
 import { getPart } from '../game/parts';
+import { hasProtocol } from '../game/protocols';
+import type { ProtocolId } from '../game/protocols';
 import { deriveFleetStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
@@ -35,6 +37,11 @@ interface FleetPanelProps {
   // withAceBonus, via deriveFleetStats), not a display-only badge that
   // could drift from what combat actually does.
   commanderId?: CommanderId;
+  // Iteration 28 (Protocols): folded into deriveFleetStats/effectiveSlots
+  // below so a picked protocol's effect (twin-linked dice, Lone flagship's
+  // +2 slots, etc.) shows here the same way the real fight/build sees it —
+  // same reasoning as commanderId's ace bonus above.
+  protocols?: ProtocolId[];
 }
 
 export { playerShipLabel };
@@ -52,14 +59,19 @@ export function FleetPanel({
   outspeedFastestEnemyInitiative,
   collapsibleParts,
   commanderId,
+  protocols,
 }: FleetPanelProps) {
   const selectedShip = fleet[selectedShipIndex];
   const selectedHasRoom = selectedShip
-    ? selectedShip.equipped.length < effectiveSlots(selectedShip.frameId, selectedShip.upgrades)
+    ? selectedShip.equipped.length < effectiveSlots(selectedShip.frameId, selectedShip.upgrades, protocols)
     : false;
 
   const instructions =
     'Click a ship to select it, click inventory parts to equip them to it, and click an equipped part to remove it.';
+  // Overspeed protocols (iteration 28): the player-side Outspeed gap drops
+  // 4 -> 3 — mirrors combatEngine.ts's initCombat, the only other place
+  // this number gets computed.
+  const outspeedGap = hasProtocol(protocols, 'overspeed-protocols') ? OUTSPEED_GAP - 1 : OUTSPEED_GAP;
 
   return (
     <section className="blueprint-panel">
@@ -71,12 +83,12 @@ export function FleetPanel({
       </button>
 
       {fleet.map((ship, shipIndex) => {
-        const stats = deriveFleetStats([ship], commanderId)[0];
+        const stats = deriveFleetStats([ship], commanderId, protocols)[0];
         const selected = shipIndex === selectedShipIndex;
-        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades) - ship.equipped.length;
+        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols) - ship.equipped.length;
         const outspeeding =
           outspeedFastestEnemyInitiative !== undefined &&
-          qualifiesForOutspeed(stats.initiative, outspeedFastestEnemyInitiative);
+          qualifiesForOutspeed(stats.initiative, outspeedFastestEnemyInitiative, outspeedGap);
         return (
           <div
             key={shipIndex}

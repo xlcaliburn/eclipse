@@ -5,6 +5,7 @@ import type { EventId } from './events';
 import type { FrameId } from './frames';
 import type { CommanderId } from './commanders';
 import type { GameMap, MapPosition } from './map';
+import type { ProtocolId } from './protocols';
 import type { UpgradeId } from './upgrades';
 
 export type PartType = 'weapon' | 'computer' | 'shield' | 'hull' | 'drive' | 'cargo';
@@ -254,6 +255,7 @@ export type Phase =
   | 'repair'
   | 'event'
   | 'interlude'
+  | 'protocol-draft'
   | 'flagship-recovery'
   | 'victory'
   | 'defeat';
@@ -369,4 +371,13 @@ export interface RunState {
   // `phase` back.
   pendingFlagshipRecovery?: { cost: number; shipName: string; kills: number; fightsSurvived: number };
   flagshipRecoveryResumePhase?: Phase;
+  // Iteration 28 (Protocols): the act-1 boss reward's one-time augment
+  // draft. `protocolOffers` is set the moment the act-1 boss is beaten
+  // (same 9.1 discipline as combat seeds — drawn once, so a reload can
+  // never reroll the offers) and cleared once PROTOCOL_CHOOSE resolves it.
+  // `protocols` is the permanent record of what was picked — an array
+  // even though v1 can only ever hold one entry, so a future iteration
+  // that adds a second draft moment needs no shape change.
+  protocolOffers?: ProtocolId[];
+  protocols?: ProtocolId[];
 }

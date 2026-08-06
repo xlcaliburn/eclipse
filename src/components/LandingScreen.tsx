@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { DailyRecord } from '../game/persistence';
+import { codeToSeed } from '../game/seedCode';
 import { useIsCompact } from './useIsCompact';
 
 // Iteration 25: a phone browser tab is not the same thing as an installed
@@ -46,6 +47,11 @@ interface LandingScreenProps {
   onStartDaily: () => void;
   onContinueDaily: () => void;
   onOpenTutorial: () => void;
+  // Iteration 26: Slay-the-Spire-style seed sharing — a run's seed (see
+  // seedCode.ts) is a shareable 7-character code; entering someone else's
+  // code (or your own from a past run) starts an identical sector: same
+  // map, bosses, shops, and events, iteration 9's determinism guarantee.
+  onNewRunFromSeed: (seed: number) => void;
 }
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -69,12 +75,25 @@ export function LandingScreen({
   onStartDaily,
   onContinueDaily,
   onOpenTutorial,
+  onNewRunFromSeed,
 }: LandingScreenProps) {
   const [copied, setCopied] = useState(false);
   const [installHintDismissed, setInstallHintDismissed] = useState(
     () => isRunningInstalled() || wasInstallHintDismissed(),
   );
+  const [seedInput, setSeedInput] = useState('');
+  const [seedError, setSeedError] = useState(false);
   const isCompact = useIsCompact();
+
+  function submitSeed() {
+    const seed = codeToSeed(seedInput);
+    if (seed === null) {
+      setSeedError(true);
+      return;
+    }
+    setSeedError(false);
+    onNewRunFromSeed(seed);
+  }
 
   function copyResult() {
     if (!dailyResult?.shareText) return;
@@ -136,6 +155,39 @@ export function LandingScreen({
       <button type="button" className="landing-screen__tutorial-link" onClick={onOpenTutorial}>
         How to play — dice, computers, shields
       </button>
+
+      {/* Iteration 26 (placeholder + input fixed in 27): replay a specific
+          sector — the same seed always generates the same map, bosses,
+          shops, and events (iteration 9's determinism), so a code shared by
+          another player (or saved from your own past run) reproduces it
+          exactly. No maxLength here — codeToSeed does its own length/range
+          validation, and truncating a pasted code on the way in would just
+          turn a valid code into an invalid one before it's ever checked. */}
+      <div className="landing-screen__seed">
+        <label htmlFor="seed-input" className="landing-screen__seed-label">
+          Have a run seed? Start that exact sector:
+        </label>
+        <div className="landing-screen__seed-row">
+          <input
+            id="seed-input"
+            type="text"
+            className="landing-screen__seed-input"
+            placeholder="e.g. 2K9X4QM"
+            value={seedInput}
+            onChange={(e) => {
+              setSeedInput(e.target.value);
+              setSeedError(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitSeed();
+            }}
+          />
+          <button type="button" className="shop-button" onClick={submitSeed} disabled={!seedInput.trim()}>
+            Go
+          </button>
+        </div>
+        {seedError && <p className="landing-screen__seed-error">Not a valid seed code — check for typos.</p>}
+      </div>
 
       {/* Iteration 18: the daily — same sector for everyone today, one
           attempt. Starting it consumes the attempt even if abandoned. */}

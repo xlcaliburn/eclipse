@@ -216,6 +216,21 @@ describe('resolveEventChoice — abandoned-arsenal', () => {
     expect(state.hand).toHaveLength(2);
     expect(state.hand.filter((c) => c === 'bulkheads')).toHaveLength(0);
   });
+
+  // Regression: the redraw used to be an unweighted pick over the whole
+  // (2-card) pool with no exclusion, so trading in a card had a real chance
+  // of handing the exact same card straight back — "why did trading in a
+  // bulkhead give me another bulkhead?" A single fixed rng draw wouldn't
+  // reliably catch this (it happened to dodge it), so this sweeps every
+  // rng value the draw could actually see instead of trusting one sample.
+  it('option 2 (Restock) never hands back the exact card just traded in, at any roll', () => {
+    for (let i = 0; i < 20; i++) {
+      const roll = i / 20;
+      const s0 = baseState({ hand: ['bulkheads'] });
+      const { state } = resolveEventChoice('abandoned-arsenal', 2, s0, fixedRng([roll]), { cardId: 'bulkheads' });
+      expect(state.hand).not.toContain('bulkheads');
+    }
+  });
 });
 
 describe('resolveEventChoice — intercepted-signal', () => {

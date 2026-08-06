@@ -4,16 +4,20 @@ import { shipName } from './shipNames';
 import { GAUNTLET, OPENER } from './enemies';
 import { getFrame, PURCHASABLE_FRAME_IDS } from './frames';
 import { MAX_HEAT } from './heat';
-import { BOSS_COLUMN } from './map';
+import { BOSS_COLUMN, LANE_COLUMNS } from './map';
+import { getProtocol } from './protocols';
 import type { CargoTag, GameMap, NodeType } from './map';
 import { getPart } from './parts';
 import { getUpgrade } from './upgrades';
 import {
   applyCargoReward,
   eliteReward,
+  fleetCap,
+  frameCost,
   globalColumn,
   hasLineOfRetreat,
   initialRunState,
+  partCost,
   runReducer,
   SHOP_OFFER_COUNT,
   winReward,
@@ -2211,11 +2215,13 @@ describe('iteration 8/24: the interlude (guaranteed field promotion)', () => {
     return { ...initialRunState(), phase: 'interlude', ...overrides };
   }
 
-  it('attaches exactly one upgrade to the chosen ship, then moves into act 2', () => {
+  it('attaches exactly one upgrade to the chosen ship, moves into act 2, and opens the protocol draft', () => {
     const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
     const result = runReducer(stateAtInterlude({ fleet }), { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
     expect(result.fleet[0].upgrades).toHaveLength(1);
-    expect(result.phase).toBe('map');
+    // Iteration 28: INTERLUDE_CHOOSE no longer lands straight on the map —
+    // the boss's second reward (the protocol draft) comes first.
+    expect(result.phase).toBe('protocol-draft');
     expect(result.act).toBe(2);
   });
 
@@ -2249,6 +2255,9 @@ describe('iteration 8/24: the interlude (guaranteed field promotion)', () => {
       visionCol: 9,
       revealedNodes: [{ col: 5, row: 0 }],
       bossRevealed: true,
+      // Iteration 28: normally drawn by CONTINUE at the moment the boss
+      // falls — set by hand here since this fixture starts mid-interlude.
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'ghost-fleet-protocol'],
     });
     const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
     expect(result.act).toBe(2);
@@ -2259,8 +2268,14 @@ describe('iteration 8/24: the interlude (guaranteed field promotion)', () => {
     expect(result.revealedNodes).toEqual([]);
     expect(result.bossRevealed).toBe(false);
 
+    // The protocol draft (iteration 28) sits between the interlude and the
+    // map now — resolve it before the map/PICK_NODE flow can proceed.
+    const drafted = runReducer(result, { type: 'PROTOCOL_CHOOSE', index: 0 });
+    expect(drafted.phase).toBe('map');
+    expect(drafted.protocols).toEqual(['reinforced-bulkheads']);
+
     // Act 2 column 0 is 3 uniform combat nodes — any row is pickable.
-    const picked = runReducer(result, { type: 'PICK_NODE', row: 1 });
+    const picked = runReducer(drafted, { type: 'PICK_NODE', row: 1 });
     expect(picked.phase).toBe('prep');
     expect(picked.position).toEqual({ col: 0, row: 1 });
   });
@@ -2667,5 +2682,197 @@ describe('the fleet remembers (iteration 18)', () => {
     expect(fresh.dailyDate).toBe('2026-08-03');
     expect(fresh.map.seed).toBe(99);
     expect(fresh).toEqual(initialRunState({ seed: 99, mode: 'daily', dailyDate: '2026-08-03' }));
+  });
+});
+
+describe('iteration 28: Protocols', () => {
+  function actWonState(overrides: Partial<RunState> = {}): RunState {
+    const fleet: PlayerShipState[] = overrides.fleet ?? [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    const combat = initCombat(
+      fleet.map((s) => ({
+        stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] },
+        initialDamage: s.damage,
+      })),
+      GAUNTLET[8],
+      1,
+    );
+    return {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: BOSS_COLUMN, row: 0 },
+      fleet,
+      combat: { ...combat, winner: 'player' as const },
+      ...overrides,
+    };
+  }
+
+  it('winning the act-1 boss draws exactly one silver, one gold, and one prismatic offer', () => {
+    const result = runReducer(actWonState(), { type: 'CONTINUE' });
+    expect(result.protocolOffers).toHaveLength(3);
+    const tiers = result.protocolOffers!.map((id) => getProtocol(id).tier);
+    expect(tiers).toEqual(['silver', 'gold', 'prismatic']);
+  });
+
+  it('PROTOCOL_CHOOSE is refused outside the protocol-draft phase', () => {
+    const state: RunState = { ...initialRunState(), phase: 'map' };
+    const result = runReducer(state, { type: 'PROTOCOL_CHOOSE', index: 0 });
+    expect(result).toBe(state);
+  });
+
+  it('PROTOCOL_CHOOSE records the pick, clears the offers, and returns to the map', () => {
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'ghost-fleet-protocol'],
+    };
+    const result = runReducer(state, { type: 'PROTOCOL_CHOOSE', index: 1 });
+    expect(result.protocols).toEqual(['ace-pipeline']);
+    expect(result.protocolOffers).toBeUndefined();
+    expect(result.phase).toBe('map');
+  });
+
+  it('PROTOCOL_CHOOSE appends to any protocols already held', () => {
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      protocols: ['salvage-rigs'],
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'ghost-fleet-protocol'],
+    };
+    const result = runReducer(state, { type: 'PROTOCOL_CHOOSE', index: 0 });
+    expect(result.protocols).toEqual(['salvage-rigs', 'reinforced-bulkheads']);
+  });
+
+  it('Lone flagship scraps every escort for half its frame value and leaves only the Flagship', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] }, // cost 6 -> 3cr
+      { frameId: 'light-cruiser', equipped: [], damage: 0, upgrades: [] }, // cost 10 -> 5cr
+    ];
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      credits: 0,
+      fleet,
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'lone-flagship'],
+    };
+    const result = runReducer(state, { type: 'PROTOCOL_CHOOSE', index: 2 });
+    expect(result.fleet).toHaveLength(1);
+    expect(result.fleet[0].frameId).toBe('cruiser');
+    expect(result.credits).toBe(Math.floor(getFrame('interceptor').cost / 2) + Math.floor(getFrame('light-cruiser').cost / 2));
+    expect(result.protocols).toEqual(['lone-flagship']);
+  });
+
+  it('Deep-space relays sets visionCol to the far end of the act immediately', () => {
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      visionCol: 0,
+      protocolOffers: ['reinforced-bulkheads', 'deep-space-relays', 'ghost-fleet-protocol'],
+    };
+    const result = runReducer(state, { type: 'PROTOCOL_CHOOSE', index: 1 });
+    expect(result.visionCol).toBe(LANE_COLUMNS);
+  });
+
+  it('Salvage rigs adds +2cr to a normal combat win and to the act-1 boss payout', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      GAUNTLET[0],
+      1,
+    );
+    const plainState: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 0, row: 0 },
+      fleet,
+      combat: { ...combat, winner: 'player' as const },
+    };
+    const plainResult = runReducer(plainState, { type: 'CONTINUE' });
+    const bonusState: RunState = { ...plainState, protocols: ['salvage-rigs'] };
+    const bonusResult = runReducer(bonusState, { type: 'CONTINUE' });
+    expect(bonusResult.pendingReward!.credits).toBe(plainResult.pendingReward!.credits + 2);
+
+    const bossResult = runReducer({ ...actWonState(), protocols: ['salvage-rigs'] }, { type: 'CONTINUE' });
+    const bossPlain = runReducer(actWonState(), { type: 'CONTINUE' });
+    expect(bossResult.credits).toBe(bossPlain.credits + 2);
+  });
+
+  it('Ghost fleet protocol converts a destroyed ship into a survivor at 1 HP instead of losing it', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 5 }], // fatal
+      GAUNTLET[0],
+      1,
+    );
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 0, row: 0 },
+      fleet,
+      protocols: ['ghost-fleet-protocol'],
+      combat: { ...combat, winner: 'player' as const },
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.fleet).toHaveLength(1);
+    expect(result.fleet[0].frameId).toBe('cruiser');
+    expect(result.fleet[0].damage).toBeGreaterThan(0); // critically damaged, not full
+    expect(result.pendingReward?.lostShips).toEqual([]);
+
+    // Without the protocol, the same fight really does lose the ship.
+    const plainResult = runReducer({ ...state, protocols: undefined }, { type: 'CONTINUE' });
+    expect(plainResult.fleet).toHaveLength(0);
+    expect(plainResult.pendingReward?.lostShips).toHaveLength(1);
+  });
+
+  it('Ghost fleet protocol doubles the heat cost of a repair-yard visit', () => {
+    const plain = runReducer(
+      { ...stateWithMap('repair'), phase: 'map', position: null, heat: 0 },
+      { type: 'PICK_NODE', row: 0 },
+    );
+    const ghost = runReducer(
+      { ...stateWithMap('repair'), phase: 'map', position: null, heat: 0, protocols: ['ghost-fleet-protocol'] },
+      { type: 'PICK_NODE', row: 0 },
+    );
+    expect(ghost.heat).toBe(plain.heat + 1);
+  });
+
+  it('Rapid drydocks banks +1 over-repair on a full heal, for any commander', () => {
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'repair',
+      protocols: ['rapid-drydocks'],
+      repairUpgradeOptions: ['spine', 'reactor', 'lattice'],
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+    };
+    const result = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'full' });
+    expect(result.fleet[0].overRepairBank).toBe(1);
+  });
+
+  it('fleetCap: Armada mandate adds +2 on top of the base or Admiral cap; Lone flagship hard-caps at 1', () => {
+    expect(fleetCap(undefined)).toBe(4);
+    expect(fleetCap(undefined, ['armada-mandate'])).toBe(6);
+    expect(fleetCap('admiral')).toBe(5);
+    expect(fleetCap('admiral', ['armada-mandate'])).toBe(7);
+    expect(fleetCap(undefined, ['lone-flagship'])).toBe(1);
+    expect(fleetCap('admiral', ['lone-flagship'])).toBe(1);
+  });
+
+  it('partCost: Munitions contracts subtracts 2cr, floored at 1cr, and stacks with a signature discount', () => {
+    const base = partCost('plasma', undefined);
+    expect(partCost('plasma', undefined, ['munitions-contracts'])).toBe(base - 2);
+    // A cheap part never goes below 1cr even after the discount.
+    const cheapBase = partCost('ion', undefined);
+    expect(partCost('ion', undefined, ['munitions-contracts'])).toBe(Math.max(1, cheapBase - 2));
+  });
+
+  it('frameCost: Armada mandate is 50% off, applied after any commander discount', () => {
+    const base = getFrame('light-cruiser').cost;
+    expect(frameCost(base, 'light-cruiser', undefined, ['armada-mandate'])).toBe(Math.floor(base * 0.5));
+    const admiralCost = frameCost(base, 'light-cruiser', 'admiral');
+    expect(frameCost(base, 'light-cruiser', 'admiral', ['armada-mandate'])).toBe(Math.floor(admiralCost * 0.5));
   });
 });

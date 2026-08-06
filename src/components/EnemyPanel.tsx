@@ -3,6 +3,8 @@ import type { FirePreview } from '../game/combatEngine';
 import type { CommanderId } from '../game/commanders';
 import { getEnemyLore } from '../game/enemyLore';
 import { getEscalation } from '../game/escalations';
+import { hasProtocol } from '../game/protocols';
+import type { ProtocolId } from '../game/protocols';
 import { deriveFleetForCombat, playerShipLabel } from '../game/ship';
 import type { EnemyDef, EnemyGroup, PlayerShipState, ShipStats } from '../game/types';
 import { classifyArchetype, EnemySilhouette } from './ShipSilhouette';
@@ -19,6 +21,10 @@ interface EnemyPanelProps {
   // below (which activation fires first, and on whom) reflects a 3+-kill
   // veteran's +1 initiative the same way the real fight will.
   commanderId?: CommanderId;
+  // Iteration 28 (Protocols): Overspeed protocols loosens the player's own
+  // Outspeed threshold shown below; Alpha doctrine changes the opening
+  // volley preview (cannons alongside missiles, shield zeroed).
+  protocols?: ProtocolId[];
 }
 
 // Flattened index of the first ship in each group, matching the per-side
@@ -74,7 +80,7 @@ function compositionSummary(enemy: EnemyDef): string {
   return enemy.name;
 }
 
-export function EnemyPanel({ enemy, fleetStats, fleet, commanderId }: EnemyPanelProps) {
+export function EnemyPanel({ enemy, fleetStats, fleet, commanderId, protocols }: EnemyPanelProps) {
   const enemyShield = highestShield(enemy.groups);
   const requiredComputer = enemyShield + 1;
   const bestComputer = fleetStats ? bestEffectiveComputer(fleetStats) : undefined;
@@ -88,11 +94,14 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId }: EnemyPanel
   // computer/shield readout above — the enemy panel is where the player
   // decides whether to buy drives, so this is where the number belongs.
   const enemyFastest = fastestInitiative(enemy.groups);
-  const outspeedThreshold = enemyFastest + OUTSPEED_GAP;
+  // Overspeed protocols (iteration 28): the player's own gap, mirrors
+  // combatEngine.ts's initCombat — the only other place this is computed.
+  const playerOutspeedGap = hasProtocol(protocols, 'overspeed-protocols') ? OUTSPEED_GAP - 1 : OUTSPEED_GAP;
+  const outspeedThreshold = enemyFastest + playerOutspeedGap;
   const qualifyingPlayerShips =
     fleetStats && fleet
       ? fleetStats
-          .map((s, i) => (qualifiesForOutspeed(s.initiative, enemyFastest) ? playerShipLabel(fleet, i) : null))
+          .map((s, i) => (qualifiesForOutspeed(s.initiative, enemyFastest, playerOutspeedGap) ? playerShipLabel(fleet, i) : null))
           .filter((label): label is string => label !== null)
       : [];
   const playerFastest = fleetStats ? fleetStats.reduce((best, s) => Math.max(best, s.initiative), -Infinity) : undefined;
@@ -121,7 +130,12 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId }: EnemyPanel
     return { dice, damage, targetNames, flak: preview.flakCancels, outspeed: preview.entries.some((e) => e.outspeed) };
   }
   const previewState =
-    fleet && fleet.length > 0 ? initCombat(deriveFleetForCombat(fleet, commanderId), enemy, 1) : null;
+    fleet && fleet.length > 0
+      ? initCombat(deriveFleetForCombat(fleet, commanderId, protocols), enemy, 1, 'weakest', {
+          overspeedProtocols: hasProtocol(protocols, 'overspeed-protocols'),
+          alphaDoctrine: hasProtocol(protocols, 'alpha-doctrine'),
+        })
+      : null;
   const missileVolley = volleySummary(previewState ? incomingFirePreview(previewState) : null);
   const cannonVolley = volleySummary(previewState ? incomingFirePreview({ ...previewState, round: 1 }) : null);
 

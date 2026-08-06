@@ -50,6 +50,23 @@ const FLEETS: { name: string; fleet: PlayerShipState[] }[] = [
     fleet: [{ frameId: 'cruiser', equipped: ['ion', 'ion', 'comp2', 'shield1', 'hull1', 'init1'], damage: 0 }],
   },
   {
+    // 2026-08-05 (iteration 26): the gap between "mid fleet" (16-18cr,
+    // columns 3-5) and "strong fleet" (~67cr, near-perfect play) had
+    // nothing standing in for the player who actually reaches column 10
+    // having shopped normally — a couple of visits, some parts that
+    // weren't the theoretical optimum, credits not perfectly zeroed out
+    // every stop. ~31cr (ion 3 + plasma 5 + comp2 5 + hull1 3 + shield1 3
+    // on the Flagship, interceptor 6 + ion 3 + hull1 3 for the escort): a
+    // Flagship with 2 decent weapons and hull/shield, plus one escort —
+    // solid, not minmaxed. This is what surfaced the act-1-boss complaint
+    // the "strong fleet" gate alone couldn't catch.
+    name: 'col10 solid fleet',
+    fleet: [
+      { frameId: 'cruiser', equipped: ['ion', 'plasma', 'comp2', 'hull1', 'shield1'], damage: 0 },
+      { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0 },
+    ],
+  },
+  {
     // Realistic end-of-run fleet: ~66 of the ~68 credits a full winning run
     // earns (parts 32 + interceptor 8 + parts 13 + interceptor 8 + ion 3 + hull 3).
     name: 'strong fleet',
@@ -196,12 +213,37 @@ const checks: { label: string; pass: boolean }[] = [
     pass: rates[GAUNTLET[7].id]['strong fleet'] >= 60,
   },
   {
-    label: 'strong fleet vs GCDS in 20-60%',
-    pass: rates[GAUNTLET[8].id]['strong fleet'] >= 20 && rates[GAUNTLET[8].id]['strong fleet'] <= 60,
+    // iteration 26: player feedback ("two cruisers with multiple weapons
+    // plus the Warlord flagship — the boss two-shots me every run") found
+    // the previous "strong fleet in 20-60%" gate below was checking the
+    // wrong fleet — it only ever exercised balance.ts's near-maximum,
+    // ~67cr reference, which no below-'strong' fleet (including this one)
+    // was measured against. "col10 solid fleet" (~31cr, a solid-but-not-
+    // maxed build — the shape of fleet the feedback actually described) is
+    // the fixture this boss is now tuned against; see enemies.ts's GCDS
+    // comment for the full re-tune writeup.
+    label: 'col10 solid fleet vs GCDS in 20-60%',
+    pass: rates[GAUNTLET[8].id]['col10 solid fleet'] >= 20 && rates[GAUNTLET[8].id]['col10 solid fleet'] <= 60,
   },
   {
-    label: 'strong fleet vs Dreadnought (the other act-1 mid-boss) in 20-60%',
-    pass: rates[DREADNOUGHT.id]['strong fleet'] >= 20 && rates[DREADNOUGHT.id]['strong fleet'] <= 60,
+    // Superseded band (kept only as a floor, not a ceiling): re-tuning for
+    // the check above pushed strong fleet's win rate to ~100%. That's a
+    // deliberate acceptance, not a regression — see enemies.ts's GCDS
+    // comment for why the two fleets aren't separable with this boss's
+    // stats alone. A near-maxed build reliably beating a mid-boss was
+    // never the complaint; a solid-but-not-maxed build losing every run
+    // was.
+    label: 'strong fleet beats GCDS >= 60% (ceiling intentionally uncapped since iteration 26)',
+    pass: rates[GAUNTLET[8].id]['strong fleet'] >= 60,
+  },
+  {
+    // Same iteration-26 re-tune and same rationale as GCDS above.
+    label: 'col10 solid fleet vs Dreadnought (the other act-1 mid-boss) in 20-60%',
+    pass: rates[DREADNOUGHT.id]['col10 solid fleet'] >= 20 && rates[DREADNOUGHT.id]['col10 solid fleet'] <= 60,
+  },
+  {
+    label: 'strong fleet beats Dreadnought >= 60% (ceiling intentionally uncapped since iteration 26)',
+    pass: rates[DREADNOUGHT.id]['strong fleet'] >= 60,
   },
   {
     // Known gap, not yet closed (2026-08-04, iteration 22.6): a 3-ship
@@ -211,6 +253,14 @@ const checks: { label: string; pass: boolean }[] = [
     // dropped from the table, so a future pass has the number to beat.
     label: 'strong fleet vs Hive Mother (the other act-1 mid-boss) in 20-60% — KNOWN FAIL, see enemies.ts',
     pass: rates[HIVE_MOTHER.id]['strong fleet'] >= 20 && rates[HIVE_MOTHER.id]['strong fleet'] <= 60,
+  },
+  {
+    // iteration 26: checked against the same "two-shots me" feedback that
+    // drove GCDS/Dreadnought's re-tune. Already healthy (81%, comfortably
+    // on the easy side) — left as a floor check, not re-tuned; see this
+    // file's Hive Mother comment.
+    label: 'col10 solid fleet vs Hive Mother >= 60% (already easy, not re-tuned in iteration 26)',
+    pass: rates[HIVE_MOTHER.id]['col10 solid fleet'] >= 60,
   },
   {
     label: 'strong fleet beats the col-7 elite (ancient guardian +2 HP) >= 40%',

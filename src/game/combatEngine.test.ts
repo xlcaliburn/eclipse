@@ -1581,3 +1581,97 @@ describe('telegraphs — incomingFirePreview (iteration 19)', () => {
     expect(JSON.stringify(advanceRound(state))).toBe(JSON.stringify(advanceRound(JSON.parse(before))));
   });
 });
+
+describe('Overspeed protocols (iteration 28)', () => {
+  it('drops the PLAYER Outspeed gap to 3, but leaves the enemy at gap 4', () => {
+    const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }); // initiative 0
+
+    // Gap 3 with the protocol active — now qualifies (didn't without it,
+    // per the existing "gap 3 grants none" case above).
+    const fleet = [{ stats: blankStats({ initiative: 3, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    let state = initCombat(fleet, foe, 1, 'weakest', { overspeedProtocols: true });
+    state = advanceRound(state); // missile (no-op)
+    state = advanceRound(state); // cannon round 1
+    expect(state.log.filter((e) => e.kind === 'outspeed')).toHaveLength(1);
+  });
+
+  it('does not speed up the enemy side even when the player holds the protocol', () => {
+    // Enemy at initiative 3 (a gap of exactly 3 over the player's 0) should
+    // NOT qualify for its own Outspeed bonus just because the PLAYER holds
+    // Overspeed protocols — only the player's own gap loosens.
+    const fleet = [{ stats: blankStats({ initiative: 0, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { initiative: 3, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1, 'weakest', { overspeedProtocols: true });
+    state = advanceRound(state);
+    state = advanceRound(state);
+    expect(state.log.some((e) => e.kind === 'outspeed' && e.side === 'enemy')).toBe(false);
+  });
+
+  it('without the protocol flag, the gap stays the default 4', () => {
+    const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 1 }] });
+    const fleet = [{ stats: blankStats({ initiative: 3, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state);
+    state = advanceRound(state);
+    expect(state.log.filter((e) => e.kind === 'outspeed')).toHaveLength(0);
+  });
+});
+
+describe('Alpha doctrine (iteration 28)', () => {
+  it('fires the player cannons during the missile phase, alongside missiles', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 50 }); // no weapons — isolates the player's own activations
+    let state = initCombat(fleet, foe, 1, 'weakest', { alphaDoctrine: true });
+    state = advanceRound(state); // round 0 — missile phase
+
+    const cannonRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'cannon');
+    expect(cannonRolls).toHaveLength(1);
+    expect(state.round).toBe(1); // still just one round consumed
+  });
+
+  it('does nothing extra in the missile phase without the flag', () => {
+    const fleet = [{ stats: blankStats({ hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 50 });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state);
+    const cannonRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'cannon');
+    expect(cannonRolls).toHaveLength(0);
+  });
+
+  it('zeroes the player base shield during the missile phase and cannon round 1, then stops', () => {
+    // Enemy fires missiles in round 0 and cannons from round 1 on, both
+    // 1 die / 1 damage — isolates the logged `shield` value read from a
+    // player-side defender in each phase without depending on rng outcome.
+    const fleet = [{ stats: blankStats({ hp: 50, shield: 6 }), initialDamage: 0 }];
+    const foe = enemy(
+      {},
+      { hp: 50, computer: 5, missiles: [{ diceCount: 1, damage: 1 }], cannons: [{ diceCount: 1, damage: 1 }] },
+    );
+
+    let withAlpha = initCombat(fleet, foe, 1, 'weakest', { alphaDoctrine: true });
+    withAlpha = advanceRound(withAlpha); // round 0 — missile phase
+    const round0Rolls = withAlpha.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(round0Rolls.length).toBeGreaterThan(0);
+    expect(round0Rolls.every((e) => e.kind === 'roll' && e.shield === 0)).toBe(true);
+    withAlpha = advanceRound(withAlpha); // round 1 — still zeroed
+    const round1Rolls = withAlpha.log.filter((e) => e.kind === 'roll' && e.side === 'enemy' && e.round === 1);
+    expect(round1Rolls.length).toBeGreaterThan(0);
+    expect(round1Rolls.every((e) => e.kind === 'roll' && e.shield === 0)).toBe(true);
+    withAlpha = advanceRound(withAlpha); // round 2 — back to normal
+    const round2Rolls = withAlpha.log.filter((e) => e.kind === 'roll' && e.side === 'enemy' && e.round === 2);
+    expect(round2Rolls.length).toBeGreaterThan(0);
+    expect(round2Rolls.every((e) => e.kind === 'roll' && e.shield === 6)).toBe(true);
+  });
+
+  it('without the flag, player shield is never zeroed', () => {
+    const fleet = [{ stats: blankStats({ hp: 50, shield: 6 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 50, computer: 5, missiles: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // round 0 — missile phase
+    const rolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(rolls.length).toBeGreaterThan(0);
+    expect(rolls.every((e) => e.kind === 'roll' && e.shield === 6)).toBe(true);
+  });
+});

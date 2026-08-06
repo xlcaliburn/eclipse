@@ -14,6 +14,7 @@ import { InterludeScreen } from './components/InterludeScreen';
 import { LandingScreen } from './components/LandingScreen';
 import { MapScreen } from './components/MapScreen';
 import { PrepScreen } from './components/PrepScreen';
+import { ProtocolDraftScreen } from './components/ProtocolDraftScreen';
 import { RepairScreen } from './components/RepairScreen';
 import { RewardScreen } from './components/RewardScreen';
 import { ShipSetupScreen } from './components/ShipSetupScreen';
@@ -133,6 +134,15 @@ function App() {
     setAwaitingBootChoice(false);
   }
 
+  // Iteration 26: same confirm-before-overwrite guard as a plain new run —
+  // a seeded run is still a new run, just with a chosen sector.
+  function handleNewRunFromSeed(seed: number) {
+    if (hasSave && !window.confirm('Start a new run? This abandons your saved run.')) return;
+    clearRun();
+    dispatch({ type: 'NEW_RUN', seed });
+    setAwaitingBootChoice(false);
+  }
+
   // Iteration 18: starting the daily consumes today's attempt (recorded
   // immediately), then boots a run from today's deterministic seed.
   function handleStartDaily() {
@@ -178,6 +188,7 @@ function App() {
             onStartDaily={handleStartDaily}
             onContinueDaily={handleContinueDaily}
             onOpenTutorial={() => setTutorialOpen(true)}
+            onNewRunFromSeed={handleNewRunFromSeed}
           />
         </div>
         {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}
@@ -186,6 +197,12 @@ function App() {
   }
 
   const showHud = state.phase !== 'commander' && state.phase !== 'setup';
+  // Iteration 27: the Settings "Run seed" readout hides itself during the
+  // daily — today's seed is the same for every player attempting it today
+  // (daily.ts's dailySeed), so showing it here would let a player look it
+  // up mid-attempt and pre-scout the one sector everyone's meant to see
+  // cold. A standard run has nothing to hide it from.
+  const settingsSeed = state.mode === 'daily' ? null : state.map.seed;
   // Peeking at the chart is safe from anywhere mid-run: PICK_NODE is guarded
   // to the 'map' phase, so a peek can never move the fleet by accident.
   const canPeekMap =
@@ -335,6 +352,7 @@ function App() {
               fleet={state.fleet}
               inventory={state.inventory}
               commanderId={state.commanderId}
+              protocols={state.protocols}
               commodityLotSellable={commodityLotSellable}
               onBuyPart={(offerIndex) => dispatch({ type: 'BUY_PART', offerIndex })}
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}
@@ -355,6 +373,13 @@ function App() {
             <InterludeScreen
               fleet={state.fleet}
               onChoose={(shipIndex) => dispatch({ type: 'INTERLUDE_CHOOSE', shipIndex })}
+            />
+          )}
+
+          {state.phase === 'protocol-draft' && state.protocolOffers && (
+            <ProtocolDraftScreen
+              offers={state.protocolOffers}
+              onChoose={(index) => dispatch({ type: 'PROTOCOL_CHOOSE', index })}
             />
           )}
 
@@ -400,6 +425,7 @@ function App() {
               fleet={state.fleet}
               runStats={state.runStats}
               dailyShare={state.mode === 'daily' ? dailyShareText(state, state.phase) : undefined}
+              seed={settingsSeed}
               onNewRun={() => dispatch({ type: 'NEW_RUN' })}
             />
           )}
@@ -408,20 +434,25 @@ function App() {
 
       {isCompact && surface === 'chart' && chartSurface}
 
-      {isCompact && surface === 'fleet' && <FleetScreen fleet={state.fleet} inventory={state.inventory} />}
+      {isCompact && surface === 'fleet' && (
+        <FleetScreen fleet={state.fleet} inventory={state.inventory} protocols={state.protocols} />
+      )}
 
       {!isCompact && surface === 'fleet' && (
         <FleetOverlay
           fleet={state.fleet}
           inventory={state.inventory}
           credits={state.credits}
+          protocols={state.protocols}
           onClose={() => setSurface('mission')}
         />
       )}
 
-      {isCompact && surface === 'settings' && <SettingsScreen />}
+      {isCompact && surface === 'settings' && <SettingsScreen seed={settingsSeed} protocols={state.protocols} />}
 
-      {!isCompact && surface === 'settings' && <SettingsOverlay onClose={() => setSurface('mission')} />}
+      {!isCompact && surface === 'settings' && (
+        <SettingsOverlay seed={settingsSeed} protocols={state.protocols} onClose={() => setSurface('mission')} />
+      )}
     </div>
     {isCompact && showHud && <TabBar surface={surface} onSelect={setSurface} />}
     {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}

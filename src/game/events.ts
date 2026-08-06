@@ -7,6 +7,7 @@ import { getPart } from './parts';
 import { CARDS, getCard, MAX_HAND_SIZE } from './cards';
 import type { CardId } from './cards';
 import type { FrameId } from './frames';
+import type { ProtocolId } from './protocols';
 import type { RngFn } from './rng';
 import type { AmbushBonus, EnemyDef, PartId, PlayerShipState, RunState } from './types';
 
@@ -45,10 +46,10 @@ export function meetsRequirement(req: EventRequirement, state: RunState): boolea
     case 'everyShipInitiativeAtLeast':
       return (
         state.fleet.length > 0 &&
-        deriveFleetStats(state.fleet, state.commanderId).every((s) => s.initiative >= req.value)
+        deriveFleetStats(state.fleet, state.commanderId, state.protocols).every((s) => s.initiative >= req.value)
       );
     case 'anyShipComputerAtLeast':
-      return deriveFleetStats(state.fleet, state.commanderId).some((s) => s.computer >= req.value);
+      return deriveFleetStats(state.fleet, state.commanderId, state.protocols).some((s) => s.computer >= req.value);
     case 'framePresent':
       return state.fleet.some((s) => s.frameId === req.frameId);
     case 'handAtLeast':
@@ -314,10 +315,15 @@ function clampCredits(credits: number): number {
 // Applies damage to one chosen ship, capped so it always survives with
 // >= 1 HP. The design law for this iteration: costs are chosen (the player
 // picked this ship for this option), never random.
-function applyCappedDamage(fleet: PlayerShipState[], shipIndex: number, amount: number): PlayerShipState[] {
+function applyCappedDamage(
+  fleet: PlayerShipState[],
+  shipIndex: number,
+  amount: number,
+  protocols?: ProtocolId[],
+): PlayerShipState[] {
   return fleet.map((ship, i) => {
     if (i !== shipIndex) return ship;
-    const hp = deriveStats(ship.frameId, ship.equipped, ship.upgrades).hp;
+    const hp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols).hp;
     const maxDamage = hp - 1;
     return { ...ship, damage: Math.min(maxDamage, ship.damage + amount) };
   });
@@ -346,8 +352,17 @@ function randomPart(rng: RngFn, pool: PartId[]): PartId {
   return pool[Math.floor(rng() * pool.length)];
 }
 
-function randomCard(rng: RngFn): CardId {
-  return CARDS[Math.floor(rng() * CARDS.length)].id;
+// `exclude` keeps a "trade in" option from handing back the exact card it
+// just took — with only 2 cards in the whole pool (bulkheads, volley), a
+// plain unweighted draw had a coin-flip chance of returning the same card
+// you'd just traded away, which read as a broken reward rather than bad
+// luck ("why did trading in a bulkhead give me another bulkhead?"). Falls
+// back to the full pool if excluding would empty it (never happens today
+// at 2 cards, but keeps this correct if the pool ever shrinks to 1).
+function randomCard(rng: RngFn, exclude?: CardId): CardId {
+  const pool = exclude ? CARDS.filter((c) => c.id !== exclude) : CARDS;
+  const source = pool.length > 0 ? pool : CARDS;
+  return source[Math.floor(rng() * source.length)].id;
 }
 
 function pickFromPool(pool: EnemyDef[], rng: RngFn): EnemyDef {
@@ -468,7 +483,7 @@ export function resolveEventChoice(
           };
         }
         return {
-          state: { ...state, fleet: applyCappedDamage(state.fleet, shipIndex, 2) },
+          state: { ...state, fleet: applyCappedDamage(state.fleet, shipIndex, 2, state.protocols) },
           outcomeText: 'The reactor arcs back — the boarding ship takes damage.',
         };
       }
@@ -496,7 +511,7 @@ export function resolveEventChoice(
           };
         }
         return {
-          state: { ...state, fleet: applyCappedDamage(state.fleet, shipIndex, 2) },
+          state: { ...state, fleet: applyCappedDamage(state.fleet, shipIndex, 2, state.protocols) },
           outcomeText: 'A collision damages the lead ship.',
         };
       }
@@ -542,9 +557,11 @@ export function resolveEventChoice(
         };
       }
       // choiceIndex 2: restock — trade in a chosen card, then take the crate.
+      // Excludes the traded card from the redraw — a "restock" that could
+      // just hand the same module back reads as broken, not lucky.
       const cardId = selection.cardId;
       const handWithoutTraded = cardId ? removeOnce(state.hand, cardId) : state.hand;
-      const newCardId = randomCard(rng);
+      const newCardId = randomCard(rng, cardId);
       return {
         state: { ...state, hand: [...handWithoutTraded, newCardId] },
         outcomeText: `You trade in your ${cardId ? getCard(cardId).name : 'card'} and take a ${getCard(newCardId).name} module instead.`,
@@ -613,7 +630,7 @@ export function resolveEventChoice(
       const { state: cancelledState, text } = revealAndCancel(state);
       if (choiceIndex === 1) {
         const shipIndex = selection.shipIndex ?? 0;
-        const fleet = applyCappedDamage(cancelledState.fleet, shipIndex, 2);
+        const fleet = applyCappedDamage(cancelledState.fleet, shipIndex, 2, cancelledState.protocols);
         return {
           state: { ...cancelledState, fleet },
           outcomeText: text

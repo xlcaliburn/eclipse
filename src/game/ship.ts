@@ -2,15 +2,28 @@ import type { CommanderId } from './commanders';
 import { getFrame } from './frames';
 import type { FrameId } from './frames';
 import { getPart } from './parts';
+import { hasProtocol } from './protocols';
+import type { ProtocolId } from './protocols';
 import type { PartId, PlayerShipState, ShipStats } from './types';
 import type { UpgradeId } from './upgrades';
 
 // `upgrades` are slotless (elite drops) and fold in on top of frame + parts.
-export function deriveStats(frameId: FrameId, equippedPartIds: PartId[], upgrades: UpgradeId[] = []): ShipStats {
+// `protocols` (iteration 28) are RunState-level, not per-ship, but two of
+// them (Twin-linked mounts, Lone flagship) change a ship's BUILD — its
+// weapon list or its frame's own baseline — rather than a live-combat
+// modifier, so they fold in here at the same place upgrades do, not as a
+// derive-time top-up like the ace/aura bonuses below.
+export function deriveStats(
+  frameId: FrameId,
+  equippedPartIds: PartId[],
+  upgrades: UpgradeId[] = [],
+  protocols?: ProtocolId[],
+): ShipStats {
   const frame = getFrame(frameId);
+  const lonelyFlagship = frameId === 'cruiser' && hasProtocol(protocols, 'lone-flagship');
   const stats: ShipStats = {
     initiative: frame.baseInitiative,
-    hp: frame.baseHp,
+    hp: frame.baseHp + (lonelyFlagship ? 2 : 0),
     computer: 0,
     shield: 0,
     cannons: [],
@@ -20,6 +33,9 @@ export function deriveStats(frameId: FrameId, equippedPartIds: PartId[], upgrade
   // Jink is innate to the Interceptor frame (iteration 8, addendum A.1) —
   // not a part, always present, no button.
   if (frameId === 'interceptor') stats.jink = true;
+
+  const twinLinked = hasProtocol(protocols, 'twin-linked-mounts');
+  let twinLinkedApplied = false;
 
   for (const id of equippedPartIds) {
     const part = getPart(id);
@@ -36,8 +52,14 @@ export function deriveStats(frameId: FrameId, equippedPartIds: PartId[], upgrade
     if (part.cloak) stats.cloak = true;
     if (part.active) stats.actives = [...(stats.actives ?? []), part.id];
     if (part.weapon) {
+      // Twin-linked mounts (iteration 28): the FIRST weapon this ship
+      // equips (in equip order — the same order this loop already walks)
+      // fires one extra die. `twinLinkedApplied` guards it to exactly one
+      // weapon per ship, not one per weapon part.
+      const bonusDie = twinLinked && !twinLinkedApplied;
+      if (bonusDie) twinLinkedApplied = true;
       const entry = {
-        diceCount: part.weapon.diceCount,
+        diceCount: part.weapon.diceCount + (bonusDie ? 1 : 0),
         damage: part.weapon.damage,
         selfDamageOnNatOne: part.weapon.selfDamageOnNatOne,
         shieldPierce: part.weapon.shieldPierce,
@@ -48,6 +70,14 @@ export function deriveStats(frameId: FrameId, equippedPartIds: PartId[], upgrade
       else stats.missiles.push(entry);
     }
   }
+
+  // Bastion doctrine (iteration 28): a static bonus, not a live "currently
+  // drawing fire" check — `taunt` itself is a static per-ship flag (from an
+  // equipped lure beacon), true for the ship's whole fight, so "+1 shield
+  // while taunting" is just "if this ship taunts at all."
+  if (stats.taunt && hasProtocol(protocols, 'bastion-doctrine')) stats.shield += 1;
+  // Reinforced bulkheads (iteration 28): +1 max HP, every ship, flat.
+  if (hasProtocol(protocols, 'reinforced-bulkheads')) stats.hp += 1;
 
   for (const upgradeId of upgrades) {
     switch (upgradeId) {
@@ -86,12 +116,20 @@ export function deriveStats(frameId: FrameId, equippedPartIds: PartId[], upgrade
 const ACE_KILL_THRESHOLD = 3;
 const ACE_INITIATIVE_BONUS = 1;
 
-// A ship with 3+ kills gains +1 initiative for the Admiral — folded into
-// derived stats (not a separate combat-engine hook) so it's automatically
-// correct everywhere derived stats already flow: UI display, Outspeed
-// qualification, activation order, all from one source of truth.
-function withAceBonus(stats: ShipStats, ship: PlayerShipState, commanderId: CommanderId | undefined): ShipStats {
-  if (commanderId === 'admiral' && (ship.kills ?? 0) >= ACE_KILL_THRESHOLD) {
+// A ship with 3+ kills gains +1 initiative for the Admiral (or, iteration
+// 28, for anyone holding the Ace pipeline protocol — same threshold/bonus,
+// generalized off the one commander) — folded into derived stats (not a
+// separate combat-engine hook) so it's automatically correct everywhere
+// derived stats already flow: UI display, Outspeed qualification,
+// activation order, all from one source of truth.
+function withAceBonus(
+  stats: ShipStats,
+  ship: PlayerShipState,
+  commanderId: CommanderId | undefined,
+  protocols: ProtocolId[] | undefined,
+): ShipStats {
+  const hasAces = commanderId === 'admiral' || hasProtocol(protocols, 'ace-pipeline');
+  if (hasAces && (ship.kills ?? 0) >= ACE_KILL_THRESHOLD) {
     return { ...stats, initiative: stats.initiative + ACE_INITIATIVE_BONUS };
   }
   return stats;
@@ -110,10 +148,15 @@ function fleetShieldAuraBonus(fleet: PlayerShipState[]): number {
   );
 }
 
-export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: CommanderId): ShipStats[] {
+export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: CommanderId, protocols?: ProtocolId[]): ShipStats[] {
   const auraShield = fleetShieldAuraBonus(fleet);
   return fleet.map((ship) => {
-    const stats = withAceBonus(deriveStats(ship.frameId, ship.equipped, ship.upgrades), ship, commanderId);
+    const stats = withAceBonus(
+      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols),
+      ship,
+      commanderId,
+      protocols,
+    );
     return auraShield > 0 ? { ...stats, shield: stats.shield + auraShield } : stats;
   });
 }
@@ -126,10 +169,16 @@ export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: Command
 export function deriveFleetForCombat(
   fleet: PlayerShipState[],
   commanderId?: CommanderId,
+  protocols?: ProtocolId[],
 ): { stats: ShipStats; initialDamage: number }[] {
   const auraShield = fleetShieldAuraBonus(fleet);
   return fleet.map((ship) => {
-    const stats = withAceBonus(deriveStats(ship.frameId, ship.equipped, ship.upgrades), ship, commanderId);
+    const stats = withAceBonus(
+      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols),
+      ship,
+      commanderId,
+      protocols,
+    );
     if (auraShield > 0) stats.shield += auraShield;
     if (ship.overRepairBank) stats.ablative = (stats.ablative ?? 0) + ship.overRepairBank;
     return { stats, initialDamage: ship.damage };
@@ -154,11 +203,14 @@ export function applyRepairBanking(ship: PlayerShipState, amount: number, flatBa
 // its frame's base by 1. Since iteration 8 (addendum A.4) a ship holds at
 // most 1 permanent upgrade, so this is now always +0 or +1 — the old hard
 // cap at MAX_EFFECTIVE_SLOTS is gone (it would have wrongly clipped a
-// Dreadnought-plus-bay).
-export function effectiveSlots(frameId: FrameId, upgrades: UpgradeId[]): number {
+// Dreadnought-plus-bay). Iteration 28: Lone flagship adds a further +2,
+// Flagship (cruiser frame) only — its whole point is one hull carrying
+// what used to be spread across a fleet.
+export function effectiveSlots(frameId: FrameId, upgrades: UpgradeId[], protocols?: ProtocolId[]): number {
   const frame = getFrame(frameId);
   const bayCount = upgrades.filter((u) => u === 'bay').length;
-  return frame.slots + bayCount;
+  const lonelyFlagshipBonus = frameId === 'cruiser' && hasProtocol(protocols, 'lone-flagship') ? 2 : 0;
+  return frame.slots + bayCount + lonelyFlagshipBonus;
 }
 
 export function equippedWeaponCount(equippedPartIds: PartId[]): number {

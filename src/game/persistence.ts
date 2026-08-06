@@ -142,6 +142,11 @@ function isValidRunState(state: RunState): boolean {
     // this save claims to be in.
     case 'flagship-recovery':
       return !!state.pendingFlagshipRecovery && !!state.flagshipRecoveryResumePhase;
+    // Iteration 28: a protocol-draft save needs the 3 offers it's supposed
+    // to be choosing between — missing means CONTINUE's act-1-boss branch
+    // never actually finished computing the state this save claims to be.
+    case 'protocol-draft':
+      return Array.isArray(state.protocolOffers) && state.protocolOffers.length === 3;
     default:
       return true;
   }

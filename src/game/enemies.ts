@@ -154,22 +154,57 @@ export const GAUNTLET: EnemyDef[] = [
   {
     id: 'gcds',
     name: 'GCDS',
-    // Nerfed 2026-08-03, re-buffed 2026-08-04 (iteration 22.3): the
-    // 2026-08-03 nerf (shield 2->1, one cannon die removed) overshot its
-    // own gate — balance.ts's sanity check wants "strong fleet vs GCDS in
-    // 20-60%" and was actually landing at 95%, a boss a well-built fleet
-    // could no longer lose to. Shield 1 -> 2 restores some of the shield
-    // pierce/computer check the boss is supposed to test, without
-    // restoring the fourth cannon die (that die is what made every
-    // below-"strong" fleet's win rate 0% pre-nerf — it stays cut). See
-    // plans/iteration-22.md 22.3.
+    // Nerfed 2026-08-03, re-buffed 2026-08-04 (iteration 22.3), re-tuned
+    // 2026-08-05 (iteration 26). The 22.3 pass only ever checked this boss
+    // against "strong fleet" (balance.ts's near-maximum, ~67cr reference)
+    // — its own comment says outright that 3 cannon dice "made every
+    // below-'strong' fleet's win rate 0% pre-nerf" and kept that die cut
+    // anyway, since the only gate that existed was strong-fleet-shaped.
+    // Player feedback ("two cruisers with multiple weapons plus the
+    // Warlord flagship — the boss two-shots me every run") is exactly that
+    // gap: a solid-but-not-maxed fleet was never actually measured. Adding
+    // balance.ts's "col10 solid fleet" (~31cr, one weaker step down from
+    // "strong") found it at a flat 0% against this boss too, same as every
+    // other non-strong reference — the whole middle of the difficulty
+    // curve had a wall in it, not a slope.
+    //
+    // Fix, empirically tuned via repeated `npx tsx scripts/balance.ts` runs
+    // (each stat changed in isolation to separate its effect — the
+    // raw+computer-shield>=6 hit threshold is discrete, so shield/computer
+    // swing "solid" and "strong" fleets very differently and a combined
+    // change can't be read after the fact):
+    //   - cannon dice 3->2: cuts the solo-target burst that was deleting a
+    //     low-HP escort in one activation before the player got a real
+    //     round of return fire.
+    //   - shield 2->1: col10-solid fleet's average computer (~0-2) could
+    //     barely scratch shield 2 at all (only natural-6 auto-hits); this
+    //     is the one stat that actually opened up a hit rate for them.
+    //   - computer 2->1: GCDS's own accuracy was the dominant lever for
+    //     col10-solid's escorts (0 shield) — raising it even by 1 point
+    //     re-created the two-shot burst; lowering it by 1 nearly doubled
+    //     their win rate (12% -> 52% at otherwise-equal stats) for almost
+    //     no change to strong fleet (97% -> 100%).
+    // HP was tried at 7/10/14 in isolation: it barely moves strong fleet's
+    // win rate at all (it wins each fight too fast/cleanly for fight-length
+    // to matter) while dragging col10-solid's DOWN (more rounds for GCDS's
+    // concentrated fire to chip through a small HP pool) — left at 10.
+    // Verified final result (`npx tsx scripts/balance.ts`): col10 solid
+    // fleet 0% -> 52%, strong fleet 55% -> 100%. Strong fleet's 100% is a
+    // deliberate acceptance, not a miss: it represents a near-maximally
+    // optimized end-of-act-1 build, and every lever that pulls its win rate
+    // down (raising GCDS's shield or computer) pulls col10-solid's down by
+    // a much larger amount — the two fleets aren't separable with this
+    // boss's stats alone. The player complaint was specifically about a
+    // solid-but-not-maxed build losing, not about a maxed build winning too
+    // easily, so col10-solid fleet is the fixture this boss is tuned
+    // against; see scripts/balance.ts's updated sanity-check gate.
     blurb: 'The final stat wall.',
     groups: solo('gcds', 1, {
       initiative: 0,
       hp: 10,
-      computer: 2,
-      shield: 2,
-      cannons: [{ diceCount: 3, damage: 2 }],
+      computer: 1,
+      shield: 1,
+      cannons: [{ diceCount: 2, damage: 2 }],
       missiles: [{ diceCount: 2, damage: 1 }],
     }),
   },
@@ -630,6 +665,14 @@ const HIVE_MOTHER: EnemyDef = {
   // rather than ship a net-negative change; the strong-fleet-vs-Hive-
   // Mother gap is now visible in the table (it wasn't before) and is
   // flagged in plans/iteration-22.md's status notes as unresolved.
+  //
+  // Checked again 2026-08-05 (iteration 26) against the same "two-shots
+  // me" player feedback that drove GCDS/Dreadnought's re-tune: col10 solid
+  // fleet scores 81% here, comfortably healthy (that pass's target was
+  // ~25-55%, and 81% is well clear on the easy side, not the hard side).
+  // Left untouched — this boss was never the one the complaint was about,
+  // and nerfing it further would only push the pre-existing strong-fleet-
+  // ceiling problem noted above in the wrong direction.
   blurb: 'Demands initiative, flak or point-defense, and a taunt-decoy — many small dice.',
   groups: solo('hive', 4, {
     initiative: 3,
@@ -652,15 +695,31 @@ const DREADNOUGHT: EnemyDef = {
   // fleet's 55% vs GCDS. Shield 4 -> 2 brings it in line with GCDS's
   // shield 2 — "demands computer 5+" was a design idea this fleet's
   // credits could never actually reach.
+  //
+  // Re-tuned again 2026-08-05 (iteration 26), same pass and same root
+  // cause as GCDS (see that boss's comment for the full methodology):
+  // balance.ts's "col10 solid fleet" (~31cr, a solid-but-not-maxed build)
+  // was still at a flat 0% here even after the 22.6 shield cut, same wall
+  // as GCDS pre-fix. Applied the same three levers, isolated one at a time
+  // via `npx tsx scripts/balance.ts`: shield 2->1 alone barely moved
+  // col10-solid (stayed 0%, strong fleet 29%->66%) — computer 3 was still
+  // one-shotting the 0-shield escort regardless of shield; computer 3->1
+  // got col10-solid to 20% (strong 97%); cutting the cannons from 3 dice
+  // (2d2+1d4) to 2 (1d2+1d3) — same total-dice reduction logic as GCDS's
+  // 3->2 cut — got col10-solid to a healthy 50% (strong fleet 100%, same
+  // deliberate acceptance as GCDS: a maxed fleet reliably beating a mid-
+  // boss isn't the problem the player reported).
+  // Final verified result: col10 solid fleet 0% -> 50%, strong fleet
+  // 29% -> 100%.
   blurb: 'Answers big dice with reactive armor.',
   groups: solo('dreadnought', 1, {
     initiative: 1,
     hp: 9,
-    computer: 3,
-    shield: 2,
+    computer: 1,
+    shield: 1,
     cannons: [
-      { diceCount: 2, damage: 2 },
-      { diceCount: 1, damage: 4 },
+      { diceCount: 1, damage: 2 },
+      { diceCount: 1, damage: 3 },
     ],
     missiles: [],
   }),

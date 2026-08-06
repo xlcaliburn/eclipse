@@ -51,6 +51,32 @@
   iteration that assumes flat veterancy math — needs its own scoped pass,
   not a drive-by.
 
+- **Risk-economy bundle: combat wagers, elite contracts, "stakes raise
+  the draft tier" (deferred by scope choice 2026-08-06, iteration 28):**
+  the other half of the augment design discussion. Wagers = stake credits
+  before a fight on a declared condition (win without losing a ship,
+  clear in ≤N rounds), legible because the dice math is transparent.
+  Elite contracts = opt-in to add a named escalation to a known upcoming
+  fight for a reward-tier bump. The unifying model — accepting stakes
+  upgrades a protocol draft's tier — was the recommended design; the user
+  chose the smaller boss-rewards-only scope for iteration 28 instead.
+  Deferred, not rejected: this is the natural iteration 29 if protocols
+  land well, and it reuses 28's tier machinery. Other risk mechanics from
+  the same discussion, unscheduled: debt broker (borrow now, scheduled
+  bounty-hunter ambush at a known column unless repaid), prototype parts
+  with deterministic wear/burnout, irreversible overhaul-yard frame
+  mutations, survival streaks (perks for going unrepaired — note the
+  Admiral-ace identity overlap), volatile cargo (artifact pays out iff
+  the carrying ship reaches the boss alive).
+- **Vanity/phrase seeds (parked 2026-08-06, iteration 27):** hashing an
+  arbitrary typed phrase into a seed (Slay-the-Spire style, via `daily.ts`'s
+  existing FNV-1a hash) instead of requiring a strict Crockford code.
+  Rejected as a *replacement* because a hash always "succeeds" — a
+  genuinely mistyped strict code would silently resolve to a different,
+  valid-looking sector instead of failing loudly (see `seedCode.ts`'s
+  wrap-around bug, iteration 27's whole reason for existing). Could return
+  as an *additional*, clearly-distinguished input mode later, not a
+  replacement for the validated 7-character code.
 - **Combat-interaction bundle (pitched 2026-07-27, user passed):**
   click-targeted actives (disruptor pulse / tractor snare / painter),
   cooldown-or-charge active economy, per-fight battle-plan drafts, and

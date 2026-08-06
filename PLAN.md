@@ -54,6 +54,9 @@ Rules for working with these files:
 | [23](plans/iteration-23.md) | Support hulls: 5 new purchasable frames (buffer, passive aura, repair, 2× enemy-debuffer) — first parts to target a single other ally or affect the enemy side directly | implemented |
 | [24](plans/iteration-24.md) | Boss closure + the Flagship comes back: boss fights auto-heal the fleet, the boss reward is a guaranteed upgrade (interlude simplified from a 3-way choice), and losing the Flagship while the fleet survives now offers a one-time paid recovery instead of losing it forever | implemented |
 | [25](plans/iteration-25.md) | Sound effects (procedural Web Audio cues, no assets) + a how-to-play tutorial covering the dice/computer/shield/initiative math | implemented |
+| [26](plans/iteration-26.md) | Act-1 mid-boss re-tune (GCDS + Dreadnought, driven by "the boss two-shots me every run" — added a `col10 solid fleet` balance.ts fixture to catch it) + fix a card-trade event that could hand back the exact card just traded in | implemented |
+| [27](plans/iteration-27.md) | Seed sharing (Slay-the-Spire-style): a 7-character code round-trips a run's seed via `seedCode.ts`, enterable on the landing screen, copyable from Settings and the end screen (found + fixed a wrap-around decode bug along the way) | implemented |
+| [28](plans/iteration-28.md) | Protocols: the act-1 boss reward gains a 1-of-3 augment draft spanning three tiers (silver stat value / gold build-arounds / prismatic rule-breakers with stated costs) — once per run, act-2-only power, seeded offers | implemented |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes

@@ -40,6 +40,13 @@ export interface RoundModifiers {
   // above this line only ever modifies player ships.
   enemyComputerPenalty: number;
   enemyShieldPenalty: number;
+  // Iteration 28 (Alpha doctrine): a per-round derived flag, not a played
+  // effect — computed fresh in advanceRound from CombatState.alphaDoctrineActive
+  // and the current round number, not carried in freshRoundModifiers()'s
+  // "armed actives reset every round" bag. True for player defenders during
+  // the opening exchange (missile phase + cannon round 1) when the protocol
+  // is active.
+  playerBaseShieldZeroed: boolean;
 }
 
 // A plain, serializable snapshot of an in-progress (or finished) fight. The
@@ -72,6 +79,13 @@ export interface CombatState {
   priorityTargetIndex?: number | null;
   log: CombatEvent[];
   winner?: Side;
+  // Iteration 28 (Protocols): set once at initCombat from RunState.protocols,
+  // never changes mid-fight. `playerOutspeedGap` is asymmetric by design —
+  // it only ever loosens the PLAYER side's Outspeed qualification (Overspeed
+  // protocols); the enemy always still needs the full OUTSPEED_GAP, or the
+  // protocol would silently speed up every enemy in the game too.
+  playerOutspeedGap: number;
+  alphaDoctrineActive: boolean;
 }
 
 export interface PlayerFleetInput {
@@ -194,8 +208,8 @@ function fastestAliveInitiative(ships: CombatShip[], initiativeBonus: number): n
 // no live CombatShip/CombatState available before a fight starts. The real
 // resolution below (`computeOutspeedShips`) is defined in terms of this
 // same check, so the two can never drift apart.
-export function qualifiesForOutspeed(shipInitiative: number, opponentFastestInitiative: number): boolean {
-  return shipInitiative - opponentFastestInitiative >= OUTSPEED_GAP;
+export function qualifiesForOutspeed(shipInitiative: number, opponentFastestInitiative: number, gap = OUTSPEED_GAP): boolean {
+  return shipInitiative - opponentFastestInitiative >= gap;
 }
 
 // Every surviving ship (either side) whose effective initiative beats the
@@ -210,16 +224,25 @@ export function qualifiesForOutspeed(shipInitiative: number, opponentFastestInit
 // already on the list simply skips its turn if something upstream (a rift
 // backfire, an earlier bonus activation) killed it first — see the
 // isAlive guard in advanceRound's bonus-phase loop.
-function computeOutspeedShips(playerShips: CombatShip[], enemyShips: CombatShip[], initiativeBonus: number): CombatShip[] {
+function computeOutspeedShips(
+  playerShips: CombatShip[],
+  enemyShips: CombatShip[],
+  initiativeBonus: number,
+  playerGap: number = OUTSPEED_GAP,
+): CombatShip[] {
   const fastestPlayer = fastestAliveInitiative(playerShips, initiativeBonus);
   const fastestEnemy = fastestAliveInitiative(enemyShips, initiativeBonus);
   const qualifying: CombatShip[] = [];
   if (fastestEnemy !== null) {
     for (const s of playerShips) {
-      if (isAlive(s) && qualifiesForOutspeed(effectiveInitiative(s, initiativeBonus), fastestEnemy)) qualifying.push(s);
+      if (isAlive(s) && qualifiesForOutspeed(effectiveInitiative(s, initiativeBonus), fastestEnemy, playerGap)) {
+        qualifying.push(s);
+      }
     }
   }
   if (fastestPlayer !== null) {
+    // The enemy side always needs the full OUTSPEED_GAP — Overspeed
+    // protocols is a player-only edge (see CombatState.playerOutspeedGap).
     for (const s of enemyShips) {
       if (isAlive(s) && qualifiesForOutspeed(effectiveInitiative(s, initiativeBonus), fastestPlayer)) qualifying.push(s);
     }
@@ -316,8 +339,13 @@ function fireShip(
       // player defenders. Folded in before the shield-pierce clamp below,
       // same as every other shield modifier.
       const disruptorPenalty = target.side === 'enemy' ? roundModifiers.enemyShieldPenalty : 0;
+      // Alpha doctrine (iteration 28): the player's base shield stat is
+      // zeroed for the opening exchange — everything else (capacitor,
+      // shield modulator) is additive and still applies on top of that 0.
+      const targetBaseShield =
+        target.side === 'player' && roundModifiers.playerBaseShieldZeroed ? 0 : target.stats.shield;
       const baseShield =
-        target.stats.shield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus - disruptorPenalty;
+        targetBaseShield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus - disruptorPenalty;
       const effectiveShield = Math.max(
         0,
         baseShield - (ship.stats.shieldPierce ?? 0) - (weapon.shieldPierce ?? 0),
@@ -498,7 +526,16 @@ function freshRoundModifiers(): RoundModifiers {
     chaffShipIndices: [],
     enemyComputerPenalty: 0,
     enemyShieldPenalty: 0,
+    playerBaseShieldZeroed: false, // always recomputed per-round in advanceRound, never carried
   };
+}
+
+// Iteration 28 (Protocols): the two combat-engine-level protocol effects,
+// bundled into one options bag so initCombat's signature doesn't grow a
+// new positional param per protocol added later.
+export interface CombatProtocolFlags {
+  overspeedProtocols?: boolean; // player Outspeed gap 4 -> 3
+  alphaDoctrine?: boolean; // player cannons also fire in the missile phase; player shield zeroed rounds 0-1
 }
 
 export function initCombat(
@@ -506,6 +543,7 @@ export function initCombat(
   enemyDef: EnemyDef,
   seed: number,
   targetingStance: TargetingStance = 'weakest',
+  protocolFlags?: CombatProtocolFlags,
 ): CombatState {
   const playerShips: CombatShip[] = playerFleet.map((p, index) => ({
     side: 'player',
@@ -545,6 +583,8 @@ export function initCombat(
     priorityTargetIndex: null,
     log: [],
     winner: undefined,
+    playerOutspeedGap: protocolFlags?.overspeedProtocols ? OUTSPEED_GAP - 1 : OUTSPEED_GAP,
+    alphaDoctrineActive: !!protocolFlags?.alphaDoctrine,
   };
 }
 
@@ -582,7 +622,6 @@ export function advanceRound(state: CombatState): CombatState {
   const enemyShips = cloneShips(state.enemyShips);
   const log = [...state.log];
   const armedEffects: ArmedEffects = { ...state.armedEffects };
-  const roundModifiers = state.roundModifiers;
 
   const { rng, consumedThisCall } = resumeRng(state.seed, state.rngCounter);
 
@@ -598,6 +637,15 @@ export function advanceRound(state: CombatState): CombatState {
   const isMissilePhase = state.round === 0;
   const phase: 'missile' | 'cannon' = isMissilePhase ? 'missile' : 'cannon';
   const roundNumber = state.round;
+
+  // Iteration 28 (Alpha doctrine): derived fresh every round from the
+  // fight-long `alphaDoctrineActive` flag, not part of the "armed actives"
+  // bag freshRoundModifiers() resets — true for the opening exchange only
+  // (the missile phase and the first cannon round).
+  const roundModifiers: RoundModifiers = {
+    ...state.roundModifiers,
+    playerBaseShieldZeroed: state.alphaDoctrineActive && roundNumber <= 1,
+  };
 
   log.push({ kind: 'phase-start', phase, round: roundNumber });
 
@@ -627,6 +675,35 @@ export function advanceRound(state: CombatState): CombatState {
     if (winner) break;
   }
 
+  // Iteration 28 (Alpha doctrine): the missile phase's normal activations
+  // are done — now every alive player ship with cannons fires them too,
+  // same phase, same round (0). Activation order is initiative-derived
+  // (the same `order`, filtered to player ships still standing).
+  if (!winner && isMissilePhase && state.alphaDoctrineActive) {
+    const alphaShips = order.filter((s) => s.side === 'player');
+    if (alphaShips.some((s) => isAlive(s) && s.stats.cannons.length > 0)) {
+      log.push({ kind: 'part-effect', text: 'Alpha doctrine — cannons fire early, alongside the opening missiles.' });
+    }
+    for (const ship of alphaShips) {
+      if (!isAlive(ship) || ship.stats.cannons.length === 0) continue;
+      winner = fireShip(
+        ship,
+        'cannon',
+        roundNumber,
+        rng,
+        log,
+        opponentsOf,
+        roundModifiers,
+        armedEffects,
+        flakState,
+        state.targetingStance,
+        state.priorityTargetIndex,
+        checkWinner,
+      );
+      if (winner) break;
+    }
+  }
+
   // Iteration 17 ("Outspeed"): a ≥OUTSPEED_GAP initiative advantage over the
   // fastest surviving opponent earns one extra, cannons-only activation —
   // missile phase never qualifies. Evaluated once, right here, after the
@@ -637,7 +714,7 @@ export function advanceRound(state: CombatState): CombatState {
   // end the fight on round 30, instead of a stalemate being declared with an
   // available finishing blow left unfired.
   if (!winner && !isMissilePhase) {
-    const outspeeders = computeOutspeedShips(playerShips, enemyShips, roundModifiers.initiativeBonus);
+    const outspeeders = computeOutspeedShips(playerShips, enemyShips, roundModifiers.initiativeBonus, state.playerOutspeedGap);
     for (const ship of outspeeders) {
       // A ship with no cannons has nothing to do with a bonus activation
       // (missiles don't fire in a cannon round) — skip it silently rather
@@ -682,6 +759,8 @@ export function advanceRound(state: CombatState): CombatState {
     priorityTargetIndex: state.priorityTargetIndex,
     log,
     winner: winner ?? undefined,
+    playerOutspeedGap: state.playerOutspeedGap,
+    alphaDoctrineActive: state.alphaDoctrineActive,
   };
 }
 
@@ -694,7 +773,12 @@ export function advanceRound(state: CombatState): CombatState {
 // state on every render is intentional: the badge should react instantly
 // when the enemy's last fast ship dies, or when an active gets armed.
 export function outspeedingShipIndices(state: CombatState): { player: number[]; enemy: number[] } {
-  const qualifying = computeOutspeedShips(state.playerShips, state.enemyShips, state.roundModifiers.initiativeBonus);
+  const qualifying = computeOutspeedShips(
+    state.playerShips,
+    state.enemyShips,
+    state.roundModifiers.initiativeBonus,
+    state.playerOutspeedGap,
+  );
   return {
     player: qualifying.filter((s) => s.side === 'player').map((s) => s.index),
     enemy: qualifying.filter((s) => s.side === 'enemy').map((s) => s.index),
@@ -730,7 +814,7 @@ export function incomingFirePreview(state: CombatState): FirePreview {
   const outspeedingEnemies =
     phase === 'cannon'
       ? new Set(
-          computeOutspeedShips(state.playerShips, state.enemyShips, state.roundModifiers.initiativeBonus)
+          computeOutspeedShips(state.playerShips, state.enemyShips, state.roundModifiers.initiativeBonus, state.playerOutspeedGap)
             .filter((s) => s.side === 'enemy')
             .map((s) => s.index),
         )

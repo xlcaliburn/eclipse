@@ -3,6 +3,7 @@ import type { CommanderId } from '../game/commanders';
 import { FRAMES } from '../game/frames';
 import type { FrameId } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
+import type { ProtocolId } from '../game/protocols';
 import {
   commodityLotBuyCost,
   commodityLotCap,
@@ -30,6 +31,7 @@ interface ShopScreenProps {
   fleet: PlayerShipState[];
   inventory: PartId[];
   commanderId?: CommanderId;
+  protocols?: ProtocolId[];
   // Iteration 20 (commodity runs): whether the fleet's currently-carried lot
   // (if any) was bought at an earlier station than this one — the shop
   // itself doesn't know the global column math, so App.tsx precomputes it.
@@ -55,6 +57,7 @@ export function ShopScreen({
   fleet,
   inventory,
   commanderId,
+  protocols,
   commodityLotSellable,
   onBuyPart,
   onSellPart,
@@ -71,7 +74,7 @@ export function ShopScreen({
 }: ShopScreenProps) {
   const [selectedShipIndex, setSelectedShipIndex] = useState(0);
   const safeSelectedIndex = Math.min(selectedShipIndex, fleet.length - 1);
-  const currentFleetCap = fleetCap(commanderId);
+  const currentFleetCap = fleetCap(commanderId, protocols);
   const fleetFull = fleet.length >= currentFleetCap;
   const effectiveRerollCost = rerollCost(commanderId);
   const lotsCarried = fleet.filter((s) => s.equipped.includes(COMMODITY_LOT_PART_ID)).length;
@@ -102,7 +105,7 @@ export function ShopScreen({
             // everyone else's offers are unaffected. Overriding just the
             // displayed cost on a copy of the Part reuses PartCard's
             // existing rendering/disabled logic untouched.
-            const cost = partCost(partId, commanderId);
+            const cost = partCost(partId, commanderId, protocols);
             const part = { ...getPart(partId), cost };
             return (
               <PartCard
@@ -185,7 +188,7 @@ export function ShopScreen({
         <div className="shop-screen__frames">
           {frameOffers.map((frameId) => {
             const frame = FRAMES[frameId];
-            const cost = frameCost(frame.cost, frameId, commanderId);
+            const cost = frameCost(frame.cost, frameId, commanderId, protocols);
             return (
               <button
                 key={frame.id}
@@ -215,6 +218,7 @@ export function ShopScreen({
         onSellPart={onSellPart}
         onScuttle={onScuttle}
         commanderId={commanderId}
+        protocols={protocols}
       />
 
       <div className="shop-screen__footer">

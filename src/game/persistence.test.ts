@@ -151,6 +151,25 @@ describe('save / load roundtrip (iteration 9.2)', () => {
     expect(loadRun(storage)).toBeNull();
   });
 
+  it('a save mid-protocol-draft roundtrips (iteration 28)', () => {
+    const storage = fakeStorage();
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'ghost-fleet-protocol'],
+    };
+    expect(saveRun(state, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(state);
+  });
+
+  it('loadRun discards a protocol-draft-phase save missing protocolOffers (iteration 28)', () => {
+    const storage = fakeStorage();
+    const state: RunState = { ...initialRunState(), phase: 'protocol-draft', act: 2 }; // no protocolOffers
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state }));
+    expect(loadRun(storage)).toBeNull();
+  });
+
   it('loadRun discards a same-version save missing `heat` (added in v5, always required)', () => {
     const storage = fakeStorage();
     const { heat: _drop, ...withoutHeat } = initialRunState();
