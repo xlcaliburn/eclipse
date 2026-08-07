@@ -322,7 +322,7 @@ export interface RunState {
   currentEnemy?: EnemyDef; // picked once, when a combat/elite/boss node is entered
   combat?: CombatState; // in-progress or just-finished fight
   pendingReward?: RewardSummary;
-  shopOffers?: PartId[]; // parts currently for sale
+  shopOffers?: PartId[]; // parts currently for sale — a shipyard visit sets this to [] (no parts, still "present")
   shopFrameOffers?: Exclude<FrameId, 'cruiser'>[]; // ships currently for sale — a random subset, drawn per visit
   // 2026-08-06: rerolls escalate within a single shop visit (1cr, 2cr,
   // 3cr, ...) instead of a flat price — this counts how many have already
@@ -330,6 +330,16 @@ export interface RunState {
   // (PICK_NODE), so the price resets on the next visit rather than
   // punishing the whole run. Absent/0 means "no rerolls used yet."
   shopRerollCount?: number;
+  // Iteration 33 (2026-08-07): which trade-station flavor this shop visit
+  // is — set in PICK_NODE from the node's type ('shop' -> 'store',
+  // 'shipyard' -> 'shipyard'), cleared on LEAVE_SHOP. Absent means a save
+  // from before this field existed, which was always a 'store' (the only
+  // kind that existed then) — every reader falls back to that.
+  shopKind?: 'store' | 'shipyard';
+  // Iteration 33: the shipyard's single purchasable upgrade this visit,
+  // drawn on arrival like shopFrameOffers, cleared on purchase or on
+  // LEAVE_SHOP. Only ever set when shopKind === 'shipyard'.
+  shopUpgradeOffer?: UpgradeId;
   currentEvent?: CurrentEventState;
   lastEventId?: EventId; // avoids repeating the same event back-to-back
   // Iteration 14.3: set by the defector's "take them aboard" choice. The

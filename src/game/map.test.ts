@@ -5,18 +5,19 @@ import { actColumns, BOSS_COLUMN, generateMap, getNode, LANE_COLUMNS, nodesConne
 import type { CargoTag } from './map';
 
 // Mirrors map.ts's ACT1_QUOTAS/ACT2_QUOTAS — see that file's comment for
-// why iteration 20 changed columns 1 and 9.
+// why iteration 20 changed columns 1 and 9, and iteration 33 for why
+// columns 5 and 9 became 'shipyard'.
 const ACT1_QUOTAS = [
   ['opener'],
   ['combat', 'combat', 'event'],
   ['combat', 'combat', 'event'],
   ['shop', 'combat', 'event'],
   ['elite', 'combat', 'event'],
-  ['repair', 'shop', 'combat'],
+  ['repair', 'shipyard', 'combat'],
   ['repair', 'combat', 'event'],
   ['elite', 'combat', 'event'],
   ['shop', 'elite', 'combat'],
-  ['shop', 'elite', 'combat'],
+  ['shipyard', 'elite', 'combat'],
 ];
 
 const ACT2_QUOTAS = [

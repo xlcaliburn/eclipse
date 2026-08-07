@@ -183,7 +183,7 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId, protocols }:
       {/* Iteration 19 (telegraphs): their side of the same story. */}
       {missileVolley && (
         <p className="hint enemy-panel__volley">
-          Their alpha strike: <strong>{missileVolley.dice}</strong> missile {missileVolley.dice === 1 ? 'die' : 'dice'},
+          Their missiles: <strong>{missileVolley.dice}</strong> {missileVolley.dice === 1 ? 'die' : 'dice'},
           up to <strong>{missileVolley.damage}</strong> dmg — opening on {missileVolley.targetNames.join(', ')}.
           {missileVolley.flak > 0 &&
             ` Your flak downs the first ${missileVolley.flak} ${missileVolley.flak === 1 ? 'die' : 'dice'}.`}

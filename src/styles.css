@@ -935,6 +935,12 @@ h1, h2, h3 {
   border-color: var(--danger);
 }
 
+/* Iteration 33: a distinct accent from the plain store, so the chart
+   telegraphs "the good one" at a glance — the whole point of the split. */
+.map-node--shipyard {
+  border-color: var(--warning);
+}
+
 .map-node--boss {
   width: 92px;
   height: 92px;
@@ -1159,18 +1165,6 @@ h1, h2, h3 {
 .card-tile--deep-scan {
   cursor: default;
 }
-
-.card-tile__lane-buttons {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.card-tile__lane-buttons .shop-button {
-  padding: 4px 8px;
-  font-size: 11px;
-}
-
 
 .modal-backdrop {
   position: fixed;
@@ -2506,6 +2500,15 @@ h1, h2, h3 {
   font-weight: 600;
 }
 
+/* Iteration 33: the general store's used-hull rack — a small badge above
+   the name, same visual weight as a part's type label. */
+.frame-card__badge {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
 .frame-card__desc {
   font-size: 12px;
   color: var(--text-dim);
@@ -2917,24 +2920,6 @@ h1, h2, h3 {
   gap: 12px;
   justify-content: center;
   margin-top: 16px;
-}
-
-/* Same quiet-text-link treatment as .setup-screen__customize-link — a
-   secondary path, not competing with the primary run buttons above it. */
-.landing-screen__tutorial-link {
-  display: block;
-  margin: 12px auto 0;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 12px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.landing-screen__tutorial-link:hover {
-  color: var(--text);
 }
 
 /* Seed sharing (iteration 26) */

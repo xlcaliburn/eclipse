@@ -1,13 +1,15 @@
 import type { CommanderId } from '../game/commanders';
 import { OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
 import { getFrame } from '../game/frames';
-import { getPart } from '../game/parts';
+import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import { hasProtocol } from '../game/protocols';
 import type { ProtocolId } from '../game/protocols';
+import { REPAIR_COST_PER_HP } from '../game/reducer';
 import { deriveFleetStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import { PartCard } from './PartCard';
+import { ProtocolRow } from './SettingsScreen';
 import { StatBar } from './StatBar';
 import { FrameSilhouette } from './ShipSilhouette';
 
@@ -42,6 +44,11 @@ interface FleetPanelProps {
   // +2 slots, etc.) shows here the same way the real fight/build sees it —
   // same reasoning as commanderId's ace bonus above.
   protocols?: ProtocolId[];
+  // 2026-08-06: shop only — lets a damaged ship's Repair button show its
+  // cost and disable when unaffordable. Undefined in Prep (no onBuyRepair
+  // there either), same optional-prop-gated pattern as onScuttle/onSellPart.
+  credits?: number;
+  onBuyRepair?: (shipIndex: number) => void; // shop only — pay to fully heal a ship's damage
 }
 
 export { playerShipLabel };
@@ -60,6 +67,8 @@ export function FleetPanel({
   collapsibleParts,
   commanderId,
   protocols,
+  credits,
+  onBuyRepair,
 }: FleetPanelProps) {
   const selectedShip = fleet[selectedShipIndex];
   const selectedHasRoom = selectedShip
@@ -81,6 +90,13 @@ export function FleetPanel({
       <button type="button" className="info-dot" title={instructions} aria-label={instructions}>
         i
       </button>
+
+      {/* Iteration 29.4: same readout as Settings/FleetOverlay — a picked
+          protocol is a permanent, silent hook everywhere else, easy to
+          forget you have by the time you're back here fitting ships. */}
+      {protocols?.map((id) => (
+        <ProtocolRow key={id} protocolId={id} />
+      ))}
 
       {fleet.map((ship, shipIndex) => {
         const stats = deriveFleetStats([ship], commanderId, protocols)[0];
@@ -119,6 +135,19 @@ export function FleetPanel({
                   </span>
                 )}
               </span>
+              {onBuyRepair && ship.damage > 0 && (
+                <button
+                  type="button"
+                  className="shop-button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onBuyRepair(shipIndex);
+                  }}
+                  disabled={credits !== undefined && credits < ship.damage * REPAIR_COST_PER_HP}
+                >
+                  Repair ({ship.damage * REPAIR_COST_PER_HP} cr)
+                </button>
+              )}
               {onScuttle && ship.frameId !== 'cruiser' && (
                 <button
                   type="button"
@@ -156,7 +185,7 @@ export function FleetPanel({
                     />
                   ))}
                   {Array.from({ length: emptySlots }).map((_, i) => (
-                    <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty hardpoint" />
+                    <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty inventory slot" />
                   ))}
                 </div>
               );
@@ -212,7 +241,11 @@ export function FleetPanel({
                 onClick={selectedHasRoom ? () => onEquip(selectedShipIndex, partId) : undefined}
                 disabled={!selectedHasRoom}
               />
-              {onSellPart && (
+              {/* A commodity lot has no half-cost salvage value (SELL_PART
+                  refuses it outright, see reducer.ts) — equip it onto a
+                  ship and SELL_COMMODITY_LOT is the only way to cash it in,
+                  so no Sell button here for it. */}
+              {onSellPart && partId !== COMMODITY_LOT_PART_ID && (
                 <button
                   type="button"
                   className="shop-button"

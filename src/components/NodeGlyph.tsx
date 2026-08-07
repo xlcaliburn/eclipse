@@ -7,6 +7,10 @@ const NODE_GLYPHS: Record<NodeType, React.ReactNode> = {
   combat: <polygon points="50,15 82,85 18,85" />,
   elite: <polygon points="50,4 61,37 96,37 68,58 79,92 50,71 21,92 32,58 4,37 39,37" />,
   shop: <polygon points="50,8 92,50 50,92 8,50" />,
+  // Iteration 33: a hexagon reads as "bigger, more structured" than the
+  // store's plain diamond at a glance — the whole point of splitting the
+  // node type is that the chart telegraphs which is which before a click.
+  shipyard: <polygon points="50,6 90,28 90,72 50,94 10,72 10,28" />,
   repair: (
     <>
       <rect x="40" y="8" width="20" height="84" />

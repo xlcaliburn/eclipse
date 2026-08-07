@@ -46,7 +46,6 @@ interface LandingScreenProps {
   dailyResult: DailyRecord | null;
   onStartDaily: () => void;
   onContinueDaily: () => void;
-  onOpenTutorial: () => void;
   // Iteration 26: Slay-the-Spire-style seed sharing — a run's seed (see
   // seedCode.ts) is a shareable 7-character code; entering someone else's
   // code (or your own from a past run) starts an identical sector: same
@@ -74,7 +73,6 @@ export function LandingScreen({
   dailyResult,
   onStartDaily,
   onContinueDaily,
-  onOpenTutorial,
   onNewRunFromSeed,
 }: LandingScreenProps) {
   const [copied, setCopied] = useState(false);
@@ -152,9 +150,6 @@ export function LandingScreen({
           {hasSave ? 'New run' : 'Start run'}
         </button>
       </div>
-      <button type="button" className="landing-screen__tutorial-link" onClick={onOpenTutorial}>
-        How to play — dice, computers, piloting
-      </button>
 
       {/* Iteration 26 (placeholder + input fixed in 27): replay a specific
           sector — the same seed always generates the same map, bosses,

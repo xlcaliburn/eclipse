@@ -187,7 +187,6 @@ function App() {
             dailyResult={todayRecord?.outcome ? todayRecord : null}
             onStartDaily={handleStartDaily}
             onContinueDaily={handleContinueDaily}
-            onOpenTutorial={() => setTutorialOpen(true)}
             onNewRunFromSeed={handleNewRunFromSeed}
           />
         </div>
@@ -349,6 +348,8 @@ function App() {
               credits={state.credits}
               offers={state.shopOffers}
               frameOffers={state.shopFrameOffers}
+              kind={state.shopKind}
+              upgradeOffer={state.shopUpgradeOffer}
               fleet={state.fleet}
               inventory={state.inventory}
               commanderId={state.commanderId}
@@ -359,9 +360,11 @@ function App() {
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}
               onBuyShip={(frameId) => dispatch({ type: 'BUY_SHIP', frameId })}
               onScuttle={(shipIndex) => dispatch({ type: 'SCUTTLE_SHIP', shipIndex })}
-              onBuyCommodityLot={(shipIndex) => dispatch({ type: 'BUY_COMMODITY_LOT', shipIndex })}
+              onBuyCommodityLot={() => dispatch({ type: 'BUY_COMMODITY_LOT' })}
               onSellCommodityLot={() => dispatch({ type: 'SELL_COMMODITY_LOT' })}
               onBuyMercenary={() => dispatch({ type: 'BUY_MERCENARY' })}
+              onBuyRepair={(shipIndex) => dispatch({ type: 'BUY_REPAIR', shipIndex })}
+              onBuyUpgrade={(shipIndex) => dispatch({ type: 'BUY_UPGRADE', shipIndex })}
               onReroll={() => dispatch({ type: 'REROLL' })}
               onLeave={() => dispatch({ type: 'LEAVE_SHOP' })}
               onViewMap={() => setSurface('chart')}

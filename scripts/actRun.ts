@@ -169,7 +169,12 @@ function chooseNode(options: MapNode[], damageRatio: number, rng: () => number, 
       case 'repair':
         base = damageRatio > 0.4 ? 100 : 20;
         break;
+      // Iteration 33: the sim doesn't model the store/shipyard split (its
+      // shopping policy is wishlist-driven, not "route 3 columns for the
+      // yard") — both score as a shop visit here. Honest limitation, not a
+      // measurement of the real routing incentive the split is meant to add.
       case 'shop':
+      case 'shipyard':
         base = 80;
         break;
       case 'combat':
@@ -193,7 +198,7 @@ function chooseNode(options: MapNode[], damageRatio: number, rng: () => number, 
     switch (commanderId) {
       case 'merchant':
         // "shop-to-shop, skip marginal fights, buy the boss fight."
-        if (n.type === 'shop') base += 30;
+        if (n.type === 'shop' || n.type === 'shipyard') base += 30;
         if (n.type === 'combat') base -= 15;
         break;
       case 'engineer':
@@ -457,6 +462,11 @@ export function simulateRun(seed: number, commanderId?: CommanderId): RunOutcome
 
     switch (node.type) {
       case 'shop':
+      case 'shipyard':
+        // Iteration 33: substituting the store/shipyard split's hull-and-
+        // upgrade shopping for the wishlist policy isn't modeled — this
+        // sim measures "does the fleet reach the boss fed", not "does the
+        // routing incentive work", so both node types spend the same way.
         shop(here);
         break;
       case 'repair':

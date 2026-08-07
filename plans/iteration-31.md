@@ -2,7 +2,10 @@
 
 > **Status: specced, not implemented.** Placement decision made with the
 > user 2026-08-06: the Foundry is a section in every trade station (not an
-> act-2-only section, not a new map node type). 31-M3 depends on iteration
+> act-2-only section, not a new map node type). **Superseded 2026-08-07 by
+> iteration 33** (general store / shipyard split): the Foundry renders in
+> shipyard nodes only — "can also upgrade" is the shipyard's identity.
+> Mechanics/pricing below are unchanged. 31-M3 depends on iteration
 > 30 (counter-protocols) being implemented first — see Sequencing.
 
 Playtester report: too much money late-run. Iteration 20/22.6 fixed the

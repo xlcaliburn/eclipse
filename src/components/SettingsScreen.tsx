@@ -30,7 +30,10 @@ function settingsBody(seed: number | null, protocols: ProtocolId[] | undefined) 
 // picked once, columns ago) is otherwise easy to forget you have. Reuses
 // the tier-accent classes ProtocolDraftScreen already defines rather than
 // inventing a second color scheme for the same three tiers.
-function ProtocolRow({ protocolId }: { protocolId: ProtocolId }) {
+// Exported (iteration 29.4) so FleetOverlay/FleetScreen can show the same
+// readout — a player checking "what do I have" in the fleet view shouldn't
+// have to go find Settings to remember which protocol they picked.
+export function ProtocolRow({ protocolId }: { protocolId: ProtocolId }) {
   const protocol = getProtocol(protocolId);
   return (
     <div className={`settings-row protocol-row protocol-row--${protocol.tier}`}>

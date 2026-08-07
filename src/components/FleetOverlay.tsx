@@ -4,6 +4,7 @@ import { deriveStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import { PartCard } from './PartCard';
+import { ProtocolRow } from './SettingsScreen';
 
 interface FleetOverlayProps {
   fleet: PlayerShipState[];
@@ -20,6 +21,13 @@ interface FleetOverlayProps {
 function fleetBody(fleet: PlayerShipState[], inventory: PartId[], protocols?: ProtocolId[]) {
   return (
     <>
+      {/* Iteration 29.4: surfaced here too, not just Settings — a player
+          checking "what do I have" shouldn't have to go elsewhere to
+          remember which protocol they picked, columns ago. */}
+      {protocols?.map((id) => (
+        <ProtocolRow key={id} protocolId={id} />
+      ))}
+
       {fleet.map((ship, shipIndex) => {
         const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols);
         const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols) - ship.equipped.length;
@@ -46,7 +54,7 @@ function fleetBody(fleet: PlayerShipState[], inventory: PartId[], protocols?: Pr
                 <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
               ))}
               {Array.from({ length: emptySlots }).map((_, i) => (
-                <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty hardpoint" />
+                <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty inventory slot" />
               ))}
             </div>
           </div>

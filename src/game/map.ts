@@ -1,7 +1,14 @@
 import { BOSS_IDS, FINAL_BOSS_IDS } from './enemies';
 import type { BossId, FinalBossId } from './enemies';
 
-export type NodeType = 'combat' | 'elite' | 'shop' | 'repair' | 'event' | 'boss' | 'opener';
+// 2026-08-07 (iteration 33): 'shipyard' is a second trade-station flavor,
+// not a variant of 'shop' — see reducer.ts's PICK_NODE (both resolve to
+// the same 'shop' phase, distinguished by RunState.shopKind) and
+// ShopScreen.tsx (branches its whole layout on that field). Kept as its
+// own NodeType (not a `shop` + a kind flag here) so the chart, fog, and
+// glyph code all switch on it the same structural way they already switch
+// on every other node type.
+export type NodeType = 'combat' | 'elite' | 'shop' | 'shipyard' | 'repair' | 'event' | 'boss' | 'opener';
 
 // Iteration 15.1: every plain 'combat' node gets a typed reward tag, seeded
 // at map generation — the fight itself is unchanged, only what winning it
@@ -100,17 +107,25 @@ export const BOSS_COLUMN = LANE_COLUMNS;
 // draw for the rest of map generation and the run. Downstream seeded test
 // expectations were updated alongside this change, not preserved — the
 // old numbers described the old content, not a contract.
+// Iteration 33 (2026-08-07): two of the four 'shop' slots became
+// 'shipyard' — col 3 and col 8 stay the general store (parts, war assets,
+// repairs, 2 second-hand hulls), col 5 and col 9 became the shipyard (4
+// pristine hulls + the upgrade bay, no parts). Swapping a node's TYPE
+// without changing the column's type COMPOSITION consumes zero extra rng
+// calls (only 'combat' entries draw a cargo tag — see generateActColumns
+// below), so this edit is stream-neutral: existing seeds regenerate an
+// identical map, just with two of their shop icons relabeled.
 const ACT1_QUOTAS: NodeType[][] = [
   ['opener'],
   ['combat', 'combat', 'event'],
   ['combat', 'combat', 'event'],
   ['shop', 'combat', 'event'],
   ['elite', 'combat', 'event'],
-  ['repair', 'shop', 'combat'],
+  ['repair', 'shipyard', 'combat'],
   ['repair', 'combat', 'event'],
   ['elite', 'combat', 'event'],
   ['shop', 'elite', 'combat'],
-  ['shop', 'elite', 'combat'],
+  ['shipyard', 'elite', 'combat'],
 ];
 
 const ACT2_QUOTAS: NodeType[][] = [
