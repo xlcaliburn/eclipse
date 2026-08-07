@@ -54,6 +54,7 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
           collapsibleParts
           commanderId={state.commanderId}
           protocols={state.protocols}
+          counterProtocol={state.counterProtocol}
         />
       </div>
 

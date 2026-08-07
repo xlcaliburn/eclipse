@@ -1,3 +1,4 @@
+import type { CounterProtocolId } from './counterProtocols';
 import type { EscalationId, ScheduledEscalation } from './escalations';
 import type { EnemyDef, EnemyGroup, ShipStats } from './types';
 
@@ -638,6 +639,61 @@ export function applyEscalations(enemy: EnemyDef, col: number, escalations: Sche
   };
 }
 
+// --- Counter-protocols (iteration 30) --------------------------------------
+// Act 2's answer to the act-1 boss's protocol draft — built the same way as
+// applyEscalations above (clone groups, mutate stats, badge what changed),
+// applied to every group including a formation's centerpiece EXCEPT for
+// 'attack-wings' (reuses applyEscalations' squadrons/centerpiece-guard logic
+// so a solo boss is never doubled — see isFormationCenterpiece above). Pure
+// stat data on fields the combat engine already honors on the enemy side —
+// no combatEngine.ts changes, per the design's scope discipline.
+export function applyCounterProtocol(enemy: EnemyDef, counterId: CounterProtocolId): EnemyDef {
+  const groups = enemy.groups.map((g) => ({
+    ...g,
+    stats: { ...g.stats, cannons: g.stats.cannons.map((c) => ({ ...c })) },
+    count: g.count,
+  }));
+
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    switch (counterId) {
+      case 'hardened-veterans':
+        g.stats.hp += 1;
+        break;
+      case 'targeting-arrays':
+        g.stats.computer += 1;
+        break;
+      case 'evasive-doctrine':
+        g.stats.shield += 1;
+        break;
+      case 'flak-screens':
+        g.stats.flak = (g.stats.flak ?? 0) + 1;
+        break;
+      case 'piercing-munitions':
+        // Per-cannon (not the ship-level shieldPierce field, which would
+        // also pierce missiles) — matches the counter's own "every enemy
+        // cannon" wording.
+        g.stats.cannons = g.stats.cannons.map((c) => ({ ...c, shieldPierce: (c.shieldPierce ?? 0) + 1 }));
+        break;
+      case 'overdrive-signals':
+        g.stats.initiative += 2;
+        break;
+      case 'ablative-plating':
+        g.stats.reactiveArmor = (g.stats.reactiveArmor ?? 0) + 1;
+        break;
+      case 'overcharged-munitions':
+        g.stats.cannons = g.stats.cannons.map((c) => ({ ...c, damage: c.damage + 1 }));
+        break;
+      case 'attack-wings':
+        if (isFormationCenterpiece(enemy, i)) break;
+        g.count = Math.max(2, g.count + 1);
+        break;
+    }
+  }
+
+  return { ...enemy, groups, appliedCounter: counterId };
+}
+
 // --- Boss variety (iteration 5) -------------------------------------------
 // Three bosses with strongly divergent counters, chosen once per run,
 // seeded at map generation (see map.ts). Kept separate from GAUNTLET so
@@ -746,6 +802,21 @@ export const FINAL_BOSS_IDS: FinalBossId[] = ['titan', 'empress', 'citadel'];
 // A final boss's centerpiece is always group 0 — the silhouette heuristic
 // in ShipSilhouette.tsx relies on that ordering to tell a flagship from
 // its escorts.
+//
+// 2026-08-07 (iteration 31-M3): re-tuned against the "act-2 endgame fleet"
+// fixture (scripts/balance.ts) — the first time the trio was measured
+// against anything post-protocols/post-fusions. Baseline (pre-retune,
+// hardened-veterans silver counter + twin-linked mounts, 5000 sims):
+// endgame fleet 0%, even the pre-fusion "strong fleet" with no counter at
+// all 0%. The `computer` stat turned out to be the dominant lever by far —
+// each point is worth roughly 2x hit-chance against a shield this high
+// (roll + computer − shield >= 6 is a hard threshold, not a smooth curve),
+// so `shield` needed to come down before `computer`/`hp` tuning could
+// move the needle at all. hp 16->12, shield 3->0, computer 3->1 (main);
+// honor guard computer 2->1 (hp/shield/cannons untouched). Measured
+// after: endgame fleet 54% (in the 25-55% target band), pre-fusion strong
+// fleet (no counter) 15% — a real fight, not a wall, for a merely-solid
+// finish.
 const TITAN: EnemyDef = {
   id: 'titan',
   name: 'Titan',
@@ -756,9 +827,9 @@ const TITAN: EnemyDef = {
       count: 1,
       stats: {
         initiative: 1,
-        hp: 16,
-        computer: 3,
-        shield: 3,
+        hp: 12,
+        computer: 1,
+        shield: 0,
         cannons: [
           { diceCount: 4, damage: 2 },
           { diceCount: 2, damage: 4 },
@@ -772,7 +843,7 @@ const TITAN: EnemyDef = {
       stats: {
         initiative: 2,
         hp: 4,
-        computer: 2,
+        computer: 1,
         shield: 1,
         cannons: [{ diceCount: 1, damage: 2 }],
         missiles: [],
@@ -781,11 +852,19 @@ const TITAN: EnemyDef = {
   ],
 };
 
+// 2026-08-07 (iteration 31-M3): the opposite problem from Titan/Citadel —
+// baseline was already too EASY against the endgame fixture (74%, above
+// the 25-55% band) despite never having been measured before. Action
+// economy (ship count), not stats, is the lever per this boss's identity
+// — mindful of iteration 22.3's low-HP-per-ship-formation lesson, hp/comp
+// per ship are untouched; one more ship (6->7) is the entire change.
+// Measured after: endgame fleet 44%, pre-fusion strong fleet 53% (both
+// comfortably inside band/floor — this boss was never the hard case).
 const HIVE_EMPRESS: EnemyDef = {
   id: 'empress',
   name: 'Hive Empress',
   blurb: 'Demands flak walls, arc projectors, and initiative — many small dice, doubled.',
-  groups: solo('empress', 6, {
+  groups: solo('empress', 7, {
     initiative: 4,
     hp: 2,
     computer: 1,
@@ -795,6 +874,24 @@ const HIVE_EMPRESS: EnemyDef = {
   }),
 };
 
+// 2026-08-07 (iteration 31-M3): same failure mode as Titan and the same
+// root cause — shield 5 put every attack roll below the hard hit
+// threshold except a natural 6 (roll + computer − shield >= 6 is
+// unreachable at shield 5 with any survivable computer stat), so the
+// fight was unwinnable regardless of hp/damage tuning until shield came
+// down. Kept strictly above the picket's shield 1 (dropping to 1 would
+// have matched it exactly, erasing "its pickets you can actually hit" —
+// the whole point of fielding a lower-shield screen at all; see
+// enemies.test.ts's citadel screen test). flak is untouched in effect
+// against this fixture (the endgame fleet carries no missiles — matches
+// the boss's own blurb, "cannons, not missiles"), lowered anyway to keep
+// it proportionate to the rest of the cut. Pickets fully unchanged — 2 of
+// them, not 1, is what keeps the fight a real fight; a single-picket
+// version tested far too easy, 78-86%. hp 20->12, shield 5->2, computer
+// 2->1, flak 3->2. Measured after: endgame fleet 53%, pre-fusion strong
+// fleet (no counter) 9% — the one boss of the trio that couldn't clear
+// the other two's 10% floor without re-opening the shield-vs-picket
+// tradeoff above; see scripts/balance.ts's floor-check comment.
 const VOID_CITADEL: EnemyDef = {
   id: 'citadel',
   name: 'Void Citadel',
@@ -806,15 +903,15 @@ const VOID_CITADEL: EnemyDef = {
       count: 1,
       stats: {
         initiative: 0,
-        hp: 20,
-        computer: 2,
-        shield: 5,
+        hp: 12,
+        computer: 1,
+        shield: 2,
         cannons: [
           { diceCount: 2, damage: 4 },
           { diceCount: 2, damage: 2 },
         ],
         missiles: [],
-        flak: 3,
+        flak: 2,
       },
     },
     {

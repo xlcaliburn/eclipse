@@ -31,12 +31,20 @@ export interface ScheduledEscalation {
   revealed: boolean;
 }
 
-// Iteration 8: four escalations per run — two in act 1 (after local columns
-// 4 and 7) plus two more in act 2 (after the same local columns), all
-// drawn without replacement from the 5-entry pool so a full run samples
-// nearly the whole escalation kit. Continues whatever rng stream the caller
-// passes in (the reducer threads the same mulberry32 instance used for map
-// generation, so the whole run's setup is deterministic from one seed).
+// Iteration 8: escalations per run, drawn without replacement from the
+// 5-entry pool. Continues whatever rng stream the caller passes in (the
+// reducer threads the same mulberry32 instance used for map generation, so
+// the whole run's setup is deterministic from one seed).
+//
+// Iteration 32 (2026-08-07): a 5th draw (act 2's third wave, below) means
+// every draw-without-replacement now exhausts the entire 5-entry pool —
+// a full run gets ALL FIVE escalations, always, not "nearly the whole kit"
+// as before this iteration (4 of 5, one omitted at random each run). The
+// only remaining variance is which escalation lands at which of the five
+// (act, column) slots. Noted here since it's a real behavior change the
+// plan's own wording didn't call out; not treated as a bug — five
+// escalations feels proportionate to a run that's now 22 lane columns
+// long instead of 20, and the pool was never designed to be scarce.
 //
 // Iteration 22: landing columns shifted from 3/6 to 4/7 to stay aligned
 // with enemies.ts's poolBand and veterancyBonus, which shifted for the same
@@ -45,6 +53,13 @@ export interface ScheduledEscalation {
 // scripts/actRun.ts's local drawAct1Escalations mirrors these numbers by
 // hand (it can't import a full RunState-driven schedule) — keep both in
 // sync.
+//
+// Iteration 32 (2026-08-07): act 2 grew from 10 lane columns to 12 (see
+// map.ts's ACT2_QUOTAS) — room for a third wave where 10 only held two.
+// Act 1 is untouched (still 2 waves; it didn't grow). Landing at column 9
+// (not 10 or 11): the trio should read as "escalating toward the boss,"
+// not "arrives with it" — the same one-column-of-breathing-room reasoning
+// that put the second wave at 7, three shy of act 1's old col-10 boss.
 export function drawEscalationSchedule(rng: () => number): ScheduledEscalation[] {
   const pool = [...ESCALATIONS];
   const pick = (): EscalationId => {
@@ -56,5 +71,6 @@ export function drawEscalationSchedule(rng: () => number): ScheduledEscalation[]
     { id: pick(), act: 1, landsAfterColumn: 7, revealed: false },
     { id: pick(), act: 2, landsAfterColumn: 4, revealed: false },
     { id: pick(), act: 2, landsAfterColumn: 7, revealed: false },
+    { id: pick(), act: 2, landsAfterColumn: 9, revealed: false },
   ];
 }

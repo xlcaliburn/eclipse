@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { setMotionSetting } from '../motionPreference';
 import { setSoundSetting } from '../soundPreference';
 import { playSfx } from '../audio';
+import { getCounterProtocol } from '../game/counterProtocols';
+import type { CounterProtocolId } from '../game/counterProtocols';
 import { getProtocol } from '../game/protocols';
 import type { ProtocolId } from '../game/protocols';
 import { seedToCode } from '../game/seedCode';
@@ -11,7 +13,7 @@ import { useSoundSetting } from './useSoundSetting';
 // The settings body, shared by the mobile tab and the desktop modal below —
 // same reasoning (and same shape) as FleetOverlay/FleetScreen. `seed` is
 // null for the daily run (see SeedRow) — everything else is unconditional.
-function settingsBody(seed: number | null, protocols: ProtocolId[] | undefined) {
+function settingsBody(seed: number | null, protocols: ProtocolId[] | undefined, counterProtocol: CounterProtocolId | undefined) {
   return (
     <>
       <MotionSetting />
@@ -19,6 +21,7 @@ function settingsBody(seed: number | null, protocols: ProtocolId[] | undefined) 
       {protocols?.map((id) => (
         <ProtocolRow key={id} protocolId={id} />
       ))}
+      {counterProtocol && <CounterProtocolRow counterProtocolId={counterProtocol} />}
       {seed !== null && <SeedRow seed={seed} />}
     </>
   );
@@ -44,6 +47,25 @@ export function ProtocolRow({ protocolId }: { protocolId: ProtocolId }) {
         </h3>
         <p className="settings-row__hint">{protocol.blurb}</p>
         {protocol.cost && <p className="settings-row__hint protocol-row__cost">Cost: {protocol.cost}</p>}
+      </div>
+    </div>
+  );
+}
+
+// Iteration 30: the same permanent-readout reasoning as ProtocolRow above,
+// for act 2's answer to it — mid-act-2 the player can re-check what the
+// enemy has without entering a fight. Exported for the same reason
+// ProtocolRow is (FleetOverlay/FleetScreen/FleetPanel show it too).
+export function CounterProtocolRow({ counterProtocolId }: { counterProtocolId: CounterProtocolId }) {
+  const counter = getCounterProtocol(counterProtocolId);
+  return (
+    <div className={`settings-row protocol-row protocol-row--${counter.tier} protocol-row--counter`}>
+      <div className="settings-row__text">
+        <h3 className="settings-row__label">
+          Enemy answer: {counter.name}
+          <span className="protocol-row__tier"> ({counter.tier})</span>
+        </h3>
+        <p className="settings-row__hint">{counter.blurb}</p>
       </div>
     </div>
   );
@@ -161,11 +183,19 @@ function SoundSetting() {
 
 // The mobile Settings tab — a full screen, no Close button, because the tab
 // bar is the way out (same reasoning as the Chart and Fleet tabs).
-export function SettingsScreen({ seed, protocols }: { seed: number | null; protocols?: ProtocolId[] }) {
+export function SettingsScreen({
+  seed,
+  protocols,
+  counterProtocol,
+}: {
+  seed: number | null;
+  protocols?: ProtocolId[];
+  counterProtocol?: CounterProtocolId;
+}) {
   return (
     <div className="settings-screen">
       <h2>Settings</h2>
-      {settingsBody(seed, protocols)}
+      {settingsBody(seed, protocols, counterProtocol)}
     </div>
   );
 }
@@ -176,10 +206,12 @@ export function SettingsScreen({ seed, protocols }: { seed: number | null; proto
 export function SettingsOverlay({
   seed,
   protocols,
+  counterProtocol,
   onClose,
 }: {
   seed: number | null;
   protocols?: ProtocolId[];
+  counterProtocol?: CounterProtocolId;
   onClose: () => void;
 }) {
   return (
@@ -189,7 +221,7 @@ export function SettingsOverlay({
           <h2>Settings</h2>
         </div>
 
-        {settingsBody(seed, protocols)}
+        {settingsBody(seed, protocols, counterProtocol)}
 
         <button type="button" className="continue-button" onClick={onClose}>
           Close

@@ -3,8 +3,8 @@ import { getEscalation } from '../game/escalations';
 import type { ScheduledEscalation } from '../game/escalations';
 import { getBoss, getFinalBoss } from '../game/enemies';
 import { visibleNodeType } from '../game/fog';
-import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, reachableNodes } from '../game/map';
-import type { CargoTag, GameMap, MapNode, MapPosition, NodeType } from '../game/map';
+import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, laneColumns, maxRows, reachableNodes } from '../game/map';
+import type { CargoTag, GameMap, MapNode, MapPosition, MapShortcut, NodeType } from '../game/map';
 import { sectorName } from '../game/sectorName';
 import { NodeGlyph } from './NodeGlyph';
 import { usePrefersReducedMotion } from './useReducedMotion';
@@ -22,7 +22,11 @@ interface MapScreenProps {
   onViewFleet?: () => void;
   onClose?: () => void; // set when this is a read-only peek from a shop/event, not the live map phase
   onAbandon?: () => void; // iteration 9.2 — live map only, never on the peek overlay
-  onPickNode: (row: number) => void;
+  // Iteration 32.2: `col` is always passed explicitly now, not left to the
+  // reducer's "omitted means position.col + 1" default — with warp lanes,
+  // a shortcut target can share a row with the normal next-column node, so
+  // row alone no longer disambiguates which one was clicked.
+  onPickNode: (row: number, col: number) => void;
   // Iteration 16.1: defaults true (desktop peek + the live map phase are
   // unchanged). The mobile Chart tab passes false outside the map phase —
   // the reducer's phase guard already makes a stray PICK_NODE a no-op, this
@@ -70,23 +74,32 @@ const ROW_H = 104;
 const PAD_X = 64;
 const PAD_Y = 60;
 
-function nodeCenter(columns: MapNode[][], col: number, row: number): { x: number; y: number } {
-  const y = columns[col].length === 1 ? PAD_Y + ROW_H : PAD_Y + row * ROW_H;
+// Iteration 32: generalized from a hardcoded 3-row assumption (single-node
+// columns centered on row 1, canvas height fixed at 2 rows tall) to
+// whatever the act's actual widest column is — act 2 is 4 lanes, not 3.
+// `rows` is the act's `maxRows(columns)`, passed in rather than recomputed
+// per call since every call site in one render already shares one act.
+function nodeCenter(columns: MapNode[][], col: number, row: number, rows: number): { x: number; y: number } {
+  const y = columns[col].length === 1 ? PAD_Y + ((rows - 1) / 2) * ROW_H : PAD_Y + row * ROW_H;
   return { x: PAD_X + col * COL_W, y };
 }
 
-function chartSize(columns: MapNode[][]): { width: number; height: number } {
-  return { width: PAD_X * 2 + (columns.length - 1) * COL_W, height: PAD_Y * 2 + 2 * ROW_H };
+function chartSize(columns: MapNode[][], rows: number): { width: number; height: number } {
+  return { width: PAD_X * 2 + (columns.length - 1) * COL_W, height: PAD_Y * 2 + (rows - 1) * ROW_H };
 }
 
 interface ChartEdge {
   from: MapPosition;
   to: MapPosition;
+  warp?: boolean; // iteration 32.2: renders dashed, distinct from a normal step
 }
 
 // Every legal adjacency in the act: |row delta| <= 1, except single-node
-// columns (opener, boss) which connect to/from every lane.
-function chartEdges(columns: MapNode[][]): ChartEdge[] {
+// columns (opener, boss) which connect to/from every lane. `shortcuts`
+// (act 2 only, defaults to none) each add one more edge, flagged so the
+// renderer draws it dashed — a warp lane is a real pickable edge, just a
+// visually distinct one, not a special case in the reachability math.
+function chartEdges(columns: MapNode[][], shortcuts: MapShortcut[] = []): ChartEdge[] {
   const edges: ChartEdge[] = [];
   for (let c = 0; c < columns.length - 1; c++) {
     for (const a of columns[c]) {
@@ -95,6 +108,9 @@ function chartEdges(columns: MapNode[][]): ChartEdge[] {
         if (connects) edges.push({ from: { col: a.col, row: a.row }, to: { col: b.col, row: b.row } });
       }
     }
+  }
+  for (const s of shortcuts) {
+    edges.push({ from: s.from, to: s.to, warp: true });
   }
   return edges;
 }
@@ -213,14 +229,15 @@ export function MapScreen({
       </div>
 
       {(() => {
-        const size = chartSize(columns);
+        const rows = maxRows(columns);
+        const size = chartSize(columns, rows);
         const edges = chartEdges(columns);
         const canPickAt = (p: MapPosition) =>
           interactive &&
           !isFled(p.col, p.row) &&
           p.col === (position === null ? 0 : position.col + 1) &&
           reachableRows.has(p.row);
-        const trail = visited.map((p) => nodeCenter(columns, p.col, p.row));
+        const trail = visited.map((p) => nodeCenter(columns, p.col, p.row, rows));
         return (
           <div className="starchart" ref={scrollRef}>
             <div className="starchart__canvas" style={{ width: size.width, height: size.height }}>
@@ -232,8 +249,8 @@ export function MapScreen({
                 aria-hidden="true"
               >
                 {edges.map((edge, i) => {
-                  const a = nodeCenter(columns, edge.from.col, edge.from.row);
-                  const b = nodeCenter(columns, edge.to.col, edge.to.row);
+                  const a = nodeCenter(columns, edge.from.col, edge.from.row, rows);
+                  const b = nodeCenter(columns, edge.to.col, edge.to.row, rows);
                   const isReachableEdge = samePos(position, edge.from) && canPickAt(edge.to);
                   const isOnwardEdge = samePos(hovered, edge.from);
                   const intoFled = isFled(edge.to.col, edge.to.row) || isFled(edge.from.col, edge.from.row);
@@ -269,7 +286,7 @@ export function MapScreen({
                     .filter(Boolean)
                     .join(' ');
                   const label = type === 'boss' ? bossLabel : type ? NODE_LABEL[type] : '?';
-                  const center = nodeCenter(columns, node.col, node.row);
+                  const center = nodeCenter(columns, node.col, node.row, rows);
                   const nodeSize = type === 'boss' ? 92 : 76;
                   // 15.1: the cargo glyph follows the exact same fog rule as
                   // the node's type — `type` is already null wherever the

@@ -1,6 +1,7 @@
 import { incomingFirePreview, initCombat, openingTargetIndex, OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
 import type { FirePreview } from '../game/combatEngine';
 import type { CommanderId } from '../game/commanders';
+import { getCounterProtocol } from '../game/counterProtocols';
 import { getEnemyLore } from '../game/enemyLore';
 import { getEscalation } from '../game/escalations';
 import { hasProtocol } from '../game/protocols';
@@ -226,7 +227,7 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId, protocols }:
         </p>
       ))}
 
-      {((enemy.appliedEscalations && enemy.appliedEscalations.length > 0) || !!enemy.veterancyBonus) && (
+      {((enemy.appliedEscalations && enemy.appliedEscalations.length > 0) || !!enemy.veterancyBonus || !!enemy.appliedCounter) && (
         <div className="enemy-panel__escalations">
           {!!enemy.veterancyBonus && (
             <span className="escalation-badge" title="Iteration 8: scales with map depth within the act">
@@ -241,6 +242,15 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId, protocols }:
               </span>
             );
           })}
+          {/* Iteration 30: the enemy's answer to whatever protocol tier was
+              drafted — only-if-it-changed-something honesty, same rule as
+              escalations above (appliedCounter is only ever set when
+              applyCounterProtocol actually ran). */}
+          {enemy.appliedCounter && (
+            <span className="escalation-badge" title={getCounterProtocol(enemy.appliedCounter).blurb}>
+              Their answer to your protocol: {getCounterProtocol(enemy.appliedCounter).name}
+            </span>
+          )}
         </div>
       )}
     </section>

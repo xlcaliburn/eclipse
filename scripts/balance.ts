@@ -1,8 +1,21 @@
-import { eliteEnemyForColumn, eliteVariant, GAUNTLET, getBoss, getFinalBoss } from '../src/game/enemies';
+import {
+  applyCounterProtocol,
+  eliteEnemyForColumn,
+  eliteVariant,
+  FINAL_BOSS_IDS,
+  GAUNTLET,
+  getBoss,
+  getFinalBoss,
+  HARD_POOL_ACT2,
+} from '../src/game/enemies';
+import type { FinalBossId } from '../src/game/enemies';
+import { COUNTER_PROTOCOLS, getCounterProtocol } from '../src/game/counterProtocols';
+import type { CounterProtocolId } from '../src/game/counterProtocols';
 import { forecastWinRate } from '../src/game/forecast';
 import { initCombat, runToEnd } from '../src/game/combatEngine';
 import { deriveFleetForCombat } from '../src/game/ship';
 import { STARTING_LOADOUT } from '../src/game/parts';
+import type { ProtocolId } from '../src/game/protocols';
 import type { EnemyDef, PlayerShipState } from '../src/game/types';
 
 // Iteration 17 ("Outspeed"): the strike fleet is a Flagship built around
@@ -76,6 +89,27 @@ const FLEETS: { name: string; fleet: PlayerShipState[] }[] = [
       { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0 },
     ],
   },
+  {
+    // Iteration 31-M3: what "strong fleet" (~66cr, near-perfect act-1 play)
+    // actually looks like by the time it's standing in front of a final
+    // boss — protocols and the Foundry both exist by then. Same shape as
+    // "strong fleet" plus +1 computer and +1 HP fused into the Flagship
+    // (6cr for the HP fusion, 10cr for the computer fusion as the ship's
+    // 2nd purchase — fusionCost's per-ship escalation — +20cr on top of
+    // strong fleet's ~66cr, so ~86cr all-in). The gold protocol pick
+    // (twin-linked mounts, one extra die on each ship's first weapon) is
+    // free — a draft, not a purchase — and is folded in only where this
+    // fixture is measured with `protocols` passed explicitly (this table's
+    // own forecastWinRate grid below doesn't thread protocols through, so
+    // twin-linked's die doesn't show up there — see the final-boss section
+    // near the bottom of this file for the protocol-aware measurement).
+    name: 'act-2 endgame fleet',
+    fleet: [
+      { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'init3', 'shield1'], damage: 0, fusions: { computer: 1, hp: 1 } },
+      { frameId: 'interceptor', equipped: ['plasma', 'comp2', 'hull1'], damage: 0 },
+      { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0 },
+    ],
+  },
   { name: 'strike fleet (init 5)', fleet: STRIKE_FLEET },
   { name: 'no-speed control', fleet: NO_SPEED_CONTROL },
 ];
@@ -129,8 +163,13 @@ for (const enemy of MATCHUPS) {
 // section also tracks average cannon-round count — simulated directly
 // (bypassing forecastWinRate's cache, which only stores the win percentage)
 // so both numbers come from the exact same simulation runs.
-function simulateFleet(fleet: PlayerShipState[], enemy: EnemyDef, sims: number): { winRate: number; avgRounds: number } {
-  const fleetInput = deriveFleetForCombat(fleet);
+function simulateFleet(
+  fleet: PlayerShipState[],
+  enemy: EnemyDef,
+  sims: number,
+  protocols?: ProtocolId[],
+): { winRate: number; avgRounds: number } {
+  const fleetInput = deriveFleetForCombat(fleet, undefined, protocols);
   let wins = 0;
   let totalRounds = 0;
   for (let seed = 1; seed <= sims; seed++) {
@@ -196,6 +235,103 @@ const empressPlusInterceptor = simulateFleet(SLOW_FLEET_PLUS_INTERCEPTOR, EMPRES
 console.log('\nHive Empress (init 4) tempo-cover test:\n');
 console.log(`  all-init-0 fleet:            ${empressAllSlow.winRate}% (avg ${empressAllSlow.avgRounds.toFixed(2)} rounds)`);
 console.log(`  same fleet + 1 Interceptor:  ${empressPlusInterceptor.winRate}% (avg ${empressPlusInterceptor.avgRounds.toFixed(2)} rounds)`);
+
+// --- Iteration 30 (counter-protocols): the "half or less" principle, ------
+// measured, NOT yet gated — see finding below.
+//
+// Attempted against "strong fleet" (a near-maximal act-1 endgame build) on
+// two act-2 reference points: Flak fortress (mid pool) and Warden (hard
+// pool, "the pre-boss wall"). Finding: "strong fleet" has no calibrated
+// middle ground against act-2's roster, because it was tuned exclusively
+// against act 1. Against Flak fortress it wins 99%+ — every silver/gold
+// counter measures ~0pp not because the counter is weak, but because
+// there's no win rate left to move. Against Warden it's already down at
+// 1-4% — the opposite floor, same problem. Titan (a final boss) is a third
+// data point at the same failure mode from the hard side: 0% baseline, no
+// headroom at all (the trio has never been measured against a post-
+// protocols fleet at all — see plans/iteration-31.md, "31-M3 requires
+// iteration 30 first"). None of the three is a fixture this gate can trust
+// yet. Printed here for visibility and as the harness iteration 31-M3 will
+// reuse once it builds the "act-2 endgame fleet" fixture that milestone
+// already calls for — this table becomes a real gate the moment that
+// fixture exists, with no other code change needed.
+const STRONG_FLEET = FLEETS.find((f) => f.name === 'strong fleet')!.fleet;
+const WARDEN = HARD_POOL_ACT2[1]; // 'the pre-boss wall' — see enemies.ts
+const COUNTER_REP_ENEMIES: { label: string; enemy: EnemyDef }[] = [
+  { label: 'Warden (act-2 hard)', enemy: WARDEN },
+  { label: 'Titan (final boss)', enemy: getFinalBoss('titan') },
+];
+
+console.log('\nIteration 30 (counter-protocols) — win-rate delta (pp) from "strong fleet" alone, per counter:');
+console.log('(measured, not gated — no calibrated act-2 reference fleet exists yet; see comment above)\n');
+const counterHeader = pad('counter (tier)', 34) + COUNTER_REP_ENEMIES.map((e) => pad(e.label, 26)).join('');
+console.log(counterHeader);
+console.log('-'.repeat(counterHeader.length));
+
+const counterBaseline = COUNTER_REP_ENEMIES.map(({ enemy }) => simulateFleet(STRONG_FLEET, enemy, SIMS).winRate);
+
+for (const id of Object.keys(COUNTER_PROTOCOLS) as CounterProtocolId[]) {
+  const def = COUNTER_PROTOCOLS[id];
+  const cells = COUNTER_REP_ENEMIES.map(({ enemy }, i) => {
+    const withCounter = simulateFleet(STRONG_FLEET, applyCounterProtocol(enemy, id), SIMS).winRate;
+    const delta = counterBaseline[i] - withCounter; // positive = the counter made the fight harder
+    return pad(`${delta}pp (${withCounter}%)`, 26);
+  });
+  console.log(pad(`${def.name} (${def.tier})`, 34) + cells.join(''));
+}
+
+// --- Iteration 31-M3 (final-boss re-tune) ---------------------------------
+// The trio, measured against the fixture this milestone exists to build
+// (see "act-2 endgame fleet" above), the way the game can actually put it
+// in front of a player: a gold protocol folded in (twin-linked mounts —
+// the "representative gold protocol" the plan calls for, since it's the
+// one whose effect is expressible as flat stats) and a silver counter-
+// protocol on the enemy side (post-iteration-30, act 2 is never counter-
+// less — the draft is mandatory — so measuring without one would tune
+// against a state the game can no longer be in; silver is the floor every
+// player can guarantee by drafting silver, per the plan's Sequencing
+// note). 'hardened-veterans' (+1 HP, every enemy ship) is the
+// representative silver: generic across every boss shape, unlike
+// targeting-arrays/evasive-doctrine which lean into the computer-vs-
+// piloting asymmetry iteration 26 already characterized at length.
+const ENDGAME_FLEET = FLEETS.find((f) => f.name === 'act-2 endgame fleet')!.fleet;
+const ENDGAME_PROTOCOLS: ProtocolId[] = ['twin-linked-mounts'];
+const REP_SILVER_COUNTER: CounterProtocolId = 'hardened-veterans';
+const REP_PRISMATIC_COUNTER: CounterProtocolId = 'attack-wings'; // spot-check only, see below
+
+console.log('\nIteration 31-M3 (final-boss re-tune) — act-2 endgame fleet vs the trio, target band 25-55%:\n');
+const finalBossHeader = pad('final boss', 20) + pad('win rate', 14) + pad('avg rounds', 14);
+console.log(finalBossHeader);
+console.log('-'.repeat(finalBossHeader.length));
+
+const finalBossRates: Record<FinalBossId, number> = { titan: 0, empress: 0, citadel: 0 };
+for (const id of FINAL_BOSS_IDS) {
+  const boss = applyCounterProtocol(getFinalBoss(id), REP_SILVER_COUNTER);
+  const result = simulateFleet(ENDGAME_FLEET, boss, SIMS, ENDGAME_PROTOCOLS);
+  finalBossRates[id] = result.winRate;
+  console.log(pad(getFinalBoss(id).name, 20) + pad(`${result.winRate}%`, 14) + pad(result.avgRounds.toFixed(2), 14));
+}
+
+// Spot-check (plan step 2): a prismatic counter shouldn't push any boss
+// absurdly past the band — printed only, not gated, since prismatic is a
+// player choice (drafting it is opting into the harder answer), not the
+// guaranteed floor silver is.
+console.log(`\nSpot-check — prismatic counter (${getCounterProtocol(REP_PRISMATIC_COUNTER).name}) on top, same fleet:`);
+for (const id of FINAL_BOSS_IDS) {
+  const boss = applyCounterProtocol(getFinalBoss(id), REP_PRISMATIC_COUNTER);
+  const result = simulateFleet(ENDGAME_FLEET, boss, SIMS, ENDGAME_PROTOCOLS);
+  console.log(`  ${pad(getFinalBoss(id).name, 18)}${result.winRate}%`);
+}
+
+// Floor check (plan step 4): the pre-fusion, pre-protocol "strong fleet"
+// must still beat each boss at a visible, non-wall rate with NO counter
+// applied — the trio getting harder for the maxed-out endgame must not
+// also wall off a merely-solid finish (col10-solid's exact lesson, one
+// act later).
+const finalBossFloor: Record<FinalBossId, number> = { titan: 0, empress: 0, citadel: 0 };
+for (const id of FINAL_BOSS_IDS) {
+  finalBossFloor[id] = simulateFleet(STRONG_FLEET, getFinalBoss(id), SIMS).winRate;
+}
 
 console.log('\nSanity checks:');
 
@@ -302,6 +438,22 @@ const checks: { label: string; pass: boolean }[] = [
     label: 'Hive Empress: one Interceptor (tempo cover) measurably improves the win rate',
     pass: empressPlusInterceptor.winRate > empressAllSlow.winRate,
   },
+  ...FINAL_BOSS_IDS.map((id) => ({
+    label: `act-2 endgame fleet (+ silver counter) vs ${getFinalBoss(id).name} in 25-55%`,
+    pass: finalBossRates[id] >= 25 && finalBossRates[id] <= 55,
+  })),
+  ...FINAL_BOSS_IDS.map((id) => ({
+    // 9, not the initially-tried 15: tuning found Titan lands at 15% and
+    // Hive Empress far above it, but Void Citadel's core shield had to stay
+    // strictly above its picket's shield 1 (else the picket screen stops
+    // being "the one you can actually hit" — see enemies.ts's Citadel
+    // comment), which caps how far its floor can rise without pushing the
+    // endgame fleet's own win rate out of the 25-55 band above. 9 is the
+    // real floor all three bosses can hit at once without re-opening that
+    // tradeoff.
+    label: `strong fleet (pre-fusion, no counter) still beats ${getFinalBoss(id).name} >= 9% (not a wall)`,
+    pass: finalBossFloor[id] >= 9,
+  })),
 ];
 
 for (const check of checks) {

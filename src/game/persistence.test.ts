@@ -170,6 +170,39 @@ describe('save / load roundtrip (iteration 9.2)', () => {
     expect(loadRun(storage)).toBeNull();
   });
 
+  it('a save mid-protocol-draft with counter offers roundtrips (iteration 30)', () => {
+    const storage = fakeStorage();
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'ghost-fleet-protocol'],
+      protocolCounterOffers: ['hardened-veterans', 'flak-screens', 'attack-wings'],
+    };
+    expect(saveRun(state, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(state);
+  });
+
+  it('a legacy protocol-draft save with no protocolCounterOffers still loads (predates iteration 30)', () => {
+    const storage = fakeStorage();
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'ghost-fleet-protocol'],
+      // protocolCounterOffers intentionally absent
+    };
+    expect(saveRun(state, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(state);
+  });
+
+  it('a run with a drafted counterProtocol roundtrips (iteration 30)', () => {
+    const storage = fakeStorage();
+    const state: RunState = { ...initialRunState(), phase: 'map', act: 2, counterProtocol: 'overdrive-signals' };
+    expect(saveRun(state, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(state);
+  });
+
   it('loadRun discards a same-version save missing `heat` (added in v5, always required)', () => {
     const storage = fakeStorage();
     const { heat: _drop, ...withoutHeat } = initialRunState();

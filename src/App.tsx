@@ -354,6 +354,7 @@ function App() {
               inventory={state.inventory}
               commanderId={state.commanderId}
               protocols={state.protocols}
+              counterProtocol={state.counterProtocol}
               rerollsUsed={state.shopRerollCount}
               commodityLotSellable={commodityLotSellable}
               onBuyPart={(offerIndex) => dispatch({ type: 'BUY_PART', offerIndex })}
@@ -365,6 +366,7 @@ function App() {
               onBuyMercenary={() => dispatch({ type: 'BUY_MERCENARY' })}
               onBuyRepair={(shipIndex) => dispatch({ type: 'BUY_REPAIR', shipIndex })}
               onBuyUpgrade={(shipIndex) => dispatch({ type: 'BUY_UPGRADE', shipIndex })}
+              onFuseStat={(shipIndex, stat) => dispatch({ type: 'FUSE_STAT', shipIndex, stat })}
               onReroll={() => dispatch({ type: 'REROLL' })}
               onLeave={() => dispatch({ type: 'LEAVE_SHOP' })}
               onViewMap={() => setSurface('chart')}
@@ -383,6 +385,7 @@ function App() {
           {state.phase === 'protocol-draft' && state.protocolOffers && (
             <ProtocolDraftScreen
               offers={state.protocolOffers}
+              counterOffers={state.protocolCounterOffers}
               onChoose={(index) => dispatch({ type: 'PROTOCOL_CHOOSE', index })}
             />
           )}
@@ -439,7 +442,12 @@ function App() {
       {isCompact && surface === 'chart' && chartSurface}
 
       {isCompact && surface === 'fleet' && (
-        <FleetScreen fleet={state.fleet} inventory={state.inventory} protocols={state.protocols} />
+        <FleetScreen
+          fleet={state.fleet}
+          inventory={state.inventory}
+          protocols={state.protocols}
+          counterProtocol={state.counterProtocol}
+        />
       )}
 
       {!isCompact && surface === 'fleet' && (
@@ -448,14 +456,22 @@ function App() {
           inventory={state.inventory}
           credits={state.credits}
           protocols={state.protocols}
+          counterProtocol={state.counterProtocol}
           onClose={() => setSurface('mission')}
         />
       )}
 
-      {isCompact && surface === 'settings' && <SettingsScreen seed={settingsSeed} protocols={state.protocols} />}
+      {isCompact && surface === 'settings' && (
+        <SettingsScreen seed={settingsSeed} protocols={state.protocols} counterProtocol={state.counterProtocol} />
+      )}
 
       {!isCompact && surface === 'settings' && (
-        <SettingsOverlay seed={settingsSeed} protocols={state.protocols} onClose={() => setSurface('mission')} />
+        <SettingsOverlay
+          seed={settingsSeed}
+          protocols={state.protocols}
+          counterProtocol={state.counterProtocol}
+          onClose={() => setSurface('mission')}
+        />
       )}
     </div>
     {isCompact && showHud && <TabBar surface={surface} onSelect={setSurface} />}

@@ -1,15 +1,16 @@
 import type { CommanderId } from '../game/commanders';
 import { OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
+import type { CounterProtocolId } from '../game/counterProtocols';
 import { getFrame } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import { hasProtocol } from '../game/protocols';
 import type { ProtocolId } from '../game/protocols';
 import { REPAIR_COST_PER_HP } from '../game/reducer';
-import { deriveFleetStats, effectiveSlots, playerShipLabel } from '../game/ship';
+import { deriveFleetStats, effectiveSlots, fusionSummary, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import { PartCard } from './PartCard';
-import { ProtocolRow } from './SettingsScreen';
+import { CounterProtocolRow, ProtocolRow } from './SettingsScreen';
 import { StatBar } from './StatBar';
 import { FrameSilhouette } from './ShipSilhouette';
 
@@ -44,6 +45,8 @@ interface FleetPanelProps {
   // +2 slots, etc.) shows here the same way the real fight/build sees it —
   // same reasoning as commanderId's ace bonus above.
   protocols?: ProtocolId[];
+  // Iteration 30: same readout reasoning as protocols above.
+  counterProtocol?: CounterProtocolId;
   // 2026-08-06: shop only — lets a damaged ship's Repair button show its
   // cost and disable when unaffordable. Undefined in Prep (no onBuyRepair
   // there either), same optional-prop-gated pattern as onScuttle/onSellPart.
@@ -67,6 +70,7 @@ export function FleetPanel({
   collapsibleParts,
   commanderId,
   protocols,
+  counterProtocol,
   credits,
   onBuyRepair,
 }: FleetPanelProps) {
@@ -97,6 +101,7 @@ export function FleetPanel({
       {protocols?.map((id) => (
         <ProtocolRow key={id} protocolId={id} />
       ))}
+      {counterProtocol && <CounterProtocolRow counterProtocolId={counterProtocol} />}
 
       {fleet.map((ship, shipIndex) => {
         const stats = deriveFleetStats([ship], commanderId, protocols)[0];
@@ -165,13 +170,18 @@ export function FleetPanel({
             </div>
             {/* Iteration 13: same StatBar as the enemy panel and combat cards. */}
             <StatBar stats={stats} damage={ship.damage} />
-            {ship.upgrades.length > 0 && (
+            {(ship.upgrades.length > 0 || fusionSummary(ship.fusions)) && (
               <div className="ship-card__upgrades">
                 {ship.upgrades.map((upgradeId, i) => (
                   <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
                     {getUpgrade(upgradeId).name}
                   </span>
                 ))}
+                {fusionSummary(ship.fusions) && (
+                  <span className="upgrade-badge" title="Iteration 31: permanent, slotless — fused at the Foundry">
+                    Fused: {fusionSummary(ship.fusions)}
+                  </span>
+                )}
               </div>
             )}
             {(() => {

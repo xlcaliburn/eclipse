@@ -23,19 +23,23 @@ describe('drawEscalationSchedule', () => {
     expect(a).toEqual(b);
   });
 
-  it('draws exactly 4 distinct escalations: 2 in act 1 and 2 in act 2, each landing after columns 4 and 7 (iteration 22)', () => {
+  it('draws exactly 5 distinct escalations: 2 in act 1 (columns 4/7) and 3 in act 2 (columns 4/7/9, iteration 32)', () => {
     const schedule = drawEscalationSchedule(mulberry32(42));
-    expect(schedule).toHaveLength(4);
+    expect(schedule).toHaveLength(5);
     const act1 = schedule.filter((e) => e.act === 1);
     const act2 = schedule.filter((e) => e.act === 2);
     expect(act1).toHaveLength(2);
-    expect(act2).toHaveLength(2);
+    expect(act2).toHaveLength(3);
     expect(act1[0].landsAfterColumn).toBe(4);
     expect(act1[1].landsAfterColumn).toBe(7);
     expect(act2[0].landsAfterColumn).toBe(4);
     expect(act2[1].landsAfterColumn).toBe(7);
+    expect(act2[2].landsAfterColumn).toBe(9);
     const ids = schedule.map((e) => e.id);
-    expect(new Set(ids).size).toBe(4); // drawn without replacement — all distinct
+    // Iteration 32: 5 draws without replacement from the 5-entry pool
+    // exhausts it — every run now gets all 5 escalations, always (see
+    // escalations.ts's top comment), so this also implicitly confirms that.
+    expect(new Set(ids).size).toBe(5);
     expect(schedule.every((e) => e.revealed === false)).toBe(true);
   });
 });

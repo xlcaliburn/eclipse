@@ -18,6 +18,13 @@ export function deriveStats(
   equippedPartIds: PartId[],
   upgrades: UpgradeId[] = [],
   protocols?: ProtocolId[],
+  // Iteration 31 (the Foundry): permanent, slotless base-stat increments —
+  // structurally the same as `upgrades` above (per-ship additive, folded in
+  // once, no live combat-engine hook needed), so it sits as a sibling param
+  // rather than a separate derive-time wrapper. A caller with no `ship`
+  // object in scope (initial setup, pricing a not-yet-purchased hull) simply
+  // omits it — there's no ship to have fused anything into yet.
+  fusions?: PlayerShipState['fusions'],
 ): ShipStats {
   const frame = getFrame(frameId);
   const lonelyFlagship = frameId === 'cruiser' && hasProtocol(protocols, 'lone-flagship');
@@ -106,6 +113,15 @@ export function deriveStats(
     }
   }
 
+  // Iteration 31 (the Foundry): pure flat increments, folded in last since
+  // they interact with nothing else (no weapon dice, no conditional flags).
+  if (fusions) {
+    if (fusions.hp) stats.hp += fusions.hp;
+    if (fusions.computer) stats.computer += fusions.computer;
+    if (fusions.shield) stats.shield += fusions.shield;
+    if (fusions.initiative) stats.initiative += fusions.initiative;
+  }
+
   return stats;
 }
 
@@ -152,7 +168,7 @@ export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: Command
   const auraShield = fleetShieldAuraBonus(fleet);
   return fleet.map((ship) => {
     const stats = withAceBonus(
-      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols),
+      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions),
       ship,
       commanderId,
       protocols,
@@ -174,7 +190,7 @@ export function deriveFleetForCombat(
   const auraShield = fleetShieldAuraBonus(fleet);
   return fleet.map((ship) => {
     const stats = withAceBonus(
-      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols),
+      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions),
       ship,
       commanderId,
       protocols,
@@ -197,6 +213,49 @@ export function applyRepairBanking(ship: PlayerShipState, amount: number, flatBa
   const overRepairBank =
     excess > 0 ? Math.min(OVER_REPAIR_CAP, (ship.overRepairBank ?? 0) + excess) : ship.overRepairBank;
   return { ...ship, damage: Math.max(0, ship.damage - amount), overRepairBank };
+}
+
+// Iteration 31 (the Foundry): total fusion PURCHASES already made on this
+// ship, across every stat — each purchase adds exactly +1 to its stat, so
+// this is just their sum. Exported so ShopScreen (display) and actRun.ts
+// (the sim's spender) price from the exact same number the reducer's
+// FUSE_STAT case does.
+export function totalFusions(ship: PlayerShipState): number {
+  const f = ship.fusions;
+  if (!f) return 0;
+  return (f.hp ?? 0) + (f.computer ?? 0) + (f.shield ?? 0) + (f.initiative ?? 0);
+}
+
+// Iteration 31: escalating Foundry price — STAT_BASE + FUSION_STEP x
+// totalFusionsOn(ship), priced per stat's combat weight. Computer highest:
+// the `roll + computer - shield >= 6` formula makes it the single
+// strongest point in the game (see iteration 26's boss work on how
+// steeply win rates move per point of it). Escalation is per-ship and
+// per-fusion of ANY stat, not per-stat — the 4th fusion on a hull costs
+// +12cr over base regardless of which stat it's spent on, so spreading
+// fusions across stats is priced the same as stacking one.
+export type FusionStat = 'hp' | 'computer' | 'shield' | 'initiative';
+const FUSION_STAT_BASE: Record<FusionStat, number> = {
+  hp: 6,
+  initiative: 7,
+  shield: 8,
+  computer: 10,
+};
+const FUSION_STEP = 4;
+export function fusionCost(stat: FusionStat, ship: PlayerShipState): number {
+  return FUSION_STAT_BASE[stat] + FUSION_STEP * totalFusions(ship);
+}
+
+// A short "Fused: +2 HP · +1 COMP" line for FleetPanel/FleetOverlay — same
+// visual weight as the upgrade badges next to it. The stats themselves
+// already read correctly via deriveStats; this just explains WHY the
+// numbers beat the parts list. Null (not rendered) when nothing's fused.
+const FUSION_STAT_ABBR: Record<FusionStat, string> = { hp: 'HP', computer: 'COMP', shield: 'PLT', initiative: 'INIT' };
+const FUSION_STAT_ORDER: FusionStat[] = ['hp', 'computer', 'shield', 'initiative'];
+export function fusionSummary(fusions: PlayerShipState['fusions']): string | null {
+  if (!fusions) return null;
+  const parts = FUSION_STAT_ORDER.filter((stat) => fusions[stat]).map((stat) => `+${fusions[stat]} ${FUSION_STAT_ABBR[stat]}`);
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 // A slotless expansion bay upgrade pushes a ship's usable slot count past

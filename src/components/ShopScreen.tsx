@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { CommanderId } from '../game/commanders';
 import { FRAMES } from '../game/frames';
 import type { FrameId } from '../game/frames';
+import type { CounterProtocolId } from '../game/counterProtocols';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import {
@@ -16,13 +17,29 @@ import {
   secondHandDamage,
   SHIPYARD_UPGRADE_COST,
 } from '../game/reducer';
-import { playerShipLabel } from '../game/ship';
+import { fusionCost, playerShipLabel } from '../game/ship';
+import type { FusionStat } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
 import { FleetPanel } from './FleetPanel';
 import { PartCard } from './PartCard';
 import { FrameSilhouette } from './ShipSilhouette';
+
+// Iteration 31 (the Foundry): fuse it into the hull — permanent, no slot.
+const FUSION_STATS: FusionStat[] = ['hp', 'computer', 'shield', 'initiative'];
+const FUSION_STAT_LABEL: Record<FusionStat, string> = {
+  hp: 'Max HP',
+  computer: 'Computer',
+  shield: 'Piloting',
+  initiative: 'Initiative',
+};
+const FUSION_STAT_DESC: Record<FusionStat, string> = {
+  hp: '+1 max HP, permanent.',
+  computer: '+1 computer, permanent.',
+  shield: '+1 piloting, permanent.',
+  initiative: '+1 initiative, permanent.',
+};
 
 interface ShopScreenProps {
   credits: number;
@@ -45,6 +62,7 @@ interface ShopScreenProps {
   inventory: PartId[];
   commanderId?: CommanderId;
   protocols?: ProtocolId[];
+  counterProtocol?: CounterProtocolId;
   // 2026-08-06: how many rerolls this shop visit has already used — the
   // Nth reroll costs N credits (half that, rounded up, for the Merchant),
   // so this is what the "Reroll stock" button's displayed price derives
@@ -65,6 +83,7 @@ interface ShopScreenProps {
   onBuyMercenary: () => void;
   onBuyRepair: (shipIndex: number) => void; // 2026-08-06: pay to fully heal one ship
   onBuyUpgrade: (shipIndex: number) => void; // 2026-08-07: shipyard only
+  onFuseStat: (shipIndex: number, stat: FusionStat) => void; // 2026-08-07 (iteration 31): shipyard only
   onReroll: () => void;
   onLeave: () => void;
   onViewMap: () => void;
@@ -82,6 +101,7 @@ export function ShopScreen({
   inventory,
   commanderId,
   protocols,
+  counterProtocol,
   rerollsUsed,
   commodityLotSellable,
   onBuyPart,
@@ -93,6 +113,7 @@ export function ShopScreen({
   onBuyMercenary,
   onBuyRepair,
   onBuyUpgrade,
+  onFuseStat,
   onReroll,
   onLeave,
   onViewMap,
@@ -100,6 +121,7 @@ export function ShopScreen({
   onUnequip,
 }: ShopScreenProps) {
   const [selectedShipIndex, setSelectedShipIndex] = useState(0);
+  const [selectedFusionStat, setSelectedFusionStat] = useState<FusionStat | null>(null);
   const safeSelectedIndex = Math.min(selectedShipIndex, fleet.length - 1);
   const currentFleetCap = fleetCap(commanderId, protocols);
   const fleetFull = fleet.length >= currentFleetCap;
@@ -298,6 +320,50 @@ export function ShopScreen({
           ) : (
             <p className="hint">Already fitted this visit.</p>
           )}
+
+          {/* Iteration 31: the Foundry — fuse a part's worth of power
+              directly into a hull. Permanent, slotless, escalating price;
+              the late-run credit sink for a fleet with full slots and
+              nowhere else to spend. */}
+          <h3>Foundry</h3>
+          <p className="hint">Fuse it into the hull — permanent, no slot. Price escalates per fusion, any stat, per ship.</p>
+          <div className="shop-screen__offers">
+            {FUSION_STATS.map((stat) => (
+              <button
+                key={stat}
+                type="button"
+                className={`card-tile card-tile--deep-scan${selectedFusionStat === stat ? ' card-tile--selected' : ''}`}
+                onClick={() => setSelectedFusionStat(stat)}
+              >
+                <span className="card-tile__name">{FUSION_STAT_LABEL[stat]}</span>
+                <span className="card-tile__desc">{FUSION_STAT_DESC[stat]}</span>
+              </button>
+            ))}
+          </div>
+          {selectedFusionStat && (
+            <>
+              <p className="hint">Fuse into which ship?</p>
+              <div className="reward-screen__ship-picks">
+                {fleet.map((ship, i) => {
+                  const cost = fusionCost(selectedFusionStat, ship);
+                  const merc = ship.mercenary;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      className="shop-button"
+                      onClick={() => onFuseStat(i, selectedFusionStat)}
+                      disabled={credits < cost || merc}
+                      title={merc ? "A mercenary won't carry a permanent fusion past its one fight." : undefined}
+                    >
+                      <FrameSilhouette frameId={ship.frameId} size={24} />
+                      {playerShipLabel(fleet, i)} ({cost} cr)
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -313,6 +379,7 @@ export function ShopScreen({
         onScuttle={onScuttle}
         commanderId={commanderId}
         protocols={protocols}
+        counterProtocol={counterProtocol}
         credits={credits}
         onBuyRepair={onBuyRepair}
       />

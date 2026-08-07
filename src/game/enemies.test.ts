@@ -50,7 +50,10 @@ describe('final bosses bring support', () => {
   it('the citadel keeps a screen the player can hit without shield pierce', () => {
     const citadel = getFinalBoss('citadel');
     const [core, ...escorts] = citadel.groups;
-    expect(core.stats.shield).toBe(5);
+    // Iteration 31-M3 (2026-08-07): re-tuned 5 -> 2 against the act-2
+    // endgame fleet (see enemies.ts's Citadel comment) — this test's real
+    // assertion is the ordering below, not the literal number.
+    expect(core.stats.shield).toBe(2);
     for (const escort of escorts) {
       expect(escort.stats.shield).toBeLessThan(core.stats.shield);
     }

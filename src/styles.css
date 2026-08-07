@@ -2788,6 +2788,18 @@ h1, h2, h3 {
   line-height: 1.4;
 }
 
+/* Iteration 30: the enemy's same-tier answer — danger-colored on every
+   card, same treatment regardless of tier, so it never reads as "the
+   downside is only on the risky picks." */
+.protocol-card__counter {
+  font-size: 12px;
+  color: var(--danger);
+  line-height: 1.4;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+
 .protocol-card--silver {
   border-color: #8b96ad;
 }
@@ -2832,6 +2844,11 @@ h1, h2, h3 {
   color: var(--text-dim);
   font-weight: normal;
   text-transform: capitalize;
+}
+/* Iteration 30: same tier accent colors, dashed instead of solid — reads
+   as "the enemy's," not "yours," at a glance. */
+.protocol-row--counter {
+  border-left-style: dashed;
 }
 .protocol-row__cost {
   color: var(--danger);

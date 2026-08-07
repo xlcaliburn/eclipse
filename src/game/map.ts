@@ -58,15 +58,24 @@ export const CARGO_DESCRIPTION: Record<CargoTag, string> = {
   command: 'Pays a reaction card on top of the normal reward (+4 credits instead if your hand is full).',
 };
 
-// Iteration 8: the run is two acts, each an 11-column trellis (0-9 lanes +
-// col 10 boss), generated together from one continued rng stream so a
-// single seed determines the whole run — both acts, both boss picks.
+// Iteration 8: the run is two acts, generated together from one continued
+// rng stream so a single seed determines the whole run — both acts, both
+// boss picks. (Iteration 32: the acts stopped being the same shape — act 1
+// is still a 10-column trellis + boss; act 2 grew to 12 columns x 4 lanes
+// + boss, and gained warp-lane shortcuts — see `act2Shortcuts` below.)
 export interface GameMap {
   seed: number;
   act1Columns: MapNode[][];
   act2Columns: MapNode[][];
   act1BossId: BossId; // the existing mid-boss trio
   act2BossId: FinalBossId; // the new final-boss trio
+  // Iteration 32 (FTL's "roundabout path"): 2 seeded edges, each skipping
+  // exactly one column outright (`from.col` to `from.col + 2`) — the
+  // shorter route through act 2. Optional-additive: absent on any
+  // pre-32 save, which every consumer (`reachableNodes`, PICK_NODE, the
+  // renderer) reads as "no shortcuts on this map," identical to how the
+  // route always worked before this iteration.
+  act2Shortcuts?: MapShortcut[];
 }
 
 export interface MapPosition {
@@ -74,8 +83,39 @@ export interface MapPosition {
   row: number;
 }
 
-export const LANE_COLUMNS = 10; // columns 0-9 are the 3-lane trellis (act1 col0 is a single-node opener); column 10 is the boss
-export const BOSS_COLUMN = LANE_COLUMNS;
+export interface MapShortcut {
+  from: MapPosition;
+  to: MapPosition;
+}
+
+export const LANE_COLUMNS = 10; // act 1's width: columns 0-9 are the 3-lane trellis (col 0 is a single-node opener); column 10 is the boss.
+// Iteration 32: act 2 grew from a copy of act 1's shape (10 columns) to its
+// own bigger chart (12 columns, 4 lanes instead of 3) — see ACT2_QUOTAS.
+// `LANE_COLUMNS` above stays act-1-specific (not renamed/generalized)
+// because `globalColumn`'s act-2 offset (col + LANE_COLUMNS + 1) keys off
+// act 1's width specifically, not whichever act is currently active — see
+// that function's comment.
+export const ACT2_LANE_COLUMNS = 12;
+
+// The number of lane columns (excluding the boss) in the given act's chart.
+// Replaces the old flat `BOSS_COLUMN` constant, which silently assumed both
+// acts were the same width — true before this iteration, false after.
+export function laneColumns(act: 1 | 2): number {
+  return act === 1 ? LANE_COLUMNS : ACT2_LANE_COLUMNS;
+}
+
+// The boss always sits one column past the last lane column.
+export function bossColumn(act: 1 | 2): number {
+  return laneColumns(act);
+}
+
+// The widest lane column in this act's chart (3 for act 1, 4 for act 2) —
+// single-node columns (the opener, the boss) never widen it, since they're
+// always length 1. Used anywhere that needs to iterate "every possible row"
+// generically instead of hardcoding 3 (fog reveals, the starchart renderer).
+export function maxRows(columns: MapNode[][]): number {
+  return Math.max(...columns.map((c) => c.length));
+}
 
 // Node type quotas per column (before per-column shuffling), per 8.1. Every
 // node's type is visible on the map (subject to iteration-6 fog) —
@@ -128,17 +168,28 @@ const ACT1_QUOTAS: NodeType[][] = [
   ['shipyard', 'elite', 'combat'],
 ];
 
+// Iteration 32 (2026-08-07): act 2 grew from a 10-column x 3-lane copy of
+// act 1's own shape to its own bigger, 4-lane, 12-column chart — see the
+// plan's 32.1. `laneColumns`/`bossColumn`/`maxRows` above make every other
+// consumer (fog reveals, the starchart renderer, `globalColumn`'s act-2
+// reach) read this table's actual size instead of assuming it matches act
+// 1's. Invariants kept from the old table: ~1 recovery option per 2
+// columns, elite density rising toward the boss, every column keeping at
+// least one plain combat. Two of the four shop slots are 'shipyard' (33's
+// split, same reasoning as ACT1_QUOTAS below).
 const ACT2_QUOTAS: NodeType[][] = [
-  ['combat', 'combat', 'combat'],
-  ['combat', 'combat', 'event'],
-  ['shop', 'combat', 'event'],
-  ['elite', 'combat', 'event'],
-  ['repair', 'shop', 'combat'],
-  ['elite', 'combat', 'event'],
-  ['combat', 'elite', 'event'],
-  ['shop', 'elite', 'combat'],
-  ['repair', 'elite', 'combat'],
-  ['shop', 'elite', 'combat'],
+  ['combat', 'combat', 'combat', 'event'],
+  ['combat', 'combat', 'event', 'shop'],
+  ['elite', 'combat', 'combat', 'event'],
+  ['repair', 'shop', 'combat', 'combat'],
+  ['elite', 'combat', 'event', 'combat'],
+  ['shipyard', 'combat', 'elite', 'event'],
+  ['repair', 'combat', 'combat', 'event'],
+  ['elite', 'elite', 'combat', 'shop'],
+  ['combat', 'elite', 'event', 'repair'],
+  ['shipyard', 'elite', 'combat', 'combat'],
+  ['repair', 'elite', 'combat', 'event'],
+  ['shop', 'elite', 'elite', 'combat'],
 ];
 
 function shuffle<T>(items: T[], rng: () => number): T[] {
@@ -184,7 +235,10 @@ function generateActColumns(
       ...(type === 'combat' ? { cargo: drawCargoTag(rng) } : {}),
     }));
   });
-  columns.push([{ col: BOSS_COLUMN, row: 0, type: 'boss' }]); // the boss — never tagged
+  // Structural, not `bossColumn(act)`: the boss sits one past however many
+  // lane columns THIS quotas table actually has — true for both acts, and
+  // doesn't require this function to know which act it's generating.
+  columns.push([{ col: quotas.length, row: 0, type: 'boss' }]); // the boss — never tagged
   return columns;
 }
 
@@ -193,12 +247,57 @@ function generateActColumns(
 // plans/iteration-22.md 22.5).
 const ACT1_PINNED_ROWS: Partial<Record<number, NodeType>> = { 3: 'shop' };
 
+// Iteration 32 (warp lanes, 32.2): 2 seeded shortcuts, each an edge from a
+// node at column `c` to a node at column `c + 2`, skipping `c + 1`
+// entirely. Placement rules straight from the plan:
+//   - `from.col` drawn from lane columns 2-8 (never the first couple of
+//     columns, never close enough to the boss to trivialize the approach).
+//   - The two shortcuts' `from.col` values at least 2 apart, so they can
+//     never chain into a triple-skip corridor.
+//   - `|from.row - to.row| <= 1` — a warp lane bends at most one lane,
+//     same as a normal edge, so the chart stays readable.
+//   - Never lands on or departs from a repair node — skipping is supposed
+//     to cost resources, not hand a free heal on arrival.
+// Rejection sampling over the rng stream already in hand: each retry just
+// draws more from the same continued stream, so the result is still fully
+// deterministic per seed (same seed -> same number of draws -> same
+// shortcuts), it just doesn't consume a fixed number of rng() calls the
+// way a straight-line generator would — expected and fine, exactly like
+// every other content-shaped draw in this file (shuffle's own draw count
+// already varies with quota composition).
+function generateAct2Shortcuts(columns: MapNode[][], rng: () => number): MapShortcut[] {
+  const shortcuts: MapShortcut[] = [];
+  const usedFromCols: number[] = [];
+  const MIN_FROM_COL = 2;
+  const MAX_FROM_COL = 8;
+  let attempts = 0;
+  while (shortcuts.length < 2 && attempts < 500) {
+    attempts++;
+    const fromCol = MIN_FROM_COL + Math.floor(rng() * (MAX_FROM_COL - MIN_FROM_COL + 1));
+    if (usedFromCols.some((c) => Math.abs(c - fromCol) < 2)) continue;
+    const toCol = fromCol + 2;
+    const fromColumn = columns[fromCol];
+    const toColumn = columns[toCol];
+    if (!fromColumn || !toColumn) continue;
+    const fromCandidates = fromColumn.filter((n) => n.type !== 'repair');
+    if (fromCandidates.length === 0) continue;
+    const from = fromCandidates[Math.floor(rng() * fromCandidates.length)];
+    const toCandidates = toColumn.filter((n) => n.type !== 'repair' && Math.abs(n.row - from.row) <= 1);
+    if (toCandidates.length === 0) continue;
+    const to = toCandidates[Math.floor(rng() * toCandidates.length)];
+    shortcuts.push({ from: { col: from.col, row: from.row }, to: { col: to.col, row: to.row } });
+    usedFromCols.push(fromCol);
+  }
+  return shortcuts;
+}
+
 export function generateMap(seed: number, rng: () => number): GameMap {
   const act1Columns = generateActColumns(ACT1_QUOTAS, rng, ACT1_PINNED_ROWS);
   const act1BossId = BOSS_IDS[Math.floor(rng() * BOSS_IDS.length)];
   const act2Columns = generateActColumns(ACT2_QUOTAS, rng);
+  const act2Shortcuts = generateAct2Shortcuts(act2Columns, rng);
   const act2BossId = FINAL_BOSS_IDS[Math.floor(rng() * FINAL_BOSS_IDS.length)];
-  return { seed, act1Columns, act2Columns, act1BossId, act2BossId };
+  return { seed, act1Columns, act2Columns, act1BossId, act2BossId, act2Shortcuts };
 }
 
 export function actColumns(map: GameMap, act: 1 | 2): MapNode[][] {
@@ -211,17 +310,25 @@ export function actBossId(map: GameMap, act: 1 | 2): BossId | FinalBossId {
 
 // A single continuous column number across both acts, so reward formulas
 // and cross-act permanence (escalations) can compare columns from either
-// act on one number line — act-1 col 0-10 is global 0-10, act-2 col 0-10 is
-// global 11-21.
+// act on one number line — act-1 col 0-10 is global 0-10, act-2 col 0-12 is
+// global 11-23 (iteration 32: act 2 grew to 12 lane columns + boss; the
+// offset itself, `LANE_COLUMNS + 1`, is still act 1's width and stays
+// fixed — only act 2's own reach got longer).
 export function globalColumn(act: 1 | 2, col: number): number {
   return act === 1 ? col : col + LANE_COLUMNS + 1;
 }
 
 // Two nodes in adjacent columns connect iff their lanes differ by at most 1.
-// Every column-9 node connects to the single boss node.
-export function nodesConnect(a: MapPosition, b: MapPosition): boolean {
+// `targetIsSingleNode` (iteration 32: was a `b.col === BOSS_COLUMN` check —
+// wrong the moment the two acts stopped sharing a boss column) lets a
+// single-node target column (the boss, today; anything shaped like it
+// tomorrow) connect from every lane, without this function needing to know
+// which column that is or which act it's in — the caller already has the
+// target column's node array in hand and can just check its length, same
+// structural approach `chartEdges` in MapScreen.tsx already used.
+export function nodesConnect(a: MapPosition, b: MapPosition, targetIsSingleNode = false): boolean {
   if (b.col !== a.col + 1) return false;
-  if (b.col === BOSS_COLUMN) return true;
+  if (targetIsSingleNode) return true;
   return Math.abs(a.row - b.row) <= 1;
 }
 
@@ -229,13 +336,28 @@ export function nodesConnect(a: MapPosition, b: MapPosition): boolean {
 // "from" column (the act-1 opener) connects to every node in the next
 // column, overriding the normal +/-1 lane rule — structurally detected by
 // column length rather than needing act context here.
-export function reachableNodes(columns: MapNode[][], from: MapPosition | null): MapNode[] {
+//
+// `shortcuts` (iteration 32, defaults to none — act 1 never has any):
+// whenever `from` matches a shortcut's `from` position exactly, its `to`
+// node joins the normally-reachable set, on top of (never instead of) the
+// regular +1-column options — taking a shortcut is a choice alongside the
+// normal route, not a replacement for it.
+export function reachableNodes(
+  columns: MapNode[][],
+  from: MapPosition | null,
+  shortcuts: MapShortcut[] = [],
+): MapNode[] {
   if (from === null) return columns[0];
   const nextCol = columns[from.col + 1];
-  if (!nextCol) return [];
-  const fromColumn = columns[from.col];
-  if (fromColumn.length === 1) return nextCol;
-  return nextCol.filter((node) => nodesConnect(from, { col: node.col, row: node.row }));
+  const normal = !nextCol
+    ? []
+    : columns[from.col].length === 1
+      ? nextCol
+      : nextCol.filter((node) => nodesConnect(from, { col: node.col, row: node.row }, nextCol.length === 1));
+  const shortcutTargets = shortcuts
+    .filter((s) => s.from.col === from.col && s.from.row === from.row)
+    .map((s) => getNode(columns, s.to));
+  return [...normal, ...shortcutTargets];
 }
 
 export function getNode(columns: MapNode[][], position: MapPosition): MapNode {

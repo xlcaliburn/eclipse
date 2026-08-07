@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { initCombat, runToEnd } from './combatEngine';
 import { shipName } from './shipNames';
+import { getCounterProtocol } from './counterProtocols';
+import type { CounterProtocolId } from './counterProtocols';
 import { GAUNTLET, OPENER } from './enemies';
 import { getFrame, PURCHASABLE_FRAME_IDS } from './frames';
 import { MAX_HEAT } from './heat';
-import { BOSS_COLUMN, LANE_COLUMNS } from './map';
+import { bossColumn, laneColumns } from './map';
 import { getProtocol } from './protocols';
-import type { CargoTag, GameMap, NodeType } from './map';
+import type { CargoTag, GameMap, MapPosition, NodeType } from './map';
 import { getPart } from './parts';
-import { deriveStats } from './ship';
+import { deriveStats, fusionCost } from './ship';
 import { getUpgrade } from './upgrades';
 import {
   applyCargoReward,
@@ -629,6 +631,80 @@ describe('BUY_UPGRADE — the shipyard upgrade bay (iteration 33, 2026-08-07)', 
   });
 });
 
+describe('FUSE_STAT — the Foundry (iteration 31, 2026-08-07)', () => {
+  it('adds one point to the chosen stat, charges the escalating price, and the price rises on the next purchase of ANY stat', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    let state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 100, fleet });
+
+    const firstCost = fusionCost('hp', state.fleet[0]);
+    state = runReducer(state, { type: 'FUSE_STAT', shipIndex: 0, stat: 'hp' });
+    expect(state.fleet[0].fusions).toEqual({ hp: 1 });
+    expect(state.credits).toBe(100 - firstCost);
+
+    // A second purchase, of a DIFFERENT stat, still costs more than the
+    // first purchase would have — the escalation is per-ship, not per-stat.
+    const secondCost = fusionCost('computer', state.fleet[0]);
+    expect(secondCost).toBeGreaterThan(firstCost);
+    const creditsBeforeSecond = state.credits;
+    state = runReducer(state, { type: 'FUSE_STAT', shipIndex: 0, stat: 'computer' });
+    expect(state.fleet[0].fusions).toEqual({ hp: 1, computer: 1 });
+    expect(state.credits).toBe(creditsBeforeSecond - secondCost);
+  });
+
+  it('refuses in a store (no Foundry there), outside the shop phase, or when unaffordable', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    const inStore = stateWithMap('shop', { phase: 'shop', shopKind: 'store', credits: 100, fleet });
+    expect(runReducer(inStore, { type: 'FUSE_STAT', shipIndex: 0, stat: 'hp' }).fleet[0].fusions).toBeUndefined();
+
+    const onMap = stateWithMap('shop', { phase: 'map', shopKind: 'shipyard', credits: 100, fleet });
+    expect(runReducer(onMap, { type: 'FUSE_STAT', shipIndex: 0, stat: 'hp' }).fleet[0].fusions).toBeUndefined();
+
+    const poor = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 1, fleet });
+    const poorResult = runReducer(poor, { type: 'FUSE_STAT', shipIndex: 0, stat: 'hp' });
+    expect(poorResult.fleet[0].fusions).toBeUndefined();
+    expect(poorResult.credits).toBe(1);
+  });
+
+  it('refuses on a mercenary — a one-fight rental carries no permanent investment', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [], mercenary: true },
+    ];
+    const state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 100, fleet });
+    const result = runReducer(state, { type: 'FUSE_STAT', shipIndex: 0, stat: 'hp' });
+    expect(result.fleet[0].fusions).toBeUndefined();
+    expect(result.credits).toBe(100);
+  });
+
+  it('a destroyed ship loses its fusions — nowhere in the run do they reappear', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: ['ion', 'comp1'], damage: 0, upgrades: [] }, // will survive
+      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [], fusions: { hp: 3 } }, // will be destroyed
+    ];
+    const combat = initCombat(
+      [
+        { stats: { initiative: 0, hp: 3, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 },
+        { stats: { initiative: 0, hp: 1, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 1 }, // already at 0 remaining
+      ],
+      GAUNTLET[0],
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: 0, row: 0 },
+      fleet,
+      currentEnemy: GAUNTLET[0],
+      combat: wonCombat,
+    };
+
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.fleet).toHaveLength(1);
+    expect(result.fleet[0].frameId).toBe('cruiser');
+    expect(result.fleet.some((s) => s.fusions?.hp)).toBe(false);
+  });
+});
+
 describe('SCUTTLE_SHIP (iteration 8, 8.7)', () => {
   it('decommissions a non-Flagship ship: parts return to inventory, upgrades are destroyed', () => {
     const fleet: PlayerShipState[] = [
@@ -823,7 +899,7 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
       ...stateWithMap('combat'),
       phase: 'combat',
       act: 2,
-      position: { col: 10, row: 0 }, // the final-boss column
+      position: { col: bossColumn(2), row: 0 }, // the final-boss column
       fleet,
       combat: wonCombat,
     };
@@ -874,7 +950,7 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
       ...stateWithMap('combat'),
       phase: 'combat',
       act: 2,
-      position: { col: 10, row: 0 },
+      position: { col: bossColumn(2), row: 0 },
       fleet,
       combat: wonCombat,
     };
@@ -2538,8 +2614,8 @@ describe('iteration 8/24: the interlude (guaranteed field promotion)', () => {
 
   it('resets position/visited/fled/fog/dossier and lands in act 2 at any act-2 column-0 node', () => {
     const state = stateAtInterlude({
-      position: { col: BOSS_COLUMN, row: 0 },
-      visited: [{ col: 9, row: 0 }, { col: BOSS_COLUMN, row: 0 }],
+      position: { col: bossColumn(1), row: 0 },
+      visited: [{ col: 9, row: 0 }, { col: bossColumn(1), row: 0 }],
       fled: [{ col: 3, row: 1 }],
       visionCol: 9,
       revealedNodes: [{ col: 5, row: 0 }],
@@ -2563,9 +2639,13 @@ describe('iteration 8/24: the interlude (guaranteed field promotion)', () => {
     expect(drafted.phase).toBe('map');
     expect(drafted.protocols).toEqual(['reinforced-bulkheads']);
 
-    // Act 2 column 0 is 3 uniform combat nodes — any row is pickable.
+    // Act 2 column 0 (iteration 32: combat/combat/combat/event, shuffled) —
+    // every row is pickable regardless of which type landed there; only the
+    // position is what this test actually verifies (the reset above is the
+    // real assertion). The resulting phase is whatever that node resolves
+    // to (prep for combat, event for an event node).
     const picked = runReducer(drafted, { type: 'PICK_NODE', row: 1 });
-    expect(picked.phase).toBe('prep');
+    expect(['prep', 'event']).toContain(picked.phase);
     expect(picked.position).toEqual({ col: 0, row: 1 });
   });
 });
@@ -2988,7 +3068,7 @@ describe('iteration 28: Protocols', () => {
     return {
       ...stateWithMap('combat'),
       phase: 'combat',
-      position: { col: BOSS_COLUMN, row: 0 },
+      position: { col: bossColumn(1), row: 0 },
       fleet,
       combat: { ...combat, winner: 'player' as const },
       ...overrides,
@@ -3063,7 +3143,7 @@ describe('iteration 28: Protocols', () => {
       protocolOffers: ['reinforced-bulkheads', 'deep-space-relays', 'ghost-fleet-protocol'],
     };
     const result = runReducer(state, { type: 'PROTOCOL_CHOOSE', index: 1 });
-    expect(result.visionCol).toBe(LANE_COLUMNS);
+    expect(result.visionCol).toBe(laneColumns(2));
   });
 
   it('Salvage rigs adds +2cr to a normal combat win and to the act-1 boss payout', () => {
@@ -3163,5 +3243,250 @@ describe('iteration 28: Protocols', () => {
     expect(frameCost(base, 'light-cruiser', undefined, ['armada-mandate'])).toBe(Math.floor(base * 0.5));
     const admiralCost = frameCost(base, 'light-cruiser', 'admiral');
     expect(frameCost(base, 'light-cruiser', 'admiral', ['armada-mandate'])).toBe(Math.floor(admiralCost * 0.5));
+  });
+});
+
+describe('iteration 30: counter-protocols', () => {
+  function actWonState(overrides: Partial<RunState> = {}): RunState {
+    const fleet: PlayerShipState[] = overrides.fleet ?? [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    const combat = initCombat(
+      fleet.map((s) => ({
+        stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] },
+        initialDamage: s.damage,
+      })),
+      GAUNTLET[8],
+      1,
+    );
+    return {
+      ...stateWithMap('combat'),
+      phase: 'combat',
+      position: { col: bossColumn(1), row: 0 },
+      fleet,
+      combat: { ...combat, winner: 'player' as const },
+      ...overrides,
+    };
+  }
+
+  // Same forceNodeType helper the Dreadnought act-2-shipyard tests use
+  // above — builds a minimal, reachable act-2 lane-0 node of the given type.
+  function act2StateAt(type: NodeType, overrides: Partial<RunState> = {}): RunState {
+    const map = forceNodeType(initialRunState().map, 0, 0, type, 2);
+    return { ...initialRunState(), phase: 'map', act: 2, map, ...overrides };
+  }
+
+  it('winning the act-1 boss also draws exactly one silver, one gold, one prismatic COUNTER offer, index-paired with the protocol offers', () => {
+    const result = runReducer(actWonState(), { type: 'CONTINUE' });
+    expect(result.protocolCounterOffers).toHaveLength(3);
+    const tiers = result.protocolCounterOffers!.map((id) => getCounterProtocol(id).tier);
+    expect(tiers).toEqual(['silver', 'gold', 'prismatic']);
+  });
+
+  it('PROTOCOL_CHOOSE records the matching counterProtocol from the same index and clears protocolCounterOffers', () => {
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'ghost-fleet-protocol'],
+      protocolCounterOffers: ['hardened-veterans', 'flak-screens', 'attack-wings'],
+    };
+    const result = runReducer(state, { type: 'PROTOCOL_CHOOSE', index: 1 });
+    expect(result.counterProtocol).toBe('flak-screens');
+    expect(result.protocolCounterOffers).toBeUndefined();
+  });
+
+  it('the lone-flagship and deep-space-relays special-effect branches also record the matching counter', () => {
+    const loneState: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'lone-flagship'],
+      protocolCounterOffers: ['hardened-veterans', 'flak-screens', 'attack-wings'],
+    };
+    const loneResult = runReducer(loneState, { type: 'PROTOCOL_CHOOSE', index: 2 });
+    expect(loneResult.counterProtocol).toBe('attack-wings');
+    expect(loneResult.protocolCounterOffers).toBeUndefined();
+
+    const relayState: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      protocolOffers: ['reinforced-bulkheads', 'deep-space-relays', 'ghost-fleet-protocol'],
+      protocolCounterOffers: ['hardened-veterans', 'flak-screens', 'attack-wings'],
+    };
+    const relayResult = runReducer(relayState, { type: 'PROTOCOL_CHOOSE', index: 1 });
+    expect(relayResult.counterProtocol).toBe('flak-screens');
+  });
+
+  it('a legacy save with no protocolCounterOffers still resolves the protocol pick cleanly, with no counter', () => {
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'protocol-draft',
+      act: 2,
+      protocolOffers: ['reinforced-bulkheads', 'ace-pipeline', 'ghost-fleet-protocol'],
+      // protocolCounterOffers intentionally absent
+    };
+    const result = runReducer(state, { type: 'PROTOCOL_CHOOSE', index: 0 });
+    expect(result.protocols).toEqual(['reinforced-bulkheads']);
+    expect(result.counterProtocol).toBeUndefined();
+  });
+
+  it('a drafted counter-protocol applies to a combat enemy in act 2, never in act 1 regardless', () => {
+    const act2 = runReducer(
+      { ...act2StateAt('combat'), counterProtocol: 'hardened-veterans' as CounterProtocolId },
+      { type: 'PICK_NODE', row: 0 },
+    );
+    expect(act2.currentEnemy?.appliedCounter).toBe('hardened-veterans');
+
+    const act1 = runReducer(
+      { ...stateWithMap('combat'), counterProtocol: 'hardened-veterans' as CounterProtocolId },
+      { type: 'PICK_NODE', row: 0 },
+    );
+    expect(act1.currentEnemy?.appliedCounter).toBeUndefined();
+  });
+
+  it('no counter applies in act 2 when nothing was drafted', () => {
+    const result = runReducer(act2StateAt('combat'), { type: 'PICK_NODE', row: 0 });
+    expect(result.currentEnemy?.appliedCounter).toBeUndefined();
+  });
+
+  it('applies to elite nodes too', () => {
+    const result = runReducer(
+      { ...act2StateAt('elite'), counterProtocol: 'targeting-arrays' as CounterProtocolId },
+      { type: 'PICK_NODE', row: 0 },
+    );
+    expect(result.currentEnemy?.appliedCounter).toBe('targeting-arrays');
+  });
+
+  it('applies on top of veterancy/escalations rather than replacing them', () => {
+    // col 0 has no veterancy/escalations in play, so this just confirms the
+    // counter doesn't clobber the enemy's base stats — a fuller escalation
+    // interaction is exercised structurally by applyCounterProtocol's own
+    // unit tests (counterProtocols.test.ts), which operate on the same
+    // clone-and-mutate shape applyEscalations uses.
+    const result = runReducer(
+      { ...act2StateAt('combat'), counterProtocol: 'hardened-veterans' as CounterProtocolId },
+      { type: 'PICK_NODE', row: 0 },
+    );
+    expect(result.currentEnemy).toBeDefined();
+    expect(result.currentEnemy!.groups[0].stats.hp).toBeGreaterThan(0);
+  });
+});
+
+describe('iteration 32.2: warp lanes (PICK_NODE via a shortcut)', () => {
+  // A hand-built act-2 state with one known shortcut (col 3 -> col 5,
+  // skipping col 4 entirely) so the test doesn't depend on which columns a
+  // real generated map happened to place its 2 shortcuts on. Both
+  // endpoints are forced to 'combat' — real placement rules already
+  // guarantee non-repair endpoints (see map.test.ts); this fixture just
+  // needs *some* known, connectable type at each end.
+  function stateWithShortcut(overrides: Partial<RunState> = {}): RunState {
+    let map = initialRunState().map;
+    map = forceNodeType(map, 3, 0, 'combat', 2);
+    map = forceNodeType(map, 5, 0, 'combat', 2);
+    map = { ...map, act2Shortcuts: [{ from: { col: 3, row: 0 }, to: { col: 5, row: 0 } }] };
+    return {
+      ...initialRunState(),
+      phase: 'map',
+      act: 2,
+      map,
+      position: { col: 3, row: 0 },
+      visited: [{ col: 3, row: 0 }],
+      ...overrides,
+    };
+  }
+
+  it('PICK_NODE with col set to the shortcut target moves 2 columns at once', () => {
+    const result = runReducer(stateWithShortcut(), { type: 'PICK_NODE', row: 0, col: 5 });
+    expect(result.position).toEqual({ col: 5, row: 0 });
+    expect(result.visited).toContainEqual({ col: 5, row: 0 });
+  });
+
+  it('skips the middle column — every one of its nodes is marked fled', () => {
+    const state = stateWithShortcut();
+    const skippedColumn = state.map.act2Columns[4];
+    const result = runReducer(state, { type: 'PICK_NODE', row: 0, col: 5 });
+    for (const node of skippedColumn) {
+      expect(result.fled).toContainEqual({ col: node.col, row: node.row });
+    }
+  });
+
+  it('PICK_NODE without col still means the normal next column (pre-32 call shape keeps working)', () => {
+    const result = runReducer(stateWithShortcut(), { type: 'PICK_NODE', row: 0 });
+    // col 3's normal next column is 4, not the shortcut's target (5).
+    expect(result.position).toEqual({ col: 4, row: result.position!.row });
+  });
+
+  it('refuses a col that matches neither the normal next column nor a real shortcut target', () => {
+    const state = stateWithShortcut();
+    const result = runReducer(state, { type: 'PICK_NODE', row: 0, col: 9 });
+    expect(result).toBe(state);
+  });
+});
+
+describe('iteration 32.3: the pursuit clock', () => {
+  // laneColumns(2) - 2 = 10 — the shortest possible route's length; the
+  // 11th and 12th act-2 lane-node arrivals each tick the clock. `visited`
+  // is faked to already hold 10 act-2-local positions so the NEXT PICK_NODE
+  // is exactly the 11th arrival, without needing 10 real dispatches.
+  function stateNearThreshold(act: 1 | 2, overrides: Partial<RunState> = {}): RunState {
+    const fakedVisited: MapPosition[] = Array.from({ length: 10 }, (_, i) => ({ col: i, row: 0 }));
+    let map = initialRunState().map;
+    map = forceNodeType(map, 10, 0, 'combat', 2);
+    return {
+      ...initialRunState(),
+      phase: 'map',
+      act,
+      map,
+      heat: 0,
+      position: { col: 9, row: 0 },
+      visited: [...fakedVisited],
+      ...overrides,
+    };
+  }
+
+  it('adds +1 heat on the 11th act-2 lane-node arrival, on top of whatever the node itself does', () => {
+    const result = runReducer(stateNearThreshold(2), { type: 'PICK_NODE', row: 0 });
+    // col 10 is 'combat' — combat never adds heat on its own, so the whole
+    // +1 here is the pursuit tax, isolating it from the dock system.
+    expect(result.heat).toBe(1);
+  });
+
+  it('does not tax the 10th arrival — the shortest possible route pays no tax', () => {
+    const state = stateNearThreshold(2, { visited: Array.from({ length: 9 }, (_, i) => ({ col: i, row: 0 })) });
+    const result = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(result.heat).toBe(0);
+  });
+
+  it('never applies in act 1, no matter how many nodes have been visited', () => {
+    let map = initialRunState().map;
+    map = forceNodeType(map, 9, 0, 'combat', 1);
+    const state = stateNearThreshold(1, { map, position: { col: 8, row: 0 } });
+    const result = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(result.heat).toBe(0);
+  });
+
+  it('never applies on the boss node, even past the threshold', () => {
+    const state = stateNearThreshold(2, { position: { col: 11, row: 0 } });
+    const result = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(result.currentEnemy).toBeDefined(); // reached the boss fight
+    expect(result.heat).toBe(0); // no pursuit tax on the boss arrival itself
+  });
+
+  it('stacks with a dock\'s own +1-to-enter heat (a shop past the threshold costs 2 total)', () => {
+    let map = initialRunState().map;
+    map = forceNodeType(map, 10, 0, 'shop', 2);
+    const state = stateNearThreshold(2, { map });
+    const result = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(result.heat).toBe(2); // 1 pursuit tax + 1 dock-entry
+  });
+
+  it('a pursuit tax that pushes heat to MAX intercepts a dock arrival exactly like any other Hunted arrival', () => {
+    let map = initialRunState().map;
+    map = forceNodeType(map, 10, 0, 'shop', 2);
+    const state = stateNearThreshold(2, { map, heat: MAX_HEAT - 1 });
+    const result = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(result.interceptionActive).toBe(true);
+    expect(result.phase).toBe('prep');
   });
 });

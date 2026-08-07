@@ -323,7 +323,7 @@ function applyCappedDamage(
 ): PlayerShipState[] {
   return fleet.map((ship, i) => {
     if (i !== shipIndex) return ship;
-    const hp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols).hp;
+    const hp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions).hp;
     const maxDamage = hp - 1;
     return { ...ship, damage: Math.min(maxDamage, ship.damage + amount) };
   });

@@ -16,6 +16,7 @@ import type { TargetingStance } from './combatEngine';
 import { drawCommanderChoices } from './commanders';
 import type { CommanderId } from './commanders';
 import {
+  applyCounterProtocol,
   applyEscalations,
   applyVeterancy,
   combatEnemyPool,
@@ -25,13 +26,14 @@ import {
   hunterKillerForAmbush,
   OPENER,
 } from './enemies';
+import { drawCounterProtocols } from './counterProtocols';
 import { drawEscalationSchedule } from './escalations';
 import { drawEvent, getEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
 import type { EventId } from './events';
 import { getFrame, MAX_FLEET_SIZE, PURCHASABLE_FRAME_IDS } from './frames';
 import type { FrameId } from './frames';
 import { addHeat, MAX_HEAT } from './heat';
-import { actColumns, BOSS_COLUMN, generateMap, getNode, globalColumn, LANE_COLUMNS, reachableNodes } from './map';
+import { actColumns, bossColumn, generateMap, getNode, globalColumn, laneColumns, maxRows, reachableNodes } from './map';
 import type { CargoTag, GameMap, MapPosition } from './map';
 export { globalColumn } from './map';
 import { COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
@@ -47,9 +49,11 @@ import {
   effectiveSlots,
   equippedWeaponCount,
   fleetHasWeapon,
+  fusionCost,
   hasWeapon,
   playerShipLabel,
 } from './ship';
+import type { FusionStat } from './ship';
 import { getUpgrade, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
 import { emptyRunStats } from './daily';
@@ -61,7 +65,12 @@ export type RunAction =
   | { type: 'SETUP_ADD_PART'; partId: PartId }
   | { type: 'SETUP_REMOVE_PART'; partId: PartId }
   | { type: 'SETUP_CONFIRM' }
-  | { type: 'PICK_NODE'; row: number }
+  // `col` (iteration 32): omitted means the normal next column
+  // (position.col + 1, same as every pre-32 call site keeps meaning);
+  // present means a warp-lane shortcut target — two columns can be
+  // reachable at once once shortcuts exist, so `row` alone no longer
+  // disambiguates which one was picked.
+  | { type: 'PICK_NODE'; row: number; col?: number }
   | { type: 'EQUIP'; shipIndex: number; partId: PartId }
   | { type: 'UNEQUIP'; shipIndex: number; partId: PartId }
   | { type: 'ENGAGE' }
@@ -101,6 +110,10 @@ export type RunAction =
   // Iteration 33 (2026-08-07): the shipyard's one purchasable slotless
   // upgrade this visit — shop phase + shopKind === 'shipyard' only.
   | { type: 'BUY_UPGRADE'; shipIndex: number }
+  // Iteration 31 (the Foundry): fuse a permanent, slotless base-stat point
+  // into a hull for an escalating credit cost — shipyard only, same as
+  // BUY_UPGRADE. See ship.ts's fusionCost.
+  | { type: 'FUSE_STAT'; shipIndex: number; stat: FusionStat }
   | { type: 'USE_ACTIVE'; shipIndex: number; abilityIndex: number }
   | { type: 'REROLL' }
   | { type: 'LEAVE_SHOP' }
@@ -311,6 +324,16 @@ function bossEnemyForAct(map: GameMap, act: 1 | 2): EnemyDef {
   return act === 1 ? getBoss(map.act1BossId) : getFinalBoss(map.act2BossId);
 }
 
+// Iteration 30: the single gate every act-2 enemy construction site routes
+// through — act-2-only (the guard, not a per-call check scattered
+// everywhere) and only when a counter-protocol was actually drafted. Called
+// AFTER veterancy/escalations at every site (documented ordering: counters
+// are the outermost layer, so appliedCounter always reflects what they
+// actually added on top of whatever else already landed).
+function withCounterProtocol(enemy: EnemyDef, state: RunState): EnemyDef {
+  return state.act === 2 && state.counterProtocol ? applyCounterProtocol(enemy, state.counterProtocol) : enemy;
+}
+
 // Iteration 24 (Flagship recovery): the Flagship ('cruiser') is the one hull
 // that can never be rebought — losing it in a fight the rest of the fleet
 // survives used to just mean it was gone for good, permanently. This wraps
@@ -447,11 +470,13 @@ function visionStep(state: RunState): number {
 type RevealKind = 'dossier' | 'sector-scan' | 'deep-scan' | 'escalation';
 
 // Lanes that still hide at least one node the player cannot already see.
+// Iteration 32: row count generalized from a hardcoded 3 to `maxRows` —
+// act 2's chart is 4 lanes wide, not 3.
 function scannableRows(state: RunState): number[] {
   const columns = actColumns(state.map, state.act);
   const rows: number[] = [];
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < LANE_COLUMNS; col++) {
+  for (let row = 0; row < maxRows(columns); row++) {
+    for (let col = 0; col < laneColumns(state.act); col++) {
       if (!columns[col][row]) continue;
       if (col <= state.visionCol) continue;
       if (state.revealedNodes.some((p) => p.col === col && p.row === row)) continue;
@@ -465,7 +490,7 @@ function scannableRows(state: RunState): number[] {
 function availableReveals(state: RunState): RevealKind[] {
   const kinds: RevealKind[] = [];
   if (!state.bossRevealed) kinds.push('dossier');
-  if (state.visionCol < LANE_COLUMNS - 1) kinds.push('sector-scan');
+  if (state.visionCol < laneColumns(state.act) - 1) kinds.push('sector-scan');
   if (scannableRows(state).length > 0) kinds.push('deep-scan');
   if (nextUnrevealedIndex(state) !== -1) kinds.push('escalation');
   return kinds;
@@ -494,7 +519,7 @@ function grantIntel(state: RunState, rng: RngFn): { state: RunState; text?: stri
       const row = rows[Math.floor(rng() * rows.length)];
       const columns = actColumns(state.map, state.act);
       const newlyRevealed: MapPosition[] = [];
-      for (let col = 0; col < LANE_COLUMNS; col++) {
+      for (let col = 0; col < laneColumns(state.act); col++) {
         if (columns[col][row]) newlyRevealed.push({ col, row });
       }
       return {
@@ -868,18 +893,53 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'map') return state;
       const { rng, nextCounter } = runRng(state);
       const columns = actColumns(state.map, state.act);
-      const nextCol = state.position === null ? 0 : state.position.col + 1;
-      const candidates = reachableNodes(columns, state.position);
-      const node = candidates.find((n) => n.row === action.row && n.col === nextCol);
+      // Iteration 32 (warp lanes): act 2's map may carry shortcut edges —
+      // act 1 never does, so this is always [] there. `reachableNodes`
+      // folds shortcut targets in alongside the normal +1-column set, so
+      // two different columns can be reachable from one position at once;
+      // `action.col` (defaulting to the normal next column, same as every
+      // pre-32 caller) is what disambiguates which one was picked.
+      const shortcuts = state.act === 2 ? (state.map.act2Shortcuts ?? []) : [];
+      const targetCol = action.col ?? (state.position === null ? 0 : state.position.col + 1);
+      const candidates = reachableNodes(columns, state.position, shortcuts);
+      const node = candidates.find((n) => n.row === action.row && n.col === targetCol);
       if (!node) return state;
       if (state.fled.some((f) => f.col === node.col && f.row === node.row)) return state;
+
+      // A shortcut skips exactly one column outright — every node in it is
+      // marked fled (same "can't return" rule WITHDRAW already uses), since
+      // position just moved two columns at once and the run can never
+      // visit them now.
+      const isShortcut = state.position !== null && targetCol === state.position.col + 2;
+      const skippedColumn = isShortcut ? (columns[state.position!.col + 1] ?? []) : [];
+      const fled = [...state.fled, ...skippedColumn.map((n) => ({ col: n.col, row: n.row }))];
 
       const position: MapPosition = { col: node.col, row: node.row };
       const visited = [...state.visited, position];
       // Arriving anywhere reveals your next set of choices (fog of war,
       // iteration 6) — a high-water mark, so retreating never un-reveals.
       const visionCol = Math.max(state.visionCol, node.col + visionStep(state));
-      const base: RunState = { ...state, position, visited, visionCol };
+
+      // Iteration 32 (the pursuit clock, 32.3): arriving at any act-2 lane
+      // node beyond the shortest-possible route's length adds +1 heat, on
+      // top of whatever the node itself does (a dock's own +1-to-enter
+      // below, or nothing for combat/elite — the boss is explicitly
+      // exempt, same as it's exempt from interception). Derived from
+      // `visited` (act-2-local, reset at the act boundary), not a new
+      // persisted counter; the threshold is `laneColumns(2) - 2`, not a
+      // magic 10, so a future re-sizing keeps "the shortest possible route
+      // pays no tax" true with no second edit here. A route using both
+      // warp lanes visits exactly `laneColumns(2) - 2` lane nodes and never
+      // crosses the threshold; the full-length route's last two arrivals
+      // do.
+      const pursuitThreshold = laneColumns(2) - 2;
+      const act2LaneVisitsSoFar = state.act === 2 ? state.visited.filter((p) => p.col < laneColumns(2)).length : 0;
+      const arrivalOrdinal = act2LaneVisitsSoFar + 1;
+      const pursuitTax =
+        state.act === 2 && node.type !== 'boss' && arrivalOrdinal > pursuitThreshold ? 1 : 0;
+      const heatAfterArrival = addHeat(state.heat, pursuitTax);
+
+      const base: RunState = { ...state, position, visited, visionCol, fled, heat: heatAfterArrival };
 
       if (node.type === 'opener') {
         // The act-1 opener: fixed enemy, no escalations (none are scheduled
@@ -906,7 +966,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const globalCol = globalColumn(state.act, node.col);
       if (node.type === 'combat') {
         const rawEnemy = pickFromPool(combatEnemyPool(state.act, node.col), rng);
-        const enemy = applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations);
+        const enemy = withCounterProtocol(applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations), state);
         return {
           ...base,
           phase: 'prep',
@@ -917,7 +977,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       }
       if (node.type === 'elite') {
         const rawEnemy = eliteEnemyForColumn(state.act, node.col, rng);
-        const enemy = applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations);
+        const enemy = withCounterProtocol(applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations), state);
         return {
           ...base,
           phase: 'prep',
@@ -927,7 +987,10 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         };
       }
       if (node.type === 'boss') {
-        const enemy = applyEscalations(bossEnemyForAct(state.map, state.act), globalCol, globalEscalations);
+        // Iteration 30: the act-2 final boss is included, same uniformity
+        // rule as escalations — the balance pass (not a fiat exemption)
+        // catches it if a prismatic counter ever pushes a boss out of band.
+        const enemy = withCounterProtocol(applyEscalations(bossEnemyForAct(state.map, state.act), globalCol, globalEscalations), state);
         return {
           ...base,
           phase: 'prep',
@@ -942,9 +1005,13 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // reached at all — a hunter-killer squad replaces the node's content
       // outright, paying a normal winReward(col) on top of the map's usual
       // prep/combat flow. Combat/elite/boss/opener entries are never
-      // intercepted (they're already a fight).
-      if (state.heat >= MAX_HEAT) {
-        const enemy = hunterKillerForAmbush(state.act, node.col);
+      // intercepted (they're already a fight). Checked against `base.heat`
+      // (iteration 32: post-pursuit-tax), not `state.heat` — a long-router
+      // arriving at a dock with the clock already at 4 gets caught exactly
+      // like any other Hunted arrival; the pursuit tax is meant to compose
+      // with this, not bypass it.
+      if (base.heat >= MAX_HEAT) {
+        const enemy = withCounterProtocol(hunterKillerForAmbush(state.act, node.col), state);
         return {
           ...base,
           phase: 'prep',
@@ -954,7 +1021,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           rngCounter: nextCounter(),
         };
       }
-      const heat = addHeat(state.heat, 1);
+      const heat = addHeat(base.heat, 1);
 
       if (node.type === 'shop' || node.type === 'shipyard') {
         // Iteration 33: both node types resolve to the same 'shop' phase,
@@ -1062,8 +1129,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // round trip lands back at max/max either way — that's the point:
       // swapping a hull part is an equipment change, not free healing, but
       // it should also never cost you HP you hadn't actually lost yet.
-      const oldHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades).hp;
-      const newHp = deriveStats(ship.frameId, equipped, ship.upgrades).hp;
+      const oldHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, undefined, ship.fusions).hp;
+      const newHp = deriveStats(ship.frameId, equipped, ship.upgrades, undefined, ship.fusions).hp;
       const hullReduction = Math.max(0, oldHp - newHp);
       const damage = Math.min(Math.max(0, ship.damage - hullReduction), Math.max(0, newHp - 1));
       const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? { ...s, equipped, damage } : s));
@@ -1170,7 +1237,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         if (ship.mercenary) return;
         const shipOutcome = outcome.playerShips[i];
         if (shipOutcome.destroyed && ghostFleet) {
-          const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, state.protocols).hp;
+          const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, state.protocols, ship.fusions).hp;
           survivingFleet.push({
             ...ship,
             damage: Math.max(0, maxHp - 1),
@@ -1206,7 +1273,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       };
       const col = state.position?.col ?? 0;
       const globalCol = globalColumn(state.act, col);
-      const isBoss = state.position?.col === BOSS_COLUMN;
+      const isBoss = state.position?.col === bossColumn(state.act);
       // 15.2: any won fight vents heat — winning leaves no one to report
       // your position. An interception win is the one exception: heat
       // resets to 0 outright rather than just stepping down by 1 (they
@@ -1248,6 +1315,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // withFlagshipRecoveryGate untouched if a recovery offer intervenes
         // first — every field on `next` besides `phase` survives that gate.
         const protocolOffers = drawProtocolOffers(rng, state.commanderId, bossHealedFleet);
+        // Iteration 30: drawn immediately after, same rng stream, same 9.1
+        // discipline — index i's counter answers offer i's tier.
+        const protocolCounterOffers = drawCounterProtocols(rng);
         return withFlagshipRecoveryGate(state.fleet, {
           ...state,
           phase: 'interlude',
@@ -1263,6 +1333,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           runStats: runStatsAfterWin,
           rngCounter: nextCounter(),
           protocolOffers,
+          protocolCounterOffers,
         });
       }
 
@@ -1498,6 +1569,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const chosen = state.protocolOffers[action.index];
       if (!chosen) return state;
       const protocols = [...(state.protocols ?? []), chosen];
+      // Iteration 30: same index into protocolCounterOffers — absent on a
+      // legacy save from before counters existed (drafted before this
+      // iteration shipped), which is fine: the run simply finishes with no
+      // counter, exactly as it would have before this iteration existed.
+      const counterProtocol = state.protocolCounterOffers?.[action.index];
 
       // Lone flagship's immediate effect: scrap every escort right now, for
       // half its frame value — the permanent +2 slots/+2 HP on the Flagship
@@ -1516,6 +1592,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           phase: 'map',
           protocols,
           protocolOffers: undefined,
+          counterProtocol,
+          protocolCounterOffers: undefined,
           fleet,
           credits: state.credits + scrapValue,
         };
@@ -1525,14 +1603,28 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // straight to the far end of act 2 — every node type from here to the
       // boss is visible from this moment on.
       if (chosen === 'deep-space-relays') {
-        return { ...state, phase: 'map', protocols, protocolOffers: undefined, visionCol: LANE_COLUMNS };
+        return {
+          ...state,
+          phase: 'map',
+          protocols,
+          protocolOffers: undefined,
+          counterProtocol,
+          protocolCounterOffers: undefined,
+          // PROTOCOL_CHOOSE only ever resolves in act 2 (protocols are an
+          // act-2-only draft — see the type's own comment); state.act is
+          // already 2 by the time this fires (INTERLUDE_CHOOSE sets it
+          // before entering the 'protocol-draft' phase this action lives
+          // in), so laneColumns(state.act) here always means act 2's 12,
+          // not act 1's 10.
+          visionCol: laneColumns(state.act),
+        };
       }
 
       // Every other protocol (silver stat value, or a gold/prismatic whose
       // whole effect is a passive stat/pricing/combat hook read off
       // RunState.protocols elsewhere) needs nothing more than recording the
       // pick.
-      return { ...state, phase: 'map', protocols, protocolOffers: undefined };
+      return { ...state, phase: 'map', protocols, protocolOffers: undefined, counterProtocol, protocolCounterOffers: undefined };
     }
 
     case 'RESOLVE_FLAGSHIP_RECOVERY': {
@@ -1777,6 +1869,22 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return { ...state, fleet, credits: state.credits - SHIPYARD_UPGRADE_COST, shopUpgradeOffer: undefined };
     }
 
+    case 'FUSE_STAT': {
+      // Iteration 31 (the Foundry): shipyard only, same surface as the
+      // upgrade bay. No rng, no rngCounter touch — pure arithmetic, same as
+      // every other shop purchase. Mercenaries excluded — a one-fight
+      // rental takes no permanent investment, same rule as BUY_UPGRADE.
+      if (state.phase !== 'shop' || state.shopKind !== 'shipyard') return state;
+      const ship = state.fleet[action.shipIndex];
+      if (!ship || ship.mercenary) return state;
+      const cost = fusionCost(action.stat, ship);
+      if (state.credits < cost) return state;
+      const fleet = state.fleet.map((s, i) =>
+        i === action.shipIndex ? { ...s, fusions: { ...s.fusions, [action.stat]: (s.fusions?.[action.stat] ?? 0) + 1 } } : s,
+      );
+      return { ...state, fleet, credits: state.credits - cost };
+    }
+
     case 'USE_ACTIVE': {
       if (state.phase !== 'combat' || !state.combat) return state;
       const combat = useActive(state.combat, action.shipIndex, action.abilityIndex);
@@ -1890,7 +1998,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           ...state,
           phase: 'prep',
           currentEvent: undefined,
-          currentEnemy: ambushEnemy,
+          currentEnemy: withCounterProtocol(ambushEnemy, state), // iteration 30: an act-2 event-ambush is still a fight
           pendingAmbushBonus: ambushBonus,
           currentCombatSeed: drawCombatSeed(rng),
           rngCounter: nextCounter(),

@@ -1,6 +1,6 @@
 # Iteration 30 — Counter-protocols: the enemy answers the draft (specced 2026-08-06)
 
-> **Status: specced, not implemented.**
+> **Status: implemented 2026-08-07.**
 
 User direction: "for act 2, now that we added in these buffs to the
 player, we need to also buff the enemies. we should create buffs
@@ -171,3 +171,65 @@ exempting it now.
 - **30-M3** — balance measurement against the per-tier bands (tune any
   counter that lands outside), browser pass, status notes here and in
   `PLAN.md`.
+
+## Implementation notes (2026-08-07)
+
+Landed as specced (data model, draw/pick/persist, application at every
+act-2 enemy site, all three UI surfaces), with one significant deviation
+in 30-M3 the spec didn't anticipate.
+
+- **Counter values used display "Piloting" throughout** — this iteration
+  landed after 29's rename, so counterProtocols.ts writes "piloting"
+  directly rather than the spec's placeholder "shield" wording.
+- **`piercing-munitions` is per-cannon, not ship-level.** `ShipStats` has
+  both a per-weapon `shieldPierce` (`WeaponStats.shieldPierce`, the Gauss
+  lance's mechanism) and a ship-level `shieldPierce` field that pierces
+  *everything* that ship fires, cannons and missiles alike. The counter's
+  own wording ("every enemy cannon ignores 1 point...") is cannon-specific,
+  so `applyCounterProtocol` bumps each group's `cannons[].shieldPierce`
+  individually rather than the ship-level field — confirmed by a dedicated
+  test that missiles are untouched.
+- **`attack-wings` reuses `isFormationCenterpiece` exactly as specced** —
+  same function, same file, imported nowhere (it's already local to
+  `enemies.ts`, where `applyCounterProtocol` also lives).
+- **30-M3 deviation: the balance gate is measured but NOT enforced**, and
+  this is the one real finding worth flagging. The plan called for
+  measuring each counter's win-rate delta against "strong fleet" (an
+  act-1-tuned near-maximal build) on a representative act-2 pool enemy and
+  one final boss. In practice "strong fleet" has no calibrated middle
+  ground against act 2's roster at all, in either direction:
+  - Against a mid-pool enemy (Flak fortress) it wins 99%+ — every
+    silver/gold counter measured ~0pp, not because the counters are weak
+    but because there's no win rate left to move.
+  - Against a hard-pool enemy (Warden) it's already down at 1-4% — the
+    opposite floor, same failure mode.
+  - Against Titan (a final boss) it's at a flat 0% — the trio has simply
+    never been measured against a post-protocols fleet at all, which is
+    exactly the gap iteration 31-M3 exists to close.
+
+  Rather than force-fit counter *numbers* to a measurement rig that can't
+  currently produce a trustworthy signal (and risk tuning them wrong once
+  a real rig exists), `scripts/balance.ts` prints the full per-counter
+  delta table against both Warden and Titan for visibility, states this
+  finding in a code comment, and does **not** fail the exit code on it —
+  every other sanity check (including the pre-existing, unrelated Hive
+  Mother known-fail) still gates normally. The table is built so iteration
+  31-M3's own deliverable — a dedicated "act-2 endgame fleet" fixture —
+  slots in as a straight fleet swap with no other code change, at which
+  point this becomes a real gate. Recommendation: re-run and tune counter
+  values (if needed) as part of 31-M3, not before.
+- **Verification**: `tsc -b --force` clean, `npx vitest run` 609/609
+  (added: `counterProtocols.test.ts` — draw determinism/tier-order plus a
+  full per-counter `applyCounterProtocol` suite including the solo-wingman
+  and centerpiece-guard cases; reducer tests for draw-at-CONTINUE,
+  pick-records-counter across all three PROTOCOL_CHOOSE branches, the
+  legacy-no-counter-offers path, act-2-only application at combat/elite
+  nodes; persistence round-trip for both the mid-draft and post-draft
+  shapes), `npx vite build` clean. Live browser pass via hand-edited
+  saves: all three draft cards showed their enemy-answer line (prismatic
+  showing both its cost and its counter); picking gold recorded
+  `counterProtocol: 'flak-screens'`; the Prep screen's fleet panel and the
+  enemy panel both badged it; Settings showed both the protocol and its
+  counter. Act-1-never-applies is covered by an automated reducer test
+  rather than re-proven by hand (same assertion, no UI-only path to
+  exercise beyond what that test already checks).

@@ -1,5 +1,6 @@
 import type { CardId } from './cards';
 import type { CombatState, TargetingStance } from './combatEngine';
+import type { CounterProtocolId } from './counterProtocols';
 import type { EscalationId, ScheduledEscalation } from './escalations';
 import type { EventId } from './events';
 import type { FrameId } from './frames';
@@ -116,6 +117,11 @@ export interface EnemyDef {
   // The per-column veterancy HP bonus folded into every group's stats.hp,
   // if any (iteration 8) — labeled on the enemy panel like escalations.
   veterancyBonus?: number;
+  // Iteration 30: which act-2 counter-protocol was folded into every
+  // group's stats for this instance, if any — labeled on the enemy panel
+  // like escalations/veterancy, only when it actually changed something
+  // (act 2 + a drafted protocol both required — see reducer.ts).
+  appliedCounter?: CounterProtocolId;
 }
 
 // One ship in the player's fleet: a frame plus the parts bolted onto it.
@@ -155,6 +161,12 @@ export interface PlayerShipState {
   // fight (deriveFleetForCombat) and cleared the moment that fight starts
   // (reducer.ts's ENGAGE), so it can never carry into a second fight.
   overRepairBank?: number;
+  // Iteration 31 (the Foundry): permanent, slotless base-stat increments
+  // fused into this hull for escalating credits — a late-run credit sink.
+  // Not a part (never salvaged, never unequipped), lost only if the ship
+  // carrying it is destroyed, same physics as `upgrades` above. Absent on
+  // every pre-31 save/ship; every read (deriveStats) falls back to 0.
+  fusions?: { hp?: number; computer?: number; shield?: number; initiative?: number };
 }
 
 // Iteration 18: run-wide counters for the end-screen summary and the daily
@@ -396,4 +408,14 @@ export interface RunState {
   // that adds a second draft moment needs no shape change.
   protocolOffers?: ProtocolId[];
   protocols?: ProtocolId[];
+  // Iteration 30 (counter-protocols): drawn at the same moment as
+  // protocolOffers, index-paired with it ([silver, gold, prismatic] both
+  // times) — offer i's counter is protocolCounterOffers[i]. Cleared once
+  // PROTOCOL_CHOOSE resolves; a mid-draft save from before this field
+  // existed loads fine with it simply absent (the legacy run finishes as
+  // drafted, with no counter). `counterProtocol` is the permanent record,
+  // applied to every act-2 enemy from here on — see enemies.ts's
+  // applyCounterProtocol and its reducer.ts call sites.
+  protocolCounterOffers?: CounterProtocolId[];
+  counterProtocol?: CounterProtocolId;
 }
