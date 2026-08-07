@@ -141,7 +141,20 @@ const FRAME_SHAPES: Record<FrameId, React.ReactNode> = {
     </>
   ),
 
-  // --- Support hulls (iteration 23) ---
+  // Iteration 36: a plain, small utility hull — no gimmick shape (that's
+  // the point: identity lives on whatever part it's carrying, not the
+  // frame). Slimmer than the Interceptor, no wings, no antenna.
+  corvette: (
+    <>
+      <polygon points="50,12 58,30 58,88 50,96 42,88 42,30" />
+      <polygon points="42,50 26,60 42,68" fill="var(--bg)" opacity="0.5" />
+      <polygon points="58,50 74,60 58,68" fill="var(--bg)" opacity="0.5" />
+      <polygon points="45,82 55,82 52,94 48,94" fill="var(--bg)" opacity="0.6" />
+    </>
+  ),
+
+  // --- Legacy support hulls (iteration 23, retired iteration 36) — kept
+  // only so an existing save's fleet still renders. ---
   frigate: ( // slim hull + a dish — a coordination ship, not a combatant
     <>
       <polygon points="50,15 60,35 60,85 50,95 40,85 40,35" />

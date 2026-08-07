@@ -408,13 +408,16 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
     expect(state.credits).toBe(20 - 6); // interceptor cost (6 as of iteration 5)
   });
 
-  it('adds a Bastion to the fleet, pre-fitted with a lure beacon', () => {
+  // Iteration 36: hulls stopped bundling an identity part — Bastion now
+  // arrives blank (any hull can carry a lure beacon, it's just a part) and
+  // reprices 12 -> 9cr since it no longer includes one.
+  it('adds a Bastion to the fleet, no starting fit (iteration 36: identity moved to parts)', () => {
     let state = stateWithMap('shop', { phase: 'shop', credits: 20, shopFrameOffers: ['bastion'] });
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'bastion' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1].frameId).toBe('bastion');
-    expect(state.fleet[1].equipped).toEqual(['lure']);
-    expect(state.credits).toBe(20 - 12); // bastion cost
+    expect(state.fleet[1].equipped).toEqual([]);
+    expect(state.credits).toBe(20 - 9); // bastion cost (repriced iteration 36)
   });
 
   it('refuses when the fleet is already at the cap', () => {
@@ -469,23 +472,30 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
     expect(state.fleet[1].equipped).toHaveLength(4); // ion + shield + 2 plasma fill all 4 slots, no weapon-cap refusal
   });
 
-  // Iteration 23: the five support hulls each arrive pre-fitted with their
-  // one signature active/passive part.
-  it('the five support hulls (iteration 23) each arrive pre-fitted with their signature part', () => {
-    const cases: ['frigate' | 'aegis' | 'tender' | 'ew-cutter' | 'disruptor-cutter', string][] = [
-      ['frigate', 'tacrelay'],
-      ['aegis', 'shieldharmonic'],
-      ['tender', 'repairbay'],
-      ['ew-cutter', 'ecm'],
-      ['disruptor-cutter', 'disruptor'],
-    ];
-    for (const [frameId, partId] of cases) {
-      const state = stateWithMap('shop', { phase: 'shop', credits: 20, shopFrameOffers: [frameId] });
-      const result = runReducer(state, { type: 'BUY_SHIP', frameId });
-      expect(result.fleet).toHaveLength(2);
-      expect(result.fleet[1].frameId).toBe(frameId);
-      expect(result.fleet[1].equipped).toEqual([partId]);
+  // Iteration 36: the five support hulls (iteration 23) are retired from
+  // the shop — their bundled signature part is now just an ordinary part
+  // any hull can carry. The Corvette replaces them as the one cheap
+  // utility carrier, and arrives with no starting fit (a blank slate, like
+  // the Freighter/Derelict).
+  it('the Corvette (iteration 36) arrives with no starting fit, and the five retired support hulls are gone from the shop pool', () => {
+    let state = stateWithMap('shop', { phase: 'shop', credits: 20, shopFrameOffers: ['corvette'] });
+    state = runReducer(state, { type: 'BUY_SHIP', frameId: 'corvette' });
+    expect(state.fleet).toHaveLength(2);
+    expect(state.fleet[1].frameId).toBe('corvette');
+    expect(state.fleet[1].equipped).toEqual([]);
+    expect(state.credits).toBe(20 - 6); // corvette cost
+
+    for (const frameId of ['frigate', 'aegis', 'tender', 'ew-cutter', 'disruptor-cutter'] as const) {
+      expect(PURCHASABLE_FRAME_IDS).not.toContain(frameId);
     }
+  });
+
+  // A save from before iteration 36 can still carry a legacy support hull
+  // in its fleet — FRAMES still has a full entry for each, so stats derive
+  // correctly even though the shop never offers one again.
+  it('a legacy support hull (retired iteration 36) still derives stats correctly if a save carries one', () => {
+    const stats = deriveStats('aegis', ['shieldharmonic']);
+    expect(stats.hp).toBe(2); // aegis's own baseHp — shieldharmonic is a fleet-wide aura, not a self-buff
   });
 
   // Iteration 21 (the Admiral, wide): every purchasable frame 25% off,
@@ -494,7 +504,7 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
   it('the Admiral buys every frame 25% cheaper, rounded down in the player\'s favor', () => {
     const cases: ['interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser', number][] = [
       ['interceptor', 4], // 6cr -> floor(4.5) = 4
-      ['bastion', 9], // 12cr -> floor(9) = 9
+      ['bastion', 6], // 9cr (iteration 36 repricing) -> floor(6.75) = 6
       ['dreadnought', 22], // 30cr (2026-08-06 repricing) -> floor(22.5) = 22
       ['light-cruiser', 16], // 22cr (2026-08-06 repricing) -> floor(16.5) = 16
     ];

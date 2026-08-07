@@ -241,6 +241,32 @@ body {
   color: var(--accent);
 }
 
+/* Iteration 36: parts/hulls rarity — same visual language as protocol
+   tiers above (mono, uppercase, color-only), a distinct class so the two
+   systems can't be confused for each other in the markup. */
+.wiki-rarity {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.wiki-rarity--common {
+  color: var(--rarity-common);
+}
+
+.wiki-rarity--rare {
+  color: var(--rarity-rare);
+}
+
+.wiki-rarity--epic {
+  color: var(--rarity-epic);
+}
+
+.wiki-rarity--legendary {
+  color: var(--rarity-legendary);
+}
+
 .wiki-cost {
   display: block;
   color: var(--danger);

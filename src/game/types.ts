@@ -12,10 +12,17 @@ export type PartType = 'weapon' | 'computer' | 'shield' | 'hull' | 'drive' | 'ca
 
 export type WeaponKind = 'cannon' | 'missile';
 
+// Iteration 36: shared by parts and frames — governs both display (grey/
+// blue/purple/gold) and shop-appearance odds (see reducer.ts's
+// RARITY_WEIGHTS). Required on every Part/Frame rather than optional: a
+// compile error on an unassigned item beats a silently-common default.
+export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
+
 export interface Part {
   id: string;
   name: string;
   type: PartType;
+  rarity: Rarity;
   description: string;
   cost: number; // shop price in credits
   // Weapon parts fire `diceCount` dice of `damage` each, in the given phase.

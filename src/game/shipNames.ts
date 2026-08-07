@@ -27,6 +27,7 @@ const HULL_CODE: Record<Exclude<FrameId, 'cruiser'>, string> = {
   bastion: 'BAS',
   freighter: 'FRT',
   derelict: 'DER',
+  corvette: 'CRV',
   frigate: 'SIG',
   aegis: 'AEG',
   tender: 'TDR',

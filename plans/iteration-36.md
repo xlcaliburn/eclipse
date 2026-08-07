@@ -1,9 +1,16 @@
 # Iteration 36 — Hulls as bases, rarity tiers, and the stat-item ladder (specced 2026-08-07)
 
-> **Status: specced, not implemented.**
-> Depends on nothing pending. Iteration 35 (cards/hand removal, uncommitted
-> as of this spec) should land first — this iteration edits the same files
-> (`parts.ts`, `reducer.ts`, `Wiki.tsx`).
+> **Status: implemented (2026-08-08).** All four milestones landed: hull
+> roster stripped of bundled identity parts with the Corvette replacing
+> the five retired support hulls (kept legacy for old saves), rarity core
+> (`Rarity` type + required field, `drawRarityWeighted` driving both part
+> and frame shop offers, UI tinting via the four `--rarity-*` tokens), the
+> stat-item ladder (`shield3`/`hull3`/`init2` new, comp3/init3 repriced to
+> 9cr), and the wiki's rarity columns. 655 tests passing, `tsc -b` and
+> `vite build` clean. No browser pass, per the standing policy — verify
+> live at your convenience. Per 36.2's determinism note: existing seed
+> codes now produce different shop offers (one extra rng draw per offer
+> slot) — expected, not a bug.
 
 User direction: "move the 'special ships' (eg bastion's lure beacon and the
 shield harmonic, etc) into items, and keep ships as just the base, so that

@@ -53,7 +53,7 @@ import { getUpgrade, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
 import { emptyRunStats } from './daily';
 import { shipName } from './shipNames';
-import type { CombatEvent, EnemyDef, PartId, PlayerShipState, RewardSummary, RunState, RunStats } from './types';
+import type { CombatEvent, EnemyDef, PartId, PlayerShipState, Rarity, RewardSummary, RunState, RunStats } from './types';
 
 export type RunAction =
   | { type: 'CHOOSE_COMMANDER'; commanderId: CommanderId }
@@ -140,20 +140,18 @@ export const SETUP_BUDGET = 12;
 // fancier has to be earned via the run's real trade stations.
 export const SETUP_ALLOWED_PARTS: PartId[] = ['ion', 'hull1', 'shield1', 'comp1'];
 
-// A purchased ship arrives pre-fitted with one signature part, like the
-// Flagship's own starting loadout — an Interceptor with an ion cannon, a
-// Bastion with the lure beacon its whole role depends on, a Cruiser with
-// the same ion cannon (its identity is having no gimmick). The Freighter
-// and Derelict have no signature identity part — blank slates for whatever
-// the fleet needs at that point in the run (or, for the Derelict, simply
-// too cheap to arrive with anything at all). The Dreadnought (2026-08-06:
-// repriced to 30cr as the top of the interceptor/cruiser/dreadnought
-// progression) now arrives combat-ready instead of an empty premium hull —
-// 2 ion cannons + a Gauss shield, 3 of its 8 slots, matching frames.ts's
-// own blurb.
+// A purchased ship arrives pre-fitted with a small stat loadout — never an
+// identity part. Iteration 36: hulls stopped bundling a specific part
+// (Bastion's lure beacon, the support hulls' signature actives) as their
+// whole role — identity now lives entirely on the part, which any hull can
+// carry. What's left here is pure "arrives combat-ready" QoL: an
+// Interceptor with an ion cannon, a Dreadnought/Cruiser with a fuller
+// starting fit matching their frames.ts blurb. Freighter, Derelict, and
+// Corvette have no starting fit at all — blank slates for whatever the
+// fleet needs.
 const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   interceptor: ['ion'],
-  bastion: ['lure'],
+  bastion: [],
   dreadnought: ['ion', 'ion', 'shield1'],
   // 2026-08-06 (the same midrange-progression repricing): now arrives with
   // a Gauss shield alongside its ion cannon — a real starting stat, not
@@ -161,11 +159,16 @@ const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   'light-cruiser': ['ion', 'shield1'],
   freighter: [],
   derelict: [],
-  frigate: ['tacrelay'],
-  aegis: ['shieldharmonic'],
-  tender: ['repairbay'],
-  'ew-cutter': ['ecm'],
-  'disruptor-cutter': ['disruptor'],
+  corvette: [],
+  // Legacy support hulls (iteration 23, retired iteration 36) — never
+  // purchasable any more (see frames.ts), so this never actually runs, but
+  // every FrameId key is still required here. Left blank rather than
+  // resurrecting their old bundles.
+  frigate: [],
+  aegis: [],
+  tender: [],
+  'ew-cutter': [],
+  'disruptor-cutter': [],
 };
 
 function setupSpent(equipped: PartId[]): number {
@@ -582,15 +585,57 @@ const DEFENSE_POOL = PARTS.filter((p) => p.type === 'shield' || p.type === 'hull
 const COMPUTER_DRIVE_POOL = PARTS.filter((p) => p.type === 'computer' || p.type === 'drive');
 const ACTIVE_POOL = PARTS.filter((p) => p.active);
 
-// Uniqueness by filtering the stratum to parts not already drawn — exactly
-// one rng draw per slot either way. The fallback to the unfiltered pool is
-// defensive only: no stratum can be exhausted by the five other slots.
-function drawUniqueFrom(pool: { id: PartId }[], taken: Set<PartId>, rng: RngFn): PartId {
-  const fresh = pool.filter((p) => !taken.has(p.id));
-  const source = fresh.length > 0 ? fresh : pool;
-  const id = source[Math.floor(rng() * source.length)].id;
-  taken.add(id);
-  return id;
+// Iteration 36 (rarity): shop odds per offer slot — legendary finds are
+// meant to be rare enough to feel like an event, common ones fill most of
+// the catalog. Sums to 1.
+const RARITY_WEIGHTS: Record<Rarity, number> = {
+  common: 0.73,
+  rare: 0.2,
+  epic: 0.05,
+  legendary: 0.02,
+};
+// Ordered low -> high; index doubles as "distance from common" for the
+// fallback walk below.
+const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
+
+function rollRarity(rng: RngFn): Rarity {
+  const roll = rng();
+  let cumulative = 0;
+  for (const tier of RARITY_ORDER) {
+    cumulative += RARITY_WEIGHTS[tier];
+    if (roll < cumulative) return tier;
+  }
+  return 'legendary'; // floating-point guard — cumulative should hit 1 exactly
+}
+
+// The single draw every shop offer slot (part or hull) goes through: roll a
+// tier by RARITY_WEIGHTS, then draw uniformly from (pool ∩ that tier ∖
+// taken). If that's empty — the tier's exhausted, or nothing of that tier
+// exists in this particular type-filtered pool — fall back one tier at a
+// time toward common, then walk back up past the rolled tier toward
+// legendary. The slot always fills as long as the pool itself isn't fully
+// taken (every real call site has far more candidates than offer slots).
+function drawRarityWeighted<T extends { id: string; rarity: Rarity }>(
+  pool: T[],
+  taken: Set<string>,
+  rng: RngFn,
+): string {
+  const rolledIndex = RARITY_ORDER.indexOf(rollRarity(rng));
+  const tryOrder = [0, -1, -2, -3, 1, 2, 3].map((offset) => rolledIndex + offset);
+  for (const idx of tryOrder) {
+    if (idx < 0 || idx >= RARITY_ORDER.length) continue;
+    const tier = RARITY_ORDER[idx];
+    const candidates = pool.filter((p) => p.rarity === tier && !taken.has(p.id));
+    if (candidates.length === 0) continue;
+    const id = candidates[Math.floor(rng() * candidates.length)].id;
+    taken.add(id);
+    return id;
+  }
+  // Defensive only: every tier (including cross-tier) came up empty, which
+  // means the whole pool is already taken. Never crash a shop draw over it.
+  const fallback = pool.find((p) => !taken.has(p.id)) ?? pool[0];
+  taken.add(fallback.id);
+  return fallback.id;
 }
 
 // Iteration 21 (signature stock): each commander always finds their
@@ -639,12 +684,12 @@ export function partCost(partId: PartId, commanderId: CommanderId | undefined, p
 function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: ProtocolId[]): PartId[] {
   const taken = new Set<PartId>();
   const offers = [
-    drawUniqueFrom(WEAPON_POOL, taken, rng),
-    drawUniqueFrom(WEAPON_POOL, taken, rng),
-    drawUniqueFrom(DEFENSE_POOL, taken, rng),
-    drawUniqueFrom(DEFENSE_POOL, taken, rng),
-    drawUniqueFrom(COMPUTER_DRIVE_POOL, taken, rng),
-    drawUniqueFrom(ACTIVE_POOL, taken, rng),
+    drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
+    drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
+    drawRarityWeighted(DEFENSE_POOL, taken, rng) as PartId,
+    drawRarityWeighted(DEFENSE_POOL, taken, rng) as PartId,
+    drawRarityWeighted(COMPUTER_DRIVE_POOL, taken, rng) as PartId,
+    drawRarityWeighted(ACTIVE_POOL, taken, rng) as PartId,
   ];
   const trimmed = hasProtocol(protocols, 'armada-mandate') ? offers.slice(0, SHOP_OFFER_COUNT - 1) : offers;
   const signaturePart = commanderId ? SIGNATURE_PART[commanderId] : undefined;
@@ -672,13 +717,19 @@ function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: Proto
 // eligibility — a store shows 2 (second-hand, no capital ships regardless
 // of act), a shipyard shows 4 (pristine, Dreadnought eligible once act 2
 // makes it eligible at all — the two gates AND together).
+// Iteration 36 (rarity): each offer slot rolls a rarity tier same as a part
+// slot does — the Dreadnought-eligibility filter above already excludes it
+// from `pool` in an act-1 store, so a legendary roll there simply falls
+// back to the next tier down (the Cruiser, epic) rather than ever leaking
+// a capital ship early.
 function drawFrameOffers(rng: RngFn, act: 1 | 2, kind: 'store' | 'shipyard'): Exclude<FrameId, 'cruiser'>[] {
   const dreadnoughtEligible = act === 2 && kind === 'shipyard';
-  const pool = PURCHASABLE_FRAME_IDS.filter((id) => dreadnoughtEligible || id !== 'dreadnought');
+  const pool = PURCHASABLE_FRAME_IDS.filter((id) => dreadnoughtEligible || id !== 'dreadnought').map(getFrame);
   const count = kind === 'shipyard' ? 4 : 2;
+  const taken = new Set<FrameId>();
   const offers: Exclude<FrameId, 'cruiser'>[] = [];
-  for (let i = 0; i < count && pool.length > 0; i++) {
-    offers.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  for (let i = 0; i < count && taken.size < pool.length; i++) {
+    offers.push(drawRarityWeighted(pool, taken, rng) as Exclude<FrameId, 'cruiser'>);
   }
   return offers;
 }

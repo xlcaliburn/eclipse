@@ -148,6 +148,7 @@ function PartsTable({ parts }: { parts: Part[] }) {
         <thead>
           <tr>
             <th>Part</th>
+            <th>Rarity</th>
             <th>Cost</th>
             <th>Effect</th>
           </tr>
@@ -158,6 +159,9 @@ function PartsTable({ parts }: { parts: Part[] }) {
               <td>
                 {p.name}
                 {p.active && <span className="wiki-tag">active</span>}
+              </td>
+              <td>
+                <span className={`wiki-rarity wiki-rarity--${p.rarity}`}>{p.rarity}</span>
               </td>
               <td className="wiki-num">{p.cost}cr</td>
               <td>{p.description}</td>
@@ -310,6 +314,7 @@ export function Wiki() {
               <thead>
                 <tr>
                   <th>Hull</th>
+                  <th>Rarity</th>
                   <th>Cost</th>
                   <th>Slots</th>
                   <th>HP</th>
@@ -327,6 +332,13 @@ export function Wiki() {
                         <FrameSilhouette frameId={f.id} size={28} />
                         {f.name}
                         {id === 'cruiser' && <span className="wiki-tag">start only</span>}
+                      </td>
+                      <td>
+                        {id === 'cruiser' ? (
+                          '—'
+                        ) : (
+                          <span className={`wiki-rarity wiki-rarity--${f.rarity}`}>{f.rarity}</span>
+                        )}
                       </td>
                       <td className="wiki-num">{f.cost}cr</td>
                       <td className="wiki-num">{f.slots}</td>

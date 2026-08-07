@@ -35,6 +35,14 @@
   --player-tint: rgba(53, 217, 212, 0.06);
   --enemy-tint: rgba(255, 85, 102, 0.06);
 
+  /* Iteration 36: rarity tiers — grey/blue/purple/gold, shared by the app
+     (PartCard, shop hull cards) and the wiki (its own table styling) so a
+     retune here never has to be made twice. */
+  --rarity-common: #8b96ad;
+  --rarity-rare: #4d9dff;
+  --rarity-epic: #b571f0;
+  --rarity-legendary: #f0b429;
+
   /* Typography */
   --font-display: 'Orbitron', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;

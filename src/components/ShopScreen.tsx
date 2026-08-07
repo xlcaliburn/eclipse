@@ -268,7 +268,7 @@ export function ShopScreen({
               <button
                 key={frame.id}
                 type="button"
-                className="frame-card"
+                className={`frame-card frame-card--rarity-${frame.rarity}`}
                 onClick={() => onBuyShip(frameId)}
                 disabled={disabled}
                 title={fleetFull ? `Fleet is full — scuttle a ship below first.` : undefined}

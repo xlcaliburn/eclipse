@@ -1780,6 +1780,36 @@ h1, h2, h3 {
   font-size: 13px;
 }
 
+/* Iteration 36 (rarity): a left accent bar, layered on top of the existing
+   full border (which already carries the part's TYPE — weapon/computer/
+   shield/hull) rather than replacing it, so both signals stay visible at
+   once. The name text picks up the same color, same "grey/blue/purple/
+   gold" language the wiki uses. */
+.part-card--rarity-common {
+  border-left: 3px solid var(--rarity-common);
+}
+.part-card--rarity-common .part-card__name {
+  color: var(--rarity-common);
+}
+.part-card--rarity-rare {
+  border-left: 3px solid var(--rarity-rare);
+}
+.part-card--rarity-rare .part-card__name {
+  color: var(--rarity-rare);
+}
+.part-card--rarity-epic {
+  border-left: 3px solid var(--rarity-epic);
+}
+.part-card--rarity-epic .part-card__name {
+  color: var(--rarity-epic);
+}
+.part-card--rarity-legendary {
+  border-left: 3px solid var(--rarity-legendary);
+}
+.part-card--rarity-legendary .part-card__name {
+  color: var(--rarity-legendary);
+}
+
 .part-card__desc {
   font-size: 11px;
   color: var(--text-dim);
@@ -2572,6 +2602,33 @@ h1, h2, h3 {
 
 .frame-card__name {
   font-weight: 600;
+}
+
+/* Iteration 36 (rarity) — same accent-bar-plus-name-color treatment as
+   .part-card--rarity-* above. */
+.frame-card--rarity-common {
+  border-left: 3px solid var(--rarity-common);
+}
+.frame-card--rarity-common .frame-card__name {
+  color: var(--rarity-common);
+}
+.frame-card--rarity-rare {
+  border-left: 3px solid var(--rarity-rare);
+}
+.frame-card--rarity-rare .frame-card__name {
+  color: var(--rarity-rare);
+}
+.frame-card--rarity-epic {
+  border-left: 3px solid var(--rarity-epic);
+}
+.frame-card--rarity-epic .frame-card__name {
+  color: var(--rarity-epic);
+}
+.frame-card--rarity-legendary {
+  border-left: 3px solid var(--rarity-legendary);
+}
+.frame-card--rarity-legendary .frame-card__name {
+  color: var(--rarity-legendary);
 }
 
 /* Iteration 33: the general store's used-hull rack — a small badge above

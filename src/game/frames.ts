@@ -1,9 +1,17 @@
+import type { Rarity } from './types';
+
 // Internal id stays 'cruiser' (renaming would churn every test fixture) —
 // its display name is "Flagship" everywhere the player sees it: it's the
 // one-per-fleet ship the run's upgrades accrete onto. The iteration-9
 // purchasable frame is internally 'light-cruiser' (display name "Cruiser",
 // free again since the Flagship rename) — a distinct id, since 'cruiser'
 // is already taken.
+//
+// Iteration 36: 'frigate' | 'aegis' | 'tender' | 'ew-cutter' |
+// 'disruptor-cutter' are LEGACY — retired from the shop (see
+// PURCHASABLE_FRAME_IDS below) but kept here so a save carrying one still
+// loads and derives stats correctly. 'corvette' replaces them as the
+// roster's one cheap utility carrier.
 export type FrameId =
   | 'cruiser'
   | 'interceptor'
@@ -12,6 +20,7 @@ export type FrameId =
   | 'light-cruiser'
   | 'freighter'
   | 'derelict'
+  | 'corvette'
   | 'frigate'
   | 'aegis'
   | 'tender'
@@ -25,6 +34,7 @@ export interface Frame {
   baseInitiative: number;
   baseHp: number;
   cost: number;
+  rarity: Rarity;
   blurb: string;
   maxWeapons?: number; // undefined = no cap
 }
@@ -37,6 +47,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 0,
     baseHp: 3,
     cost: 14,
+    rarity: 'common', // never sold — the starting ship, rarity is unused but required
     blurb: 'Roomy workhorse. 6 slots, slow.',
   },
   interceptor: {
@@ -46,17 +57,24 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 2,
     baseHp: 2,
     cost: 6,
+    rarity: 'common',
     blurb: 'Fast and fragile. 3 slots, fires early, and dodges the first hit of each fight.',
   },
+  // Iteration 36: reprice 12 -> 9cr. Used to arrive pre-fitted with the
+  // lure beacon (a bundled 5cr identity part) — now hulls are pure bases
+  // (see STARTING_FIT in reducer.ts), so the bundle is gone, but a 6-HP
+  // wall is still the roster's best durability base and doesn't refund
+  // the part's full value.
   bastion: {
     id: 'bastion',
     name: 'Bastion',
     slots: 3,
     baseInitiative: 0,
     baseHp: 6,
-    cost: 12,
+    cost: 9,
+    rarity: 'rare',
     maxWeapons: 1,
-    blurb: 'Durable protector. 3 slots, at most 1 weapon, arrives with a lure beacon.',
+    blurb: 'Durable protector. 3 slots, at most 1 weapon — pair it with a lure beacon to lean into the role.',
   },
   // 2026-08-06: repriced as the top of a deliberate 3-step progression —
   // "interceptors, then something more midrange, then finally Dreadnoughts
@@ -74,6 +92,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 0,
     baseHp: 8,
     cost: 30,
+    rarity: 'legendary',
     maxWeapons: 4,
     blurb: 'One giant instead of Flagship-plus-escorts. 8 slots, max 4 weapons. Arrives fitted with 2 ion cannons and a Gauss shield.',
   },
@@ -86,6 +105,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 1,
     baseHp: 4,
     cost: 22,
+    rarity: 'epic',
     blurb: 'No gimmick — the only escort that can carry a real multi-weapon loadout. Arrives fitted with an ion cannon and a Gauss shield.',
   },
   // 5 slots for less than a 3-slot Bastion used to be the exact
@@ -99,6 +119,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 0,
     baseHp: 3,
     cost: 15,
+    rarity: 'rare',
     maxWeapons: 2,
     blurb: 'Built for freight, not fighting. 5 slots, at most 2 weapons.',
   },
@@ -109,12 +130,35 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 0,
     baseHp: 2,
     cost: 3,
+    rarity: 'common',
     blurb: 'Barely flight-worthy. 2 slots, the weakest hull in the yard — you get what you pay for.',
   },
 
-  // --- Support hulls (iteration 23): cheap, thin, capped at 1 weapon —
-  // none of these out-fight a Cruiser. They buy a fleet-wide effect
-  // instead, via the signature active part each arrives pre-fitted with. ---
+  // Iteration 36: replaces the five retired support hulls below as the
+  // roster's one cheap utility carrier — the natural home for an aura or
+  // active part now that those parts are player-assembled, not bundled.
+  corvette: {
+    id: 'corvette',
+    name: 'Corvette',
+    slots: 3,
+    baseInitiative: 1,
+    baseHp: 2,
+    cost: 6,
+    rarity: 'common',
+    maxWeapons: 1,
+    blurb: 'A cheap, thin utility hull. 3 slots, at most 1 weapon — fit it with whatever the fleet needs.',
+  },
+
+  // --- Legacy support hulls (iteration 23, retired iteration 36) ---------
+  // Each used to arrive pre-fitted with a bundled signature part — identity
+  // that now lives on the part alone (any hull can carry it). Stripped of
+  // that bundle, frigate/ew-cutter/disruptor-cutter are stat-identical to
+  // the new Corvette and aegis is a worse Derelict at 3x the price, so none
+  // has a base identity left to keep. Removed from PURCHASABLE_FRAME_IDS —
+  // no shop ever offers one again — but kept here (with a full Frame entry)
+  // so an existing save carrying one still loads and derives stats
+  // correctly. Do not resurrect without giving each a genuine base-level
+  // reason to exist (see plans/parking-lot.md's "per-hull innate quirks").
   frigate: {
     id: 'frigate',
     name: 'Signal Frigate',
@@ -122,8 +166,9 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 1,
     baseHp: 2,
     cost: 7,
+    rarity: 'common',
     maxWeapons: 1,
-    blurb: 'A coordination hull, not a combatant. 3 slots, at most 1 weapon, arrives with a tactical relay pre-wired.',
+    blurb: 'A coordination hull, not a combatant. 3 slots, at most 1 weapon.',
   },
   aegis: {
     id: 'aegis',
@@ -132,8 +177,9 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 0,
     baseHp: 2,
     cost: 9,
+    rarity: 'common',
     maxWeapons: 1,
-    blurb: "Broadcasts a shield harmonic to the whole fleet. 2 slots, thin hull — everyone feels it when this one goes down.",
+    blurb: 'Thin hull built to broadcast a shield harmonic. 2 slots.',
   },
   tender: {
     id: 'tender',
@@ -142,8 +188,9 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 0,
     baseHp: 3,
     cost: 8,
+    rarity: 'common',
     maxWeapons: 1,
-    blurb: "Carries drone repair bays, not warheads. 3 slots, at most 1 weapon, keeps the fleet's most-battered hull in the fight.",
+    blurb: 'Carries drone repair bays, not warheads. 3 slots, at most 1 weapon.',
   },
   'ew-cutter': {
     id: 'ew-cutter',
@@ -152,6 +199,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 1,
     baseHp: 2,
     cost: 8,
+    rarity: 'common',
     maxWeapons: 1,
     blurb: 'Jams enemy targeting systems before the shooting starts. 3 slots, at most 1 weapon.',
   },
@@ -162,6 +210,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseInitiative: 1,
     baseHp: 2,
     cost: 8,
+    rarity: 'common',
     maxWeapons: 1,
     blurb: 'Strips enemy shields before the shooting starts. 3 slots, at most 1 weapon.',
   },
@@ -173,6 +222,8 @@ export const MAX_FLEET_SIZE = 4;
 // exception, never purchasable (it's the single starting ship the run's
 // upgrades accrete onto). Single source of truth for both the reducer's
 // random shop-offer draw and any UI that needs the full purchasable set.
+// Iteration 36: the five legacy support hulls above are deliberately
+// excluded — see their FRAMES comment.
 export const PURCHASABLE_FRAME_IDS: Exclude<FrameId, 'cruiser'>[] = [
   'interceptor',
   'bastion',
@@ -180,11 +231,7 @@ export const PURCHASABLE_FRAME_IDS: Exclude<FrameId, 'cruiser'>[] = [
   'light-cruiser',
   'freighter',
   'derelict',
-  'frigate',
-  'aegis',
-  'tender',
-  'ew-cutter',
-  'disruptor-cutter',
+  'corvette',
 ];
 
 export function getFrame(id: FrameId): Frame {

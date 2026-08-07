@@ -26,7 +26,7 @@ export function PartCard({ part, onClick, disabled, showCost }: PartCardProps) {
   return (
     <button
       type="button"
-      className={`part-card part-card--${part.type}${part.active ? ' part-card--active' : ''}`}
+      className={`part-card part-card--${part.type} part-card--rarity-${part.rarity}${part.active ? ' part-card--active' : ''}`}
       onClick={onClick}
       disabled={disabled || !onClick}
     >
