@@ -105,12 +105,21 @@ body {
   padding: 1px 5px;
 }
 
-/* Tables */
+/* Tables — wrapped in .wiki-table-wrap (see Wiki.tsx's TableWrap) so a
+   table wider than the viewport scrolls on its own lane instead of
+   forcing the whole page to scroll sideways. The wrapper is a no-op
+   whenever a table already fits. */
+.wiki-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 8px 0 16px;
+}
+
 .wiki-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.88rem;
-  margin: 8px 0 16px;
+  margin: 0;
 }
 
 .wiki-table th,
@@ -142,7 +151,7 @@ body {
 
 .wiki-table--inline {
   width: auto;
-  margin: 8px 0 4px;
+  margin: 0;
 }
 
 /* Tags & tiers */
@@ -261,4 +270,73 @@ body {
   margin-top: 48px;
   border-top: 1px solid var(--border);
   padding-top: 16px;
+}
+
+/* Mobile (iteration 34) — this page had zero @media rules before; every
+   number below is a straight shrink of its desktop counterpart, not a
+   new layout, so the page reads the same, just fitted to a phone. Wide
+   tables are handled separately above (.wiki-table-wrap scrolls on its
+   own lane) — this block is everything else: padding, type scale, the
+   sticky nav, and the enemy-card grid's column width. */
+@media (max-width: 720px) {
+  .wiki {
+    padding: 16px 12px 64px;
+  }
+
+  .wiki h1 {
+    font-size: 1.3rem;
+  }
+
+  .wiki h2 {
+    font-size: 1rem;
+    margin: 36px 0 10px;
+  }
+
+  .wiki h3 {
+    font-size: 0.88rem;
+  }
+
+  .wiki-nav {
+    gap: 5px 10px;
+    padding: 8px 10px;
+    /* The header itself scrolls with the page on mobile — a sticky bar
+       pinned this close to the top ate too much of a phone's shorter
+       viewport height once the fixed offset was added up with the
+       browser chrome. */
+    position: static;
+  }
+
+  .wiki-nav a {
+    font-size: 0.68rem;
+  }
+
+  .wiki-table {
+    font-size: 0.8rem;
+  }
+
+  .wiki-table th,
+  .wiki-table td {
+    padding: 5px 7px;
+  }
+
+  .wiki-enemy-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .wiki-enemy-grid {
+    /* Even a 220px column can't sit two-across on the narrowest phones
+       once the card's own padding is subtracted — one column reads
+       better than two that are each too tight to hold a weapon line
+       without wrapping mid-word. */
+    grid-template-columns: 1fr;
+  }
+
+  .wiki-enemy__hp {
+    float: none;
+    display: block;
+    margin-top: 2px;
+  }
 }

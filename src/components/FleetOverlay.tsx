@@ -113,12 +113,27 @@ export function FleetOverlay({ fleet, inventory, protocols, counterProtocol, onC
 
 // Iteration 16.1: the mobile Fleet tab — the same read-only snapshot,
 // promoted to a full screen instead of a modal (desktop keeps the modal
-// above). No Close button: once the tab bar exists, it's the way out, same
-// reasoning as the Chart tab.
-export function FleetScreen({ fleet, inventory, protocols, counterProtocol }: Omit<FleetOverlayProps, 'onClose' | 'credits'>) {
+// above).
+// Iteration 35: gained a real Back button — dropping the Mission tab
+// removed the tab bar's own way back to it, so every mobile full-screen
+// tab needs its own now (matching MapScreen's existing "Close" pattern).
+export function FleetScreen({
+  fleet,
+  inventory,
+  protocols,
+  counterProtocol,
+  onClose,
+}: Omit<FleetOverlayProps, 'credits' | 'onClose'> & { onClose?: () => void }) {
   return (
     <div className="fleet-screen">
-      <h2>Your fleet</h2>
+      <div className="screen-header">
+        <h2>Your fleet</h2>
+        {onClose && (
+          <button type="button" className="shop-button" onClick={onClose}>
+            Back
+          </button>
+        )}
+      </div>
       {fleetBody(fleet, inventory, protocols, counterProtocol)}
     </div>
   );

@@ -63,6 +63,8 @@ Rules for working with these files:
 | [32](plans/iteration-32.md) | Act-2 starchart expansion: 4 rows × 12 columns, seeded warp lanes that skip a column (routes of unequal length), and a deterministic pursuit clock taxing the roundabout route with heat — FTL's fleet, on the existing heat track (implement 33 first) | implemented |
 | [33](plans/iteration-33.md) | General store / shipyard split: stores sell parts + 2 second-hand hulls (discounted, arrive damaged), shipyards sell 4 pristine hulls + purchasable upgrades (and host 31's Foundry) — shops gain routing identity | implemented |
 | [34](plans/iteration-34.md) | The relic chain: a three-stage event quest (fragment per event node, chosen costs) assembling the Ancient artifact — +4 computer / +4 piloting in one slot, the event pool's first run-spanning pull | implemented |
+| 35 | Reaction cards/hand removed (active parts now own that role; Flagship starts with the Overdrive injector as compensation; elite/command payouts flattened to credits; card events reworked to parts) + tutorial bottom-anchored on mobile + Mission tab removed, Chart → Map | implemented directly, no plan file |
+| [36](plans/iteration-36.md) | Hulls as bases: signature-part bundles stripped (support hulls retired into one Corvette), rarity tiers (common/rare/epic/legendary at 73/20/5/2% shop odds) on every part + hull, and the full +1/+2/+3 stat-item ladder (3/5/9cr) | specced |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes

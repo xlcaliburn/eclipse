@@ -207,12 +207,12 @@ function App() {
   const canPeekMap =
     showHud && state.phase !== 'map' && state.phase !== 'victory' && state.phase !== 'defeat';
 
-  // The Chart surface, shared between desktop's peek (early-return below)
-  // and mobile's tab (rendered inline further down). Desktop keeps a real
-  // Close button and stays fully interactive (unchanged pixel-for-pixel);
-  // the mobile tab drops the Close button — the tab bar is the way out —
-  // and is only interactive during the live map phase, so a read-only tab
-  // doesn't show pick affordances it can't act on.
+  // The Map surface, shared between desktop's peek (early-return below) and
+  // mobile's tab (rendered inline further down). Both keep a real Close/Back
+  // button now (iteration 35 dropped the Mission tab that used to be
+  // mobile's only way off this screen); mobile stays read-only outside the
+  // live map phase, so a read-only tab doesn't show pick affordances it
+  // can't act on.
   const chartSurface = (
     <MapScreen
       map={state.map}
@@ -224,7 +224,7 @@ function App() {
       visionCol={state.visionCol}
       escalations={state.escalations}
       bossRevealed={state.bossRevealed}
-      onClose={isCompact ? undefined : () => setSurface('mission')}
+      onClose={() => setSurface('mission')}
       interactive={isCompact ? state.phase === 'map' : true}
       onPickNode={(row, col) => dispatch({ type: 'PICK_NODE', row, col })}
     />
@@ -323,9 +323,7 @@ function App() {
               playerLabels={state.fleet.map((_, i) => playerShipLabel(state.fleet, i))}
               playerFrameIds={state.fleet.map((ship) => ship.frameId)}
               playerUpgrades={state.fleet.map((ship) => ship.upgrades)}
-              hand={state.hand}
               canWithdraw={hasLineOfRetreat(state)}
-              onPlayCard={(cardId) => dispatch({ type: 'PLAY_CARD', cardId })}
               onAdvanceRound={() => dispatch({ type: 'ADVANCE_ROUND' })}
               onContinue={() => dispatch({ type: 'CONTINUE' })}
               onWithdraw={() => dispatch({ type: 'WITHDRAW' })}
@@ -415,7 +413,7 @@ function App() {
           {state.phase === 'event' && state.currentEvent && (
             <EventScreen
               state={state}
-              onChoose={(choiceIndex, shipIndex, cardId) => dispatch({ type: 'EVENT_CHOOSE', choiceIndex, shipIndex, cardId })}
+              onChoose={(choiceIndex, shipIndex, partId) => dispatch({ type: 'EVENT_CHOOSE', choiceIndex, shipIndex, partId })}
               onContinue={() => dispatch({ type: 'EVENT_CONTINUE' })}
               onViewMap={() => setSurface('chart')}
               onViewFleet={() => setSurface('fleet')}
@@ -447,6 +445,7 @@ function App() {
           inventory={state.inventory}
           protocols={state.protocols}
           counterProtocol={state.counterProtocol}
+          onClose={() => setSurface('mission')}
         />
       )}
 
@@ -462,7 +461,12 @@ function App() {
       )}
 
       {isCompact && surface === 'settings' && (
-        <SettingsScreen seed={settingsSeed} protocols={state.protocols} counterProtocol={state.counterProtocol} />
+        <SettingsScreen
+          seed={settingsSeed}
+          protocols={state.protocols}
+          counterProtocol={state.counterProtocol}
+          onClose={() => setSurface('mission')}
+        />
       )}
 
       {!isCompact && surface === 'settings' && (

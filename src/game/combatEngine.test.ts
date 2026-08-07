@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   advanceRound,
-  applyVolley,
-  armBulkheads,
   canUseActive,
   combatOutcome,
   hasMissilePhase,
@@ -14,7 +12,6 @@ import {
   qualifiesForOutspeed,
   runToEnd,
   setPriorityTarget,
-  unconsumedContingentCards,
   useActive,
 } from './combatEngine';
 import type { EnemyDef, ShipStats } from './types';
@@ -93,87 +90,6 @@ describe('stepping vs one-shot equivalence', () => {
 
     expect(stepped.winner).toBe(oneShot.winner);
     expect(JSON.stringify(stepped.log)).toBe(JSON.stringify(oneShot.log));
-  });
-});
-
-describe('cards (iteration 7: pool trimmed to {bulkheads, volley})', () => {
-  it('bulkheads converts a lethal hit into 1-HP survival, then is consumed', () => {
-    // A single die per activation (not several), so the very first lethal
-    // hit is the only thing that can trigger — and trigger it must, since a
-    // computer of 10 hits on anything but a natural 1.
-    // initiative 3 (not more) — enough to guarantee the enemy activates
-    // before the player every round, but under the iteration-17 Outspeed
-    // gap (4) so the enemy doesn't also get a same-round bonus activation
-    // that would land a second, unprotected hit right after bulkheads
-    // saves the ship at 1 HP.
-    const fleet = [{ stats: blankStats({ hp: 2 }), initialDamage: 0 }];
-    const foe = enemy(
-      {},
-      { initiative: 3, hp: 5, computer: 10, cannons: [{ diceCount: 1, damage: 5 }] },
-    );
-    let state = initCombat(fleet, foe, 9);
-    state = armBulkheads(state);
-
-    let bulkheadsFired = false;
-    let damageAtTrigger = -1;
-    let guard = 0;
-    while (!state.winner && !bulkheadsFired && guard < 20) {
-      state = advanceRound(state);
-      bulkheadsFired = state.log.some((e) => e.kind === 'card' && e.cardId === 'bulkheads');
-      if (bulkheadsFired) damageAtTrigger = state.playerShips[0].damage;
-      guard++;
-    }
-
-    expect(bulkheadsFired).toBe(true);
-    // The hit that triggered it must have left the ship at exactly 1 HP,
-    // not destroyed.
-    expect(damageAtTrigger).toBe(state.playerShips[0].stats.hp - 1);
-    expect(unconsumedContingentCards(state)).toEqual([]);
-  });
-
-  it('the exact scenario the card exists for: same seed, loses without bulkheads, wins with it', () => {
-    // Found by brute-force seed search over a scenario tuned so a single
-    // enemy hit is virtually always lethal and virtually always lands.
-    const playerStats: ShipStats = {
-      initiative: 0,
-      hp: 2,
-      computer: 10,
-      shield: 0,
-      cannons: [{ diceCount: 1, damage: 1 }],
-      missiles: [],
-    };
-    const foe = enemy(
-      {},
-      { initiative: 5, hp: 1, computer: 10, cannons: [{ diceCount: 1, damage: 5 }] },
-    );
-    const seed = 2;
-
-    const withoutCard = runToEnd(initCombat([{ stats: playerStats, initialDamage: 0 }], foe, seed));
-    const withCard = runToEnd(armBulkheads(initCombat([{ stats: playerStats, initialDamage: 0 }], foe, seed)));
-
-    expect(withoutCard.winner).toBe('enemy');
-    expect(withCard.winner).toBe('player');
-  });
-
-  it('volley doubles every player cannon die for exactly one round', () => {
-    // No initiative gap here (both sides default to 0) — firing order isn't
-    // the point, and iteration 17's Outspeed rule would otherwise grant a
-    // same-round bonus activation on any gap of 4+, doubling the roll count
-    // this test is asserting on.
-    const fleet = [
-      { stats: blankStats({ computer: 10, hp: 5, cannons: [{ diceCount: 2, damage: 1 }] }), initialDamage: 0 },
-    ];
-    const foe = enemy({}, { hp: 20 });
-    let state = initCombat(fleet, foe, 1);
-    state = advanceRound(state); // missile (no-op)
-    state = applyVolley(state);
-    state = advanceRound(state); // cannon round 1 — doubled to 4 dice
-    const round1PlayerRolls = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 1 && e.side === 'player');
-    expect(round1PlayerRolls).toHaveLength(4);
-
-    state = advanceRound(state); // cannon round 2 — back to the normal 2 dice
-    const round2PlayerRolls = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 2 && e.side === 'player');
-    expect(round2PlayerRolls).toHaveLength(2);
   });
 });
 
@@ -1366,18 +1282,6 @@ describe('Outspeed (iteration 17)', () => {
 
     const outspeedEvents = state.log.filter((e) => e.kind === 'outspeed') as { side: string; shipIndex: number }[];
     expect(outspeedEvents.map((e) => e.shipIndex)).toEqual([1, 0]);
-  });
-
-  it('volley also doubles a bonus activation\'s cannon dice', () => {
-    const fleet = [{ stats: blankStats({ initiative: 10, hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
-    const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }); // initiative 0, gap 10 qualifies
-    let state = initCombat(fleet, foe, 1);
-    state = advanceRound(state); // missile
-    state = applyVolley(state);
-    state = advanceRound(state); // cannon round 1: (1 die x2 volley) normal + (1 die x2 volley) bonus = 4
-
-    const playerRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'cannon' && e.round === 1);
-    expect(playerRolls).toHaveLength(4);
   });
 
   it('a rift-cannon backfire during the bonus activation can destroy the firer', () => {

@@ -274,6 +274,23 @@ h1, h2, h3 {
   padding: 20px;
 }
 
+/* Iteration 35: a heading + an optional Back button, same shape as
+   .map-screen__header — shared here since Fleet/Settings gained the same
+   "screen with a Back button" pattern once the Mission tab (their old way
+   home) went away. */
+.screen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.screen-header h2 {
+  margin: 0;
+}
+
 /* One settings entry: label + explanation on the left, control on the right.
    Shared by the mobile Settings tab and the desktop modal. */
 .settings-row {
@@ -384,6 +401,30 @@ h1, h2, h3 {
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   display: inline-block;
+}
+
+/* Iteration 34: worked dice examples inside the tutorial/onboarding
+   prose — the same WeaponDie/DieFace icons the combat screen itself
+   renders, so "what does this readout icon mean" has one visual answer
+   instead of a paragraph describing it. Icons and captions wrap onto
+   their own line together rather than stretching one caption across the
+   full panel width. */
+.tutorial-dice-example {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 4px 0 6px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.tutorial-dice-example__caption {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
 }
 
 /* Warp-streak phase transition (iteration 10.6) */
@@ -1187,6 +1228,28 @@ h1, h2, h3 {
   overflow-y: auto;
   padding: 32px 16px;
   z-index: 50;
+}
+
+/* Iteration 35: both the tutorial and the first-run onboarding popups can
+   open mid-combat, and the default modal-backdrop centers/top-anchors its
+   panel — square over the fleet cards a mobile player is most likely
+   checking the explanation against. Bottom-anchored here instead, so the
+   fight stays visible above the panel rather than under it. Desktop is
+   wide enough that the panel already sits beside the fight, not over it,
+   so this is mobile-only. Deliberately placed AFTER the base .modal-backdrop
+   rule above, not before it (see the .combat-ship__incoming precedent) —
+   same specificity (both single-class selectors), so source order decides
+   the winner regardless of which media query matches; earlier would have
+   silently lost. */
+@media (max-width: 720px) {
+  .modal-backdrop--tutorial {
+    align-items: flex-end;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .modal-backdrop--tutorial .tutorial-body {
+    max-height: 42vh;
+  }
 }
 
 .modal-panel {
@@ -2935,6 +2998,29 @@ h1, h2, h3 {
   color: var(--text);
 }
 
+.landing-screen__navbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+.landing-screen__navbar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.landing-screen__navbar a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .landing-screen__pitch {
   max-width: 480px;
   margin: 10px auto 0;
@@ -3123,6 +3209,22 @@ h1, h2, h3 {
   padding: 0 6px;
   margin-top: 2px;
   white-space: nowrap;
+}
+
+/* Mobile: this was nowrap with no width limit — at the phone-width
+   side-by-side two-column card layout (see the shared ≤640px combat-card
+   rules above), that forced the chip past its card's edge instead of
+   wrapping, overlapping neighboring cards. Deliberately placed AFTER the
+   base rule above, not inside that earlier shared block: same class,
+   equal specificity, so source order decides the winner regardless of
+   which one's media query matches — earlier would have silently lost. */
+@media (max-width: 640px) {
+  .combat-ship__incoming {
+    font-size: 8px;
+    white-space: normal;
+    max-width: 100%;
+    padding: 0 4px;
+  }
 }
 
 .enemy-panel__volley strong {

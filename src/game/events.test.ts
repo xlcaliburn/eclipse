@@ -27,7 +27,6 @@ function baseState(overrides: Partial<RunState> = {}): RunState {
     credits: 10,
     inventory: [],
     fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'hull1'], damage: 0, upgrades: [] }],
-    hand: [],
     escalations: [
       { id: 'hardened', act: 1, landsAfterColumn: 2, revealed: false },
       { id: 'deflectors', act: 1, landsAfterColumn: 5, revealed: false },
@@ -95,12 +94,9 @@ describe('meetsRequirement — predicate library', () => {
     expect(meetsRequirement(req, withBastion)).toBe(true);
   });
 
-  it('handAtLeast / handBelowMax', () => {
-    expect(meetsRequirement({ kind: 'handAtLeast', value: 1 }, baseState({ hand: [] }))).toBe(false);
-    expect(meetsRequirement({ kind: 'handAtLeast', value: 1 }, baseState({ hand: ['bulkheads'] }))).toBe(true);
-    const full = ['bulkheads', 'volley', 'bulkheads', 'volley', 'bulkheads'] as const;
-    expect(meetsRequirement({ kind: 'handBelowMax' }, baseState({ hand: [...full] }))).toBe(false);
-    expect(meetsRequirement({ kind: 'handBelowMax' }, baseState({ hand: [] }))).toBe(true);
+  it('inventoryAtLeast', () => {
+    expect(meetsRequirement({ kind: 'inventoryAtLeast', value: 1 }, baseState({ inventory: [] }))).toBe(false);
+    expect(meetsRequirement({ kind: 'inventoryAtLeast', value: 1 }, baseState({ inventory: ['ion'] }))).toBe(true);
   });
 
   it('creditsAtLeast', () => {
@@ -206,31 +202,9 @@ describe('resolveEventChoice — abandoned-arsenal', () => {
     expect(state.credits).toBe(3);
   });
 
-  it('option 1: grants a random reaction card', () => {
-    const { state } = resolveEventChoice('abandoned-arsenal', 1, baseState({ hand: [] }), fixedRng([0.1]));
-    expect(state.hand).toHaveLength(1);
-  });
-
-  it('option 2 (Restock): the chosen card leaves the hand, a new one replaces it', () => {
-    const s0 = baseState({ hand: ['bulkheads', 'volley'] });
-    const { state } = resolveEventChoice('abandoned-arsenal', 2, s0, fixedRng([0.9]), { cardId: 'bulkheads' });
-    expect(state.hand).toHaveLength(2);
-    expect(state.hand.filter((c) => c === 'bulkheads')).toHaveLength(0);
-  });
-
-  // Regression: the redraw used to be an unweighted pick over the whole
-  // (2-card) pool with no exclusion, so trading in a card had a real chance
-  // of handing the exact same card straight back — "why did trading in a
-  // bulkhead give me another bulkhead?" A single fixed rng draw wouldn't
-  // reliably catch this (it happened to dodge it), so this sweeps every
-  // rng value the draw could actually see instead of trusting one sample.
-  it('option 2 (Restock) never hands back the exact card just traded in, at any roll', () => {
-    for (let i = 0; i < 20; i++) {
-      const roll = i / 20;
-      const s0 = baseState({ hand: ['bulkheads'] });
-      const { state } = resolveEventChoice('abandoned-arsenal', 2, s0, fixedRng([roll]), { cardId: 'bulkheads' });
-      expect(state.hand).not.toContain('bulkheads');
-    }
+  it('option 1: grants a random part into inventory', () => {
+    const { state } = resolveEventChoice('abandoned-arsenal', 1, baseState({ inventory: [] }), fixedRng([0.1]));
+    expect(state.inventory).toHaveLength(1);
   });
 });
 
@@ -514,10 +488,10 @@ describe('resolveEventChoice — militia-requisition', () => {
     expect(state).toEqual(s0);
   });
 
-  it('option 1: the chosen card leaves the hand and grants 7 credits', () => {
-    const s0 = baseState({ hand: ['bulkheads', 'volley'] });
-    const { state } = resolveEventChoice('militia-requisition', 1, s0, fixedRng([]), { cardId: 'bulkheads' });
-    expect(state.hand).toEqual(['volley']);
+  it('option 1: the chosen part leaves the inventory and grants 7 credits', () => {
+    const s0 = baseState({ inventory: ['ion', 'comp1'] });
+    const { state } = resolveEventChoice('militia-requisition', 1, s0, fixedRng([]), { partId: 'ion' });
+    expect(state.inventory).toEqual(['comp1']);
     expect(state.credits).toBe(17);
   });
 });

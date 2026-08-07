@@ -4,8 +4,6 @@ import { actColumns, globalColumn } from './map';
 import type { MapPosition } from './map';
 import { applyRepairBanking, deriveFleetStats, deriveStats } from './ship';
 import { ANCIENT_ARTIFACT_PART_ID, getPart } from './parts';
-import { CARDS, getCard, MAX_HAND_SIZE } from './cards';
-import type { CardId } from './cards';
 import type { FrameId } from './frames';
 import type { ProtocolId } from './protocols';
 import type { RngFn } from './rng';
@@ -38,8 +36,7 @@ export type EventRequirement =
   | { kind: 'everyShipInitiativeAtLeast'; value: number }
   | { kind: 'anyShipComputerAtLeast'; value: number }
   | { kind: 'framePresent'; frameId: FrameId }
-  | { kind: 'handAtLeast'; value: number }
-  | { kind: 'handBelowMax' }
+  | { kind: 'inventoryAtLeast'; value: number }
   | { kind: 'creditsAtLeast'; value: number };
 
 export function meetsRequirement(req: EventRequirement, state: RunState): boolean {
@@ -55,10 +52,8 @@ export function meetsRequirement(req: EventRequirement, state: RunState): boolea
       return deriveFleetStats(state.fleet, state.commanderId, state.protocols).some((s) => s.computer >= req.value);
     case 'framePresent':
       return state.fleet.some((s) => s.frameId === req.frameId);
-    case 'handAtLeast':
-      return state.hand.length >= req.value;
-    case 'handBelowMax':
-      return state.hand.length < MAX_HAND_SIZE;
+    case 'inventoryAtLeast':
+      return state.inventory.length >= req.value;
     case 'creditsAtLeast':
       return state.credits >= req.value;
     default:
@@ -72,7 +67,7 @@ export interface EventOption {
   requirement?: EventRequirement; // unmet -> shown locked with reqText
   reqText?: string; // "requires Cloaking field"
   chooseShip?: boolean; // UI collects a ship index before dispatch
-  chooseCard?: boolean; // UI collects a card from hand before dispatch
+  choosePart?: boolean; // UI collects a part from inventory before dispatch
 }
 
 export interface EventDef {
@@ -128,20 +123,10 @@ export const EVENTS: EventDef[] = [
   {
     id: 'abandoned-arsenal',
     title: 'Abandoned arsenal',
-    flavor: 'Racks of unused reaction-card modules line the walls.',
+    flavor: 'Racks of unused ship parts line the walls, stripped from wrecks and never claimed.',
     options: [
       { label: 'Sell the scrap (+3 credits)' },
-      {
-        label: 'Take a crate — a reaction card, sight unseen',
-        requirement: { kind: 'handBelowMax' },
-        reqText: 'requires a free hand slot',
-      },
-      {
-        label: 'Restock — trade in a card of your choice, then take the crate',
-        requirement: { kind: 'handAtLeast', value: 1 },
-        reqText: 'requires a reaction card to trade in',
-        chooseCard: true,
-      },
+      { label: 'Take a crate — a part, sight unseen' },
     ],
   },
   {
@@ -275,14 +260,14 @@ export const EVENTS: EventDef[] = [
   {
     id: 'militia-requisition',
     title: 'Militia requisition',
-    flavor: 'A local militia post is collecting reaction-card modules for the front.',
+    flavor: 'A local militia post is collecting spare ship parts for the front.',
     options: [
       { label: 'Refuse' },
       {
-        label: 'Donate a reaction card of your choice (+7 credits)',
-        requirement: { kind: 'handAtLeast', value: 1 },
-        reqText: 'requires a reaction card to donate',
-        chooseCard: true,
+        label: 'Donate a part of your choice (+7 credits)',
+        requirement: { kind: 'inventoryAtLeast', value: 1 },
+        reqText: 'requires a spare part to donate',
+        choosePart: true,
       },
     ],
   },
@@ -430,19 +415,6 @@ function randomPart(rng: RngFn, pool: PartId[]): PartId {
   return pool[Math.floor(rng() * pool.length)];
 }
 
-// `exclude` keeps a "trade in" option from handing back the exact card it
-// just took — with only 2 cards in the whole pool (bulkheads, volley), a
-// plain unweighted draw had a coin-flip chance of returning the same card
-// you'd just traded away, which read as a broken reward rather than bad
-// luck ("why did trading in a bulkhead give me another bulkhead?"). Falls
-// back to the full pool if excluding would empty it (never happens today
-// at 2 cards, but keeps this correct if the pool ever shrinks to 1).
-function randomCard(rng: RngFn, exclude?: CardId): CardId {
-  const pool = exclude ? CARDS.filter((c) => c.id !== exclude) : CARDS;
-  const source = pool.length > 0 ? pool : CARDS;
-  return source[Math.floor(rng() * source.length)].id;
-}
-
 function pickFromPool(pool: EnemyDef[], rng: RngFn): EnemyDef {
   return pool[Math.floor(rng() * pool.length)];
 }
@@ -516,7 +488,7 @@ function revealNextEscalation(state: RunState): { state: RunState; text?: string
 
 export interface EventChoiceSelection {
   shipIndex?: number;
-  cardId?: CardId;
+  partId?: PartId;
 }
 
 export interface EventResolution {
@@ -627,22 +599,11 @@ export function resolveEventChoice(
           outcomeText: 'You sell the scrap for 3 credits.',
         };
       }
-      if (choiceIndex === 1) {
-        const cardId = randomCard(rng);
-        return {
-          state: { ...state, hand: [...state.hand, cardId] },
-          outcomeText: `You take a ${getCard(cardId).name} module.`,
-        };
-      }
-      // choiceIndex 2: restock — trade in a chosen card, then take the crate.
-      // Excludes the traded card from the redraw — a "restock" that could
-      // just hand the same module back reads as broken, not lucky.
-      const cardId = selection.cardId;
-      const handWithoutTraded = cardId ? removeOnce(state.hand, cardId) : state.hand;
-      const newCardId = randomCard(rng, cardId);
+      // choiceIndex 1: take a crate — a random part, sight unseen.
+      const partId = randomPart(rng, FIVE_CREDIT_PARTS);
       return {
-        state: { ...state, hand: [...handWithoutTraded, newCardId] },
-        outcomeText: `You trade in your ${cardId ? getCard(cardId).name : 'card'} and take a ${getCard(newCardId).name} module instead.`,
+        state: { ...state, inventory: [...state.inventory, partId] },
+        outcomeText: `You take a crate — inside is a working ${getPart(partId).name}.`,
       };
     }
 
@@ -819,11 +780,11 @@ export function resolveEventChoice(
       if (choiceIndex === 0) {
         return { state, outcomeText: 'You refuse the requisition.' };
       }
-      const cardId = selection.cardId;
-      const hand = cardId ? removeOnce(state.hand, cardId) : state.hand;
+      const partId = selection.partId;
+      const inventory = partId ? removeOnce(state.inventory, partId) : state.inventory;
       return {
-        state: { ...state, hand, credits: state.credits + 7 },
-        outcomeText: `You donate your ${cardId ? getCard(cardId).name : 'card'} module for 7 credits.`,
+        state: { ...state, inventory, credits: state.credits + 7 },
+        outcomeText: `You donate your ${partId ? getPart(partId).name : 'part'} for 7 credits.`,
       };
     }
 

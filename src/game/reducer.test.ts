@@ -728,36 +728,10 @@ describe('SCUTTLE_SHIP (iteration 8, 8.7)', () => {
 
 });
 
-describe('cards — hand cap and PLAY_CARD (iteration 7: pool trimmed to {bulkheads, volley})', () => {
-  it('PLAY_CARD removes the card from hand and applies its effect', () => {
-    const combat = initCombat(
-      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [{ diceCount: 1, damage: 1 }], missiles: [] }, initialDamage: 0 }],
-      GAUNTLET[0],
-      1,
-    );
-    let state: RunState = { ...stateWithMap('combat'), phase: 'combat', combat, hand: ['volley'] };
-    state = runReducer(state, { type: 'PLAY_CARD', cardId: 'volley' });
-    expect(state.hand).toHaveLength(0);
-    expect(state.combat?.roundModifiers.volleyActive).toBe(true);
-  });
-
-  it('PLAY_CARD refuses once the fight already has a winner', () => {
-    const combat = initCombat(
-      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
-      GAUNTLET[0],
-      1,
-    );
-    const won = { ...combat, winner: 'player' as const };
-    let state: RunState = { ...stateWithMap('combat'), phase: 'combat', combat: won, hand: ['bulkheads'] };
-    state = runReducer(state, { type: 'PLAY_CARD', cardId: 'bulkheads' });
-    expect(state.hand).toEqual(['bulkheads']); // rejected, still in hand
-  });
-});
-
 describe('starting hand + missile-phase auto-skip (player feedback)', () => {
-  it('a new run starts with bulkheads and volley in hand', () => {
+  it('a new run starts with the Overdrive injector equipped (iteration 35: cards/hand removed)', () => {
     const state = initialRunState();
-    expect(state.hand).toEqual(['bulkheads', 'volley']);
+    expect(state.fleet[0].equipped).toContain('injector');
   });
 
   it('ENGAGE skips straight past an empty missile phase (round 0) when neither fleet has missiles', () => {
@@ -1348,26 +1322,26 @@ describe('EVENT_CHOOSE — framework validation (14.1)', () => {
     expect(outOfRange).toEqual(state);
   });
 
-  it('a chooseCard option without that card actually in hand is a no-op', () => {
+  it('a choosePart option without that part actually in inventory is a no-op', () => {
     const state = stateWithMap('event', {
       phase: 'event',
       currentEvent: { eventId: 'militia-requisition' },
-      hand: ['bulkheads'],
+      inventory: ['ion'],
     });
     const missing = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
     expect(missing).toEqual(state);
-    const wrongCard = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1, cardId: 'volley' });
-    expect(wrongCard).toEqual(state);
+    const wrongPart = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1, partId: 'comp1' });
+    expect(wrongPart).toEqual(state);
   });
 
-  it('a chosen card actually leaves the hand once validated', () => {
+  it('a chosen part actually leaves the inventory once validated', () => {
     const state = stateWithMap('event', {
       phase: 'event',
       currentEvent: { eventId: 'militia-requisition' },
-      hand: ['bulkheads'],
+      inventory: ['ion'],
     });
-    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1, cardId: 'bulkheads' });
-    expect(result.hand).not.toContain('bulkheads');
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1, partId: 'ion' });
+    expect(result.inventory).not.toContain('ion');
     expect(result.credits).toBe(state.credits + 7);
   });
 
@@ -2881,27 +2855,19 @@ describe('cargo reward payouts', () => {
     expect(applyCargoReward('wreck', 10)).toBe(8); // above the floor, unaffected
   });
 
-  it('command ship grants a reaction card on top of the normal reward', () => {
-    const result = runReducer(wonCargoState('command', { hand: [] }), { type: 'CONTINUE' });
-    expect(result.pendingReward?.credits).toBe(winReward(1));
-    expect(result.pendingReward?.cardGained).toBeDefined();
-    expect(result.pendingReward?.cardInsteadCredits).toBeUndefined();
-    expect(result.hand).toHaveLength(1);
+  it('command ship pays winReward(col) + 8 flat (iteration 35: cards removed, above convoy\'s +4 to stay distinct)', () => {
+    const result = runReducer(wonCargoState('command'), { type: 'CONTINUE' });
+    expect(result.pendingReward?.credits).toBe(winReward(1) + 8);
   });
 
-  it('command ship pays +4cr instead of a card when the hand is already full (mirrors the elite fallback)', () => {
-    const fullHand = new Array(5).fill('bulkheads') as RunState['hand'];
-    const result = runReducer(wonCargoState('command', { hand: fullHand }), { type: 'CONTINUE' });
-    expect(result.pendingReward?.credits).toBe(winReward(1) + 4);
-    expect(result.pendingReward?.cardGained).toBeUndefined();
-    expect(result.pendingReward?.cardInsteadCredits).toBe(4);
-  });
-
-  it('an elite kill is never cargo-adjusted, even if its node happens to carry a tag', () => {
+  it('an elite kill is never cargo-adjusted (base reward), even if its node happens to carry a tag', () => {
+    // eliteReward(1) as the base, +4 flat for the elite kill itself
+    // (iteration 35: what used to be a reaction card, now always credits) —
+    // NOT the convoy tag's own +4, which is suppressed for elites.
     const eliteEnemy = { ...GAUNTLET[0], id: `${GAUNTLET[0].id}-elite` };
     const state = wonCargoState('convoy', { currentEnemy: eliteEnemy });
     const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.pendingReward?.credits).toBe(eliteReward(1)); // not +4
+    expect(result.pendingReward?.credits).toBe(eliteReward(1) + 4);
   });
 });
 

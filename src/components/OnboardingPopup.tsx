@@ -1,3 +1,4 @@
+import { DieFace, WeaponDie } from './Die';
 import type { OnboardingKey } from '../onboardingProgress';
 
 interface OnboardingPopupProps {
@@ -25,18 +26,36 @@ const CONTENT: Record<OnboardingKey, { title: string; body: React.ReactNode }> =
           The combat log shows this math on every roll as it happens — including a callout whenever a target's
           Piloting fully cancels out your Computer (only a natural 6 gets through then).
         </p>
+        <div className="tutorial-dice-example">
+          <WeaponDie damage={2} kind="cannon" size={28} />
+          <span className="tutorial-dice-example__caption">
+            A die on a ship's readout shows its <strong>damage</strong> (this one deals 2), not a roll — every
+            attack still rolls a fresh d6 against the math above, and
+          </span>
+          <DieFace value={6} size={28} />
+          <span className="tutorial-dice-example__caption">a natural 6 always gets through.</span>
+        </div>
       </>
     ),
   },
   missiles: {
     title: 'Missiles',
     body: (
-      <p className="tutorial-row__hint">
-        Before the first cannon round, one missile phase fires — only because at least one fleet here is actually
-        carrying missiles (it's skipped outright otherwise). Missiles roll the same hit math as cannons, but
-        there's no return fire that phase: it's a free opening volley, not a trade. Flak batteries can shoot
-        missile dice down before they land, cancelling them before they're even rolled.
-      </p>
+      <>
+        <p className="tutorial-row__hint">
+          Before the first cannon round, one missile phase fires — only because at least one fleet here is actually
+          carrying missiles (it's skipped outright otherwise). Missiles roll the same hit math as cannons, but
+          there's no return fire that phase: it's a free opening volley, not a trade. Flak batteries can shoot
+          missile dice down before they land, cancelling them before they're even rolled.
+        </p>
+        <div className="tutorial-dice-example">
+          <WeaponDie damage={1} kind="missile" size={28} />
+          <span className="tutorial-dice-example__caption">
+            A missile die on a ship's readout — the dashed ring (vs. a cannon die's solid one) marks it as a
+            missile. This one deals 1 damage, fired once, in the opening volley only.
+          </span>
+        </div>
+      </>
     ),
   },
   piloting: {
@@ -53,7 +72,11 @@ const CONTENT: Record<OnboardingKey, { title: string; body: React.ReactNode }> =
 export function OnboardingPopup({ topic, onClose }: OnboardingPopupProps) {
   const { title, body } = CONTENT[topic];
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    // modal-backdrop--tutorial (iteration 35): these fire mid-combat, the
+    // first time their topic actually matters — bottom-anchored on mobile
+    // so the fleet cards up top (what the popup is explaining) stay
+    // visible underneath instead of getting covered by the panel.
+    <div className="modal-backdrop modal-backdrop--tutorial" onClick={onClose}>
       <div className="modal-panel tutorial-overlay onboarding-popup" onClick={(e) => e.stopPropagation()}>
         <div className="modal-panel__header">
           <h2>{title}</h2>

@@ -27,7 +27,10 @@ export function DieFace({ value, size = 22, className }: { value: number; size?:
   );
 }
 
-function WeaponDie({
+// Exported (not just used by WeaponDiceRow below) so a standalone caller —
+// the tutorial's worked examples — can show one die on its own without
+// needing a full ShipStats object to derive it from.
+export function WeaponDie({
   damage,
   kind,
   size = 20,

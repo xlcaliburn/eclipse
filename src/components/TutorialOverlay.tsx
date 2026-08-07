@@ -2,6 +2,8 @@
 // number here is quoted straight from the engine (resolver.ts's
 // `resolveHit`, combatEngine.ts's `OUTSPEED_GAP`), not re-derived, so it
 // can't quietly drift out of sync with what a fight actually does.
+import { DieFace, WeaponDie } from './Die';
+
 interface TutorialOverlayProps {
   onClose: () => void;
 }
@@ -21,6 +23,16 @@ function TutorialBody() {
           5 + 2 − 1 = 6 — hit. The combat log shows this math on every roll, including a callout on any roll where
           Piloting fully cancels out your Computer (only a natural 6 gets through then).
         </p>
+        <div className="tutorial-dice-example">
+          <WeaponDie damage={2} kind="cannon" size={30} />
+          <span className="tutorial-dice-example__caption">
+            This is what a die on a ship's readout looks like — the number is its <strong>damage</strong>, not a
+            roll. This one deals 2 damage per hit. Every attack still rolls its own fresh d6 against the ≥6
+            threshold above —
+          </span>
+          <DieFace value={6} size={30} />
+          <span className="tutorial-dice-example__caption">a natural 6 always hits, no matter the math.</span>
+        </div>
       </section>
 
       <section className="tutorial-row">
@@ -47,6 +59,13 @@ function TutorialBody() {
           fire that phase: it's a free opening volley, not a trade. Flak batteries can shoot missile dice down
           before they land, cancelling them before they're even rolled.
         </p>
+        <div className="tutorial-dice-example">
+          <WeaponDie damage={1} kind="missile" size={30} />
+          <span className="tutorial-dice-example__caption">
+            A missile die on a ship's readout — the dashed ring (vs. a cannon die's solid one) is how you tell them
+            apart at a glance. This one deals 1 damage, fired once, in the opening volley only.
+          </span>
+        </div>
       </section>
 
       <section className="tutorial-row">
@@ -72,7 +91,10 @@ function TutorialBody() {
 
 export function TutorialOverlay({ onClose }: TutorialOverlayProps) {
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    // modal-backdrop--tutorial (iteration 35): this can open mid-combat —
+    // bottom-anchored on mobile so it doesn't sit over the fleet cards up
+    // top, the exact thing a player might be checking the rules against.
+    <div className="modal-backdrop modal-backdrop--tutorial" onClick={onClose}>
       <div className="modal-panel tutorial-overlay" onClick={(e) => e.stopPropagation()}>
         <div className="modal-panel__header">
           <h2>How to play</h2>

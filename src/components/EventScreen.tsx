@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import type { CardId } from '../game/cards';
-import { getCard } from '../game/cards';
 import { getEvent, meetsRequirement } from '../game/events';
+import { getPart } from '../game/parts';
 import { playerShipLabel } from '../game/ship';
-import type { RunState } from '../game/types';
+import type { PartId, RunState } from '../game/types';
+import { PartCard } from './PartCard';
 import { FrameSilhouette } from './ShipSilhouette';
 
 interface EventScreenProps {
   state: RunState;
-  onChoose: (choiceIndex: number, shipIndex?: number, cardId?: CardId) => void;
+  onChoose: (choiceIndex: number, shipIndex?: number, partId?: PartId) => void;
   onContinue: () => void;
   onViewMap: () => void;
   onViewFleet: () => void;
@@ -74,27 +74,18 @@ export function EventScreen({ state, onChoose, onContinue, onViewMap, onViewFlee
               );
             }
 
-            if (pickingIndex === i && option.chooseCard) {
+            if (pickingIndex === i && option.choosePart) {
               return (
                 <div key={i} className="event-screen__option event-screen__picker">
-                  <p className="hint">Pick a card:</p>
-                  <div className="combat-hand__cards">
-                    {state.hand.map((cardId, cardIndex) => {
-                      const card = getCard(cardId);
-                      return (
-                        <button
-                          key={`${cardId}-${cardIndex}`}
-                          type="button"
-                          className="card-tile"
-                          onClick={() => onChoose(i, undefined, cardId)}
-                          title={card.description}
-                        >
-                          <span className="card-tile__kind">Consumable</span>
-                          <span className="card-tile__name">{card.name}</span>
-                          <span className="card-tile__desc">{card.description}</span>
-                        </button>
-                      );
-                    })}
+                  <p className="hint">Pick a part:</p>
+                  <div className="reward-screen__ship-picks">
+                    {state.inventory.map((partId, partIndex) => (
+                      <PartCard
+                        key={`${partId}-${partIndex}`}
+                        part={getPart(partId)}
+                        onClick={() => onChoose(i, undefined, partId)}
+                      />
+                    ))}
                   </div>
                   <button type="button" className="shop-button" onClick={() => setPickingIndex(null)}>
                     Back
@@ -108,7 +99,7 @@ export function EventScreen({ state, onChoose, onContinue, onViewMap, onViewFlee
                 <button
                   type="button"
                   className="shop-button"
-                  onClick={() => (option.chooseShip || option.chooseCard ? setPickingIndex(i) : onChoose(i))}
+                  onClick={() => (option.chooseShip || option.choosePart ? setPickingIndex(i) : onChoose(i))}
                 >
                   {option.label}
                 </button>

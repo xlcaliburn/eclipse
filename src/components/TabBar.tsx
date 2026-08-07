@@ -17,18 +17,15 @@ interface TabBarProps {
 // Settings used to be a fourth tab here; it moved to the top HudBar's gear
 // button (already built for desktop) so mobile reaches it the same way —
 // one tap on a persistent icon, not a dedicated slot in the primary nav.
-function MissionGlyph() {
-  return (
-    <svg viewBox="0 0 100 100" width={20} height={20} aria-hidden="true">
-      <circle cx="50" cy="50" r="26" fill="none" stroke="currentColor" strokeWidth="9" />
-      <line x1="50" y1="2" x2="50" y2="24" stroke="currentColor" strokeWidth="9" />
-      <line x1="50" y1="76" x2="50" y2="98" stroke="currentColor" strokeWidth="9" />
-      <line x1="2" y1="50" x2="24" y2="50" stroke="currentColor" strokeWidth="9" />
-      <line x1="76" y1="50" x2="98" y2="50" stroke="currentColor" strokeWidth="9" />
-    </svg>
-  );
-}
-
+//
+// Iteration 35: Mission followed Settings out — it was the redundant one
+// once you actually count taps: it's already the surface every phase
+// change snaps back to (see App.tsx's phase-keyed reset effect), so it
+// only ever earned its own tab as the sole way *back* from Map/Fleet.
+// That's now a Back button on each of those screens instead (same "close
+// button whenever onClose is provided" pattern MapScreen already used for
+// desktop) — a home tab that's also the only way home was circular; an
+// explicit Back reads clearer than a tab that means "here, but also away."
 function ChartGlyph() {
   return (
     <svg viewBox="0 0 100 100" width={20} height={20} aria-hidden="true">
@@ -57,21 +54,12 @@ export function TabBar({ surface, onSelect }: TabBarProps) {
     <nav className="tab-bar" aria-label="Screens">
       <button
         type="button"
-        className={cls('mission')}
-        aria-current={surface === 'mission' ? 'page' : undefined}
-        onClick={() => onSelect('mission')}
-      >
-        <MissionGlyph />
-        <span className="tab-bar__label">Mission</span>
-      </button>
-      <button
-        type="button"
         className={cls('chart')}
         aria-current={surface === 'chart' ? 'page' : undefined}
         onClick={() => onSelect('chart')}
       >
         <ChartGlyph />
-        <span className="tab-bar__label">Chart</span>
+        <span className="tab-bar__label">Map</span>
       </button>
       <button
         type="button"

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { canPlayCard, canUseActive, hasMissilePhase, incomingFirePreview, outspeedingShipIndices } from '../game/combatEngine';
+import { canUseActive, hasMissilePhase, incomingFirePreview, outspeedingShipIndices } from '../game/combatEngine';
 import type { CombatState } from '../game/combatEngine';
-import { getCard } from '../game/cards';
-import type { CardId } from '../game/cards';
 import type { FrameId } from '../game/frames';
 import { getPart } from '../game/parts';
 import type { CombatEvent, EnemyDef, EnemyGroup, Side } from '../game/types';
@@ -58,9 +56,7 @@ interface CombatScreenProps {
   playerLabels: string[];
   playerFrameIds: FrameId[];
   playerUpgrades?: UpgradeId[][];
-  hand: CardId[];
   canWithdraw: boolean;
-  onPlayCard: (cardId: CardId) => void;
   onAdvanceRound: () => void;
   onContinue: () => void;
   onWithdraw: () => void;
@@ -109,7 +105,7 @@ function eventClassName(event: CombatEvent): string {
   if (event.kind === 'destroyed') {
     return event.side === 'player' ? 'combat-log__line combat-log__line--bad' : 'combat-log__line combat-log__line--good';
   }
-  if (event.kind === 'card' || event.kind === 'part-effect') {
+  if (event.kind === 'part-effect') {
     return 'combat-log__line combat-log__line--card';
   }
   if (event.kind === 'outspeed') {
@@ -139,7 +135,6 @@ function describeEvent(event: CombatEvent, enemy: EnemyDef, playerLabels: string
     }
     case 'stalemate':
       return 'Combat drags on for 30 rounds with no resolution — the enemy is declared the winner.';
-    case 'card':
     case 'part-effect':
       return event.text;
     default:
@@ -153,9 +148,7 @@ export function CombatScreen({
   playerLabels,
   playerFrameIds,
   playerUpgrades,
-  hand,
   canWithdraw,
-  onPlayCard,
   onAdvanceRound,
   onContinue,
   onWithdraw,
@@ -483,7 +476,7 @@ export function CombatScreen({
       const at = centerOf(event.side, event.shipIndex);
       if (at) push({ kind: 'shards', x: at.x, y: at.y }, 1100);
       playSfx(event.side === 'player' ? 'shipLost' : 'kill');
-    } else if (event.kind === 'card' || event.kind === 'part-effect') {
+    } else if (event.kind === 'part-effect') {
       // The jink gets a badge on the dodging card instead of a top banner —
       // it belongs to one ship, not the whole fight.
       if (!(event.kind === 'part-effect' && event.text.includes('jinks'))) {
@@ -682,37 +675,9 @@ export function CombatScreen({
         aria-controls="combat-command-bar-body"
         onClick={() => setHandCollapsed((v) => !v)}
       >
-        {handCollapsed ? `Show hand (${hand.length + activeAbilities.length})` : 'Hide hand'}
+        {handCollapsed ? `Show actives (${activeAbilities.length})` : 'Hide actives'}
       </button>
       <div className="combat-command-bar__body" id="combat-command-bar-body">
-        <div className="combat-hand">
-          <h3>Your hand</h3>
-          {hand.length === 0 ? (
-            <p className="hint">No reaction cards.</p>
-          ) : (
-            <div className="combat-hand__cards">
-              {hand.map((cardId, i) => {
-                const card = getCard(cardId);
-                const playable = canPlayCard(combat, cardId);
-                return (
-                  <button
-                    key={`${cardId}-${i}`}
-                    type="button"
-                    className="card-tile"
-                    disabled={!playable}
-                    onClick={() => onPlayCard(cardId)}
-                    title={card.description}
-                  >
-                    <span className="card-tile__kind">Consumable</span>
-                    <span className="card-tile__name">{card.name}</span>
-                    <span className="card-tile__desc">{card.description}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
         <div className="combat-hand">
           <h3>Ship actives</h3>
           {activeAbilities.length === 0 ? (

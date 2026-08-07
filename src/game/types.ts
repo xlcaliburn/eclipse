@@ -1,4 +1,3 @@
-import type { CardId } from './cards';
 import type { CombatState, TargetingStance } from './combatEngine';
 import type { CounterProtocolId } from './counterProtocols';
 import type { EscalationId, ScheduledEscalation } from './escalations';
@@ -213,14 +212,6 @@ export interface StalemateEvent {
   kind: 'stalemate';
 }
 
-// A reaction-card play or trigger, for the combat log ("Point-defense screen
-// negates the missile phase.", "Emergency bulkheads keep a ship at 1 HP.").
-export interface CardEvent {
-  kind: 'card';
-  cardId: CardId;
-  text: string;
-}
-
 // A passive PART effect (as opposed to a played reaction card): flak
 // shooting down a missile, reactive armor negating a hit, a rift cannon
 // backfiring on its own ship.
@@ -245,7 +236,6 @@ export type CombatEvent =
   | DestroyedEvent
   | PhaseEvent
   | StalemateEvent
-  | CardEvent
   | PartEffectEvent
   | OutspeedEvent;
 
@@ -296,8 +286,6 @@ export interface RewardSummary {
   credits: number; // credits earned at this node
   creditsTotal: number; // running total after the award
   intelText?: string; // the Spymaster's post-fight intelligence, if any was gained
-  cardGained?: CardId; // elite card drop, if any
-  cardInsteadCredits?: number; // the +4 fallback when the hand was full
   salvagedParts: PartId[]; // parts recovered from destroyed ships
   lostShips: string[]; // labels of ships destroyed this fight
   upgradeOptions?: UpgradeId[]; // elites only: 3 choices, unresolved until picked
@@ -324,7 +312,6 @@ export interface RunState {
   credits: number;
   inventory: PartId[]; // owned, unequipped parts
   fleet: PlayerShipState[];
-  hand: CardId[]; // reaction cards currently held
   escalations: ScheduledEscalation[]; // seeded at run start from the map seed
   bossRevealed: boolean; // the boss dossier has been bought
   visionCol: number; // fog of war high-water mark — node types in columns <= this are visible

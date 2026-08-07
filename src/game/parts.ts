@@ -385,4 +385,16 @@ export function getPart(id: PartId): Part {
 
 // Two ion cannons: softened from one in iteration 2 so fight 1 is a friendly
 // opener rather than a coin flip.
-export const STARTING_LOADOUT: PartId[] = ['ion', 'ion', 'comp1', 'hull1'];
+// Iteration 35: gained the Overdrive injector as a 5th part (the Flagship
+// has 6 slots, only 4 spoken for) — compensation for the reaction-card
+// system's removal. Injector, not one of the roster's other unclaimed
+// actives (override, thrusters, modulator): "all your ships fire first
+// this round" is the flashiest first taste of what an active part does,
+// and it reinforces the initiative/Outspeed lesson the tutorial already
+// teaches, instead of introducing an unrelated mechanic cold. The other
+// active parts are left alone deliberately — several are commander/
+// support-hull signature parts (uplink2, dcbay, chaff, tacrelay,
+// repairbay, ecm, disruptor), and handing one out for free to everyone
+// would blunt exactly the thing that makes drafting that commander or
+// hull feel distinct.
+export const STARTING_LOADOUT: PartId[] = ['ion', 'ion', 'comp1', 'hull1', 'injector'];

@@ -181,20 +181,31 @@ function SoundSetting() {
   );
 }
 
-// The mobile Settings tab — a full screen, no Close button, because the tab
-// bar is the way out (same reasoning as the Chart and Fleet tabs).
+// The mobile Settings tab — a full screen.
+// Iteration 35: gained a real Back button — dropping the Mission tab
+// removed the tab bar's own way back to it, so every mobile full-screen
+// tab needs its own now (matching MapScreen's existing "Close" pattern).
 export function SettingsScreen({
   seed,
   protocols,
   counterProtocol,
+  onClose,
 }: {
   seed: number | null;
   protocols?: ProtocolId[];
   counterProtocol?: CounterProtocolId;
+  onClose?: () => void;
 }) {
   return (
     <div className="settings-screen">
-      <h2>Settings</h2>
+      <div className="screen-header">
+        <h2>Settings</h2>
+        {onClose && (
+          <button type="button" className="shop-button" onClick={onClose}>
+            Back
+          </button>
+        )}
+      </div>
       {settingsBody(seed, protocols, counterProtocol)}
     </div>
   );

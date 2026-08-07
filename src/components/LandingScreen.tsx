@@ -59,6 +59,12 @@ const OUTCOME_LABEL: Record<string, string> = {
   abandoned: '🏳️ Abandoned',
 };
 
+// 2026-08-08: hidden while seed sharing gets re-evaluated — not a code
+// problem, just not ready to advertise on the front door yet. The whole
+// block below (state, handler, JSX) is left in place so this is a one-line
+// flip back on, not a re-implementation.
+const SHOW_SEED_ENTRY = false;
+
 // Shown at every boot, whether or not a save exists (previously this only
 // appeared for returning players — a brand-new player got no context at all
 // and landed straight on commander pick). `hasSave` decides which buttons
@@ -131,6 +137,12 @@ export function LandingScreen({
           </p>
         </div>
       )}
+      {/* Top navbar — currently just the wiki link, but its own row rather
+          than folded into the pitch text so a settings/about link can join
+          it later without a layout change. */}
+      <nav className="landing-screen__navbar">
+        <a href="./wiki.html">Wiki</a>
+      </nav>
       <h1>Eclipse Roguelike</h1>
       <p className="landing-screen__pitch">
         Command a small fleet through a two-act star sector. Fit your ships,
@@ -158,31 +170,33 @@ export function LandingScreen({
           exactly. No maxLength here — codeToSeed does its own length/range
           validation, and truncating a pasted code on the way in would just
           turn a valid code into an invalid one before it's ever checked. */}
-      <div className="landing-screen__seed">
-        <label htmlFor="seed-input" className="landing-screen__seed-label">
-          Have a run seed? Start that exact sector:
-        </label>
-        <div className="landing-screen__seed-row">
-          <input
-            id="seed-input"
-            type="text"
-            className="landing-screen__seed-input"
-            placeholder="e.g. 2K9X4QM"
-            value={seedInput}
-            onChange={(e) => {
-              setSeedInput(e.target.value);
-              setSeedError(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submitSeed();
-            }}
-          />
-          <button type="button" className="shop-button" onClick={submitSeed} disabled={!seedInput.trim()}>
-            Go
-          </button>
+      {SHOW_SEED_ENTRY && (
+        <div className="landing-screen__seed">
+          <label htmlFor="seed-input" className="landing-screen__seed-label">
+            Have a run seed? Start that exact sector:
+          </label>
+          <div className="landing-screen__seed-row">
+            <input
+              id="seed-input"
+              type="text"
+              className="landing-screen__seed-input"
+              placeholder="e.g. 2K9X4QM"
+              value={seedInput}
+              onChange={(e) => {
+                setSeedInput(e.target.value);
+                setSeedError(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitSeed();
+              }}
+            />
+            <button type="button" className="shop-button" onClick={submitSeed} disabled={!seedInput.trim()}>
+              Go
+            </button>
+          </div>
+          {seedError && <p className="landing-screen__seed-error">Not a valid seed code — check for typos.</p>}
         </div>
-        {seedError && <p className="landing-screen__seed-error">Not a valid seed code — check for typos.</p>}
-      </div>
+      )}
 
       {/* Iteration 18: the daily — same sector for everyone today, one
           attempt. Starting it consumes the attempt even if abandoned. */}
@@ -221,13 +235,6 @@ export function LandingScreen({
           </div>
         )}
       </div>
-
-      {/* The player wiki (wiki.html, a second Vite page): every pool and
-          price, generated from the live game data — for playtesters giving
-          balance feedback. Relative href so it works at any deploy depth. */}
-      <p className="hint landing-screen__wiki-link">
-        <a href="./wiki.html">Player wiki — every enemy, part, and boss, with exact numbers</a>
-      </p>
     </div>
   );
 }

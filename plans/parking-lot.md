@@ -1,5 +1,15 @@
 ## Parking lot (discussed, deliberately deferred)
 
+- **Per-hull innate base quirks** (parked from iteration 36, 2026-08-07):
+  once the signature-part bundles are stripped, each surviving hull could
+  gain a jink-style innate quirk (something a part can't replicate) so
+  bases differentiate on more than slots/HP/caps. Deliberately NOT part of
+  36 — that iteration opens the design space, a later content pass fills
+  it.
+- **More legendary parts** (parked from iteration 36): the legendary tier
+  launches with only the shield harmonic. Seed 1–2 genuinely
+  legendary-grade effects (fleet-wide or rule-bending, not bigger stat
+  sticks) once the rarity system has been felt in play.
 - **Carrier frame** (launches free drone dice/ships mid-combat): needs new
   resolver machinery (mid-combat ship spawning). Belongs in a "bigger
   fights" iteration alongside any move to more rounds / larger fleets.

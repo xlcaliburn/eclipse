@@ -1,4 +1,3 @@
-import type { CardId } from './cards';
 import { resumeRng, rollD6 } from './rng';
 import type { RngFn } from './rng';
 import { resolveHit } from './resolver';
@@ -23,15 +22,10 @@ export interface CombatShip {
   jinkAvailable: boolean; // iteration 8: the first hit this combat misses instead, consumed before reactive armor
 }
 
-export interface ArmedEffects {
-  bulkheadsArmed: boolean;
-}
-
 export interface RoundModifiers {
   initiativeBonus: number;
   computerBonus: number;
   playerShieldBonus: number; // shield modulator active: +2 shield to all player ships this round
-  volleyActive: boolean; // second volley card: player cannon dice fire twice this round
   overrideShipIndices: number[]; // fire-control override active: these player ships reroll a missed die once
   evadingShipIndices: number[]; // emergency thrusters active: these player ships can't be targeted and don't fire
   chaffShipIndices: number[]; // chaff launcher active: natural 6s against these player ships resolve as normal rolls
@@ -64,7 +58,6 @@ export interface CombatState {
   playerShips: CombatShip[];
   enemyShips: CombatShip[];
   roundModifiers: RoundModifiers;
-  armedEffects: ArmedEffects;
   usedActives: { shipIndex: number; abilityIndex: number }[]; // active parts already spent this combat
   // Iteration 9.4: the player's fleet-wide targeting doctrine for this fight
   // — set once at initCombat (from RunState, persists between fights until
@@ -269,7 +262,6 @@ function fireShip(
   log: CombatEvent[],
   opponentsOf: (s: CombatShip) => CombatShip[],
   roundModifiers: RoundModifiers,
-  armedEffects: ArmedEffects,
   flakState: FlakState,
   targetingStance: TargetingStance,
   priorityTargetIndex: number | null | undefined,
@@ -294,9 +286,7 @@ function fireShip(
     (ship.side === 'player' ? roundModifiers.computerBonus : -roundModifiers.enemyComputerPenalty);
 
   for (const weapon of weapons) {
-    // Second volley doubles every player cannon die for the round.
-    const diceCount =
-      weapon.diceCount * (phase === 'cannon' && ship.side === 'player' && roundModifiers.volleyActive ? 2 : 1);
+    const diceCount = weapon.diceCount;
 
     for (let d = 0; d < diceCount; d++) {
       // Flak cancels the opposing side's missile dice before they're rolled,
@@ -449,7 +439,6 @@ function fireShip(
       }
 
       let damage = hit ? weapon.damage : 0;
-      let bulkheadsSaved = false;
       let reactiveSaved = false;
       let ablativeAbsorbed = 0;
 
@@ -462,13 +451,6 @@ function fireShip(
           ablativeAbsorbed = Math.min(target.ablativeRemaining, damage);
           target.ablativeRemaining -= ablativeAbsorbed;
           damage -= ablativeAbsorbed;
-        }
-        if (target.side === 'player' && armedEffects.bulkheadsArmed) {
-          const would = target.damage + damage;
-          if (would >= target.stats.hp) {
-            damage = Math.max(0, target.stats.hp - 1 - target.damage);
-            bulkheadsSaved = true;
-          }
         }
       }
 
@@ -494,14 +476,7 @@ function fireShip(
             log.push({ kind: 'part-effect', text: `Ablative coating absorbs ${ablativeAbsorbed} damage.` });
           }
           target.damage += damage;
-          if (bulkheadsSaved) {
-            armedEffects.bulkheadsArmed = false;
-            log.push({
-              kind: 'card',
-              cardId: 'bulkheads' as CardId,
-              text: 'Emergency bulkheads keep a ship in the fight at 1 HP.',
-            });
-          } else if (!isAlive(target)) {
+          if (!isAlive(target)) {
             log.push({ kind: 'destroyed', side: target.side, shipIndex: target.index });
             const prowWinner = applyOnDestroyTrigger(target, opponentsOf, log, checkWinner);
             if (prowWinner) return prowWinner;
@@ -520,7 +495,6 @@ function freshRoundModifiers(): RoundModifiers {
     initiativeBonus: 0,
     computerBonus: 0,
     playerShieldBonus: 0,
-    volleyActive: false,
     overrideShipIndices: [],
     evadingShipIndices: [],
     chaffShipIndices: [],
@@ -577,7 +551,6 @@ export function initCombat(
     playerShips,
     enemyShips,
     roundModifiers: freshRoundModifiers(),
-    armedEffects: { bulkheadsArmed: false },
     usedActives: [],
     targetingStance,
     priorityTargetIndex: null,
@@ -621,7 +594,6 @@ export function advanceRound(state: CombatState): CombatState {
   const playerShips = cloneShips(state.playerShips);
   const enemyShips = cloneShips(state.enemyShips);
   const log = [...state.log];
-  const armedEffects: ArmedEffects = { ...state.armedEffects };
 
   const { rng, consumedThisCall } = resumeRng(state.seed, state.rngCounter);
 
@@ -666,7 +638,6 @@ export function advanceRound(state: CombatState): CombatState {
       log,
       opponentsOf,
       roundModifiers,
-      armedEffects,
       flakState,
       state.targetingStance,
       state.priorityTargetIndex,
@@ -694,7 +665,6 @@ export function advanceRound(state: CombatState): CombatState {
         log,
         opponentsOf,
         roundModifiers,
-        armedEffects,
         flakState,
         state.targetingStance,
         state.priorityTargetIndex,
@@ -731,7 +701,6 @@ export function advanceRound(state: CombatState): CombatState {
         log,
         opponentsOf,
         roundModifiers,
-        armedEffects,
         flakState,
         state.targetingStance,
         state.priorityTargetIndex,
@@ -753,7 +722,6 @@ export function advanceRound(state: CombatState): CombatState {
     playerShips,
     enemyShips,
     roundModifiers: freshRoundModifiers(),
-    armedEffects,
     usedActives: state.usedActives,
     targetingStance: state.targetingStance,
     priorityTargetIndex: state.priorityTargetIndex,
@@ -872,40 +840,6 @@ export function combatOutcome(state: CombatState): CombatOutcome {
       destroyed: s.damage >= s.stats.hp,
     })),
   };
-}
-
-// --- Reaction card effects (pure state transitions) ---------------------
-
-export function armBulkheads(state: CombatState): CombatState {
-  return { ...state, armedEffects: { ...state.armedEffects, bulkheadsArmed: true } };
-}
-
-export function applyVolley(state: CombatState): CombatState {
-  return { ...state, roundModifiers: { ...state.roundModifiers, volleyActive: true } };
-}
-
-export function canPlayCard(state: CombatState, _cardId: CardId): boolean {
-  return !state.winner;
-}
-
-export function playCard(state: CombatState, cardId: CardId): CombatState {
-  switch (cardId) {
-    case 'bulkheads':
-      return armBulkheads(state);
-    case 'volley':
-      return applyVolley(state);
-    default:
-      return state;
-  }
-}
-
-// Cards that should return to the player's hand if the fight ends before
-// they ever triggered (currently just bulkheads, if it was armed but no hit
-// was ever lethal enough to consume it).
-export function unconsumedContingentCards(state: CombatState): CardId[] {
-  const returned: CardId[] = [];
-  if (state.armedEffects.bulkheadsArmed) returned.push('bulkheads');
-  return returned;
 }
 
 // --- Active parts (iteration 7): once-per-combat abilities on equipment --

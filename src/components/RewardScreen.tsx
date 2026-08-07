@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { getCard } from '../game/cards';
 import { playerShipLabel } from '../game/ship';
 import type { PlayerShipState, RewardSummary } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
@@ -31,11 +30,6 @@ export function RewardScreen({ reward, fleet, onPickUpgrade, onLeave }: RewardSc
         +{reward.credits} credits <span className="hint">(total {reward.creditsTotal})</span>
       </p>
       {reward.intelText && <p className="hint reward-screen__intel">Intelligence: {reward.intelText}</p>}
-
-      {reward.cardGained && <p className="hint">Reaction card gained: {getCard(reward.cardGained).name}</p>}
-      {reward.cardInsteadCredits !== undefined && (
-        <p className="hint">Hand was full — +{reward.cardInsteadCredits} credits instead of a card.</p>
-      )}
 
       {reward.lostShips.length > 0 && (
         <div className="reward-screen__losses">

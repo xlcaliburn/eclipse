@@ -1,15 +1,10 @@
-import { CARDS, MAX_HAND_SIZE } from './cards';
-import type { CardId } from './cards';
 import {
   advanceRound,
-  canPlayCard,
   combatOutcome,
   hasMissilePhase,
   initCombat,
-  playCard,
   setPriorityTarget,
   runToEnd,
-  unconsumedContingentCards,
   useActive,
 } from './combatEngine';
 import type { TargetingStance } from './combatEngine';
@@ -76,7 +71,6 @@ export type RunAction =
   | { type: 'ENGAGE' }
   | { type: 'ADVANCE_ROUND' }
   | { type: 'AUTO_RESOLVE' }
-  | { type: 'PLAY_CARD'; cardId: CardId }
   | { type: 'SET_PRIORITY_TARGET'; index: number | null }
   | { type: 'CONTINUE' }
   | { type: 'WITHDRAW' }
@@ -118,7 +112,7 @@ export type RunAction =
   | { type: 'REROLL' }
   | { type: 'LEAVE_SHOP' }
   | { type: 'LEAVE_REPAIR' }
-  | { type: 'EVENT_CHOOSE'; choiceIndex: number; shipIndex?: number; cardId?: CardId }
+  | { type: 'EVENT_CHOOSE'; choiceIndex: number; shipIndex?: number; partId?: PartId }
   | { type: 'EVENT_CONTINUE' }
   // Iteration 15.3: either branch of the repair-yard choice. `choice: 'full'`
   // needs nothing else; `choice: 'overhaul'` carries the ship + upgrade the
@@ -311,8 +305,9 @@ export function winReward(col: number): number {
   return 7 + col;
 }
 
-// Credits earned for winning an elite node at the given column (when the
-// hand is full and a reaction card can't be granted, +4 more is added).
+// Credits earned for winning an elite node at the given column. Iteration 35:
+// used to also grant a random reaction card (or +4cr if the hand was full)
+// on top of this — now a flat +4cr bonus every time (see the CONTINUE case).
 //
 // Iteration 22.6: base bumped 8->11, same reasoning as winReward above —
 // kept 3cr above it so an elite still reads as the bigger payout.
@@ -411,7 +406,6 @@ export function initialRunState(options?: { seed?: number; mode?: 'daily'; daily
         fightsSurvived: 0,
       },
     ],
-    hand: ['bulkheads', 'volley'], // iteration 7: cards are found, never bought — start with one of each
     escalations,
     bossRevealed: false,
     visionCol: 0,
@@ -689,10 +683,6 @@ function drawFrameOffers(rng: RngFn, act: 1 | 2, kind: 'store' | 'shipyard'): Ex
   return offers;
 }
 
-function drawRandomCard(rng: RngFn): CardId {
-  return CARDS[Math.floor(rng() * CARDS.length)].id;
-}
-
 function pickFromPool(pool: EnemyDef[], rng: () => number): EnemyDef {
   return pool[Math.floor(rng() * pool.length)];
 }
@@ -709,9 +699,10 @@ function randomWreckPart(rng: RngFn): PartId {
 
 // Applies the cargo table's credit adjustment to an already-computed base
 // reward. Patrol/command/untagged pass through unchanged — command's bonus
-// is the card (wired separately in CONTINUE), not a credit change. Exported
-// for a direct unit test of the wreck-field floor (winReward's own minimum
-// of 4 can never actually reach the floor in an integration test).
+// (eliteOrCommandBonus) is wired separately in CONTINUE, not a base-reward
+// change. Exported for a direct unit test of the wreck-field floor
+// (winReward's own minimum of 4 can never actually reach the floor in an
+// integration test).
 export function applyCargoReward(tag: CargoTag | undefined, base: number): number {
   if (tag === 'convoy') return base + 4;
   if (tag === 'wreck') return Math.max(1, base - 2);
@@ -1171,14 +1162,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return { ...state, combat: runToEnd(state.combat) };
     }
 
-    case 'PLAY_CARD': {
-      if (state.phase !== 'combat' || !state.combat) return state;
-      if (!state.hand.includes(action.cardId)) return state;
-      if (!canPlayCard(state.combat, action.cardId)) return state;
-      const combat = playCard(state.combat, action.cardId);
-      return { ...state, combat, hand: removeOnce(state.hand, action.cardId) };
-    }
-
     // Iteration 13: click an enemy ship in the theater to make every player
     // die fire at it while it lives; clicking the current priority again
     // clears it. No RNG — determinism untouched.
@@ -1192,7 +1175,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'combat' || !state.combat || !state.combat.winner) return state;
       const { rng, nextCounter } = runRng(state);
       const outcome = combatOutcome(state.combat);
-      const returnedCards = unconsumedContingentCards(state.combat);
 
       // Iteration 18: fight-end stat attribution — per-ship kills, run-wide
       // damage totals. Computed once here, folded into every branch below.
@@ -1324,7 +1306,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           fleet: bossHealedFleet,
           inventory,
           credits: state.credits + creditsEarned,
-          hand: [...state.hand, ...returnedCards],
           combat: undefined,
           currentEnemy: undefined,
           pendingAmbushBonus: undefined,
@@ -1346,20 +1327,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const node = state.position ? getNode(columns, state.position) : undefined;
       const cargoTag: CargoTag | undefined = !isElite && !state.interceptionActive ? node?.cargo : undefined;
       const baseReward = applyCargoReward(cargoTag, isElite ? eliteReward(globalCol) : winReward(globalCol));
-      let hand = [...state.hand, ...returnedCards];
-      let cardGained: CardId | undefined;
-      let cardInsteadCredits: number | undefined;
-
-      // A command-ship cargo tag grants a reaction card exactly like an
-      // elite kill does (same hand-full -> +4cr fallback).
-      if (isElite || cargoTag === 'command') {
-        if (hand.length < MAX_HAND_SIZE) {
-          cardGained = drawRandomCard(rng);
-          hand = [...hand, cardGained];
-        } else {
-          cardInsteadCredits = 4;
-        }
-      }
+      // Iteration 35: an elite kill used to grant a random reaction card (or
+      // +4cr if the hand was full); a command-ship cargo tag paid the same.
+      // Now that cards are gone, both just pay flat credits — command stays
+      // above elite's old fallback value so it doesn't collapse into being
+      // mechanically identical to convoy's flat +4cr despite being rarer.
+      const eliteOrCommandBonus = isElite ? 4 : cargoTag === 'command' ? 8 : 0;
 
       // A wreck-field cargo tag also drops a random 5-credit-tier part
       // straight into inventory, on top of its (reduced) credit payout.
@@ -1398,7 +1371,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // merchantBonus does).
       const salvageRigsBonus = hasProtocol(state.protocols, 'salvage-rigs') ? 2 : 0;
       const creditsEarned =
-        baseReward + merchantBonus + (cardInsteadCredits ?? 0) + salvageTotal + ambushBonusCredits + salvageRigsBonus;
+        baseReward + merchantBonus + eliteOrCommandBonus + salvageTotal + ambushBonusCredits + salvageRigsBonus;
       const credits = state.credits + creditsEarned;
       const upgradeOptions = isElite ? randomUpgradeIds(3, rng) : undefined;
 
@@ -1410,8 +1383,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         credits: creditsEarned,
         creditsTotal: credits,
         intelText: intelDraw.text,
-        cardGained,
-        cardInsteadCredits,
         salvagedParts,
         lostShips,
         upgradeOptions,
@@ -1423,7 +1394,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         fleet: healedFleet,
         inventory,
         credits,
-        hand,
         combat: undefined,
         currentEnemy: undefined,
         pendingReward,
@@ -1478,9 +1448,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         damageTaken: baseStats.damageTaken + fightStats.damageTaken,
       };
 
-      const returnedCards = unconsumedContingentCards(state.combat);
-      const hand = [...state.hand, ...returnedCards];
-
       const fled = [...state.fled, state.position!];
       const position = revertedPosition(state);
       const visited = state.visited.slice(0, -1);
@@ -1496,7 +1463,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         phase: 'map',
         fleet: survivingFleet,
         inventory,
-        hand,
         combat: undefined,
         currentEnemy: undefined,
         fled,
@@ -1970,7 +1936,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (!option) return state;
       if (option.requirement && !meetsRequirement(option.requirement, state)) return state;
       if (option.chooseShip && (action.shipIndex === undefined || !state.fleet[action.shipIndex])) return state;
-      if (option.chooseCard && (action.cardId === undefined || !state.hand.includes(action.cardId))) return state;
+      if (option.choosePart && (action.partId === undefined || !state.inventory.includes(action.partId))) return state;
 
       const { rng, nextCounter } = runRng(state);
       const {
@@ -1980,7 +1946,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         ambushBonus,
       } = resolveEventChoice(state.currentEvent.eventId, action.choiceIndex, state, rng, {
         shipIndex: action.shipIndex,
-        cardId: action.cardId,
+        partId: action.partId,
       });
       return {
         ...nextState,
