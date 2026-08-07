@@ -1,5 +1,15 @@
 ## Parking lot (discussed, deliberately deferred)
 
+- **Ion disruptor cannon + Boarding torpedo** (parked from iteration 42,
+  2026-08-07): the two persistent-state weapons out of the original ten
+  ("mutate a ship's live stats for the rest of the fight" — a stacking
+  piloting drain and a permanent weapon-group disable). Not cut for
+  difficulty — both were scoped and judged buildable in
+  `plans/iteration-42.md`'s 42.4 — the user chose to ship the other eight
+  now and hold these two rather than land all ten at once. Full spec
+  (part fields `shieldDrainOnHit`/`disableWeaponOnHit`, pricing: Rare
+  6cr / Epic 8cr) still lives in iteration-42.md's 42.4 section,
+  unchanged, ready to pick back up.
 - **Per-hull innate base quirks** (parked from iteration 36, 2026-08-07):
   once the signature-part bundles are stripped, each surviving hull could
   gain a jink-style innate quirk (something a part can't replicate) so

@@ -29,11 +29,13 @@ export interface RoundModifiers {
   overrideShipIndices: number[]; // fire-control override active: these player ships reroll a missed die once
   evadingShipIndices: number[]; // emergency thrusters active: these player ships can't be targeted and don't fire
   chaffShipIndices: number[]; // chaff launcher active: natural 6s against these player ships resolve as normal rolls
-  // Iteration 23 (ECM pod / Shield disruptor): the first parts to touch the
-  // ENEMY side's effective stats instead of the player's own — everything
-  // above this line only ever modifies player ships.
+  // Iteration 23 (ECM pod): the first part to touch the ENEMY side's
+  // effective stats instead of the player's own — everything above this
+  // line only ever modifies player ships. (Shield disruptor used to be
+  // the other one, reducing enemy piloting; reworked 2026-08-07 into
+  // Evasion suite, a player-side-only permanent bonus — see its
+  // 'disruptor' case in useActive below, no longer a round modifier.)
   enemyComputerPenalty: number;
-  enemyShieldPenalty: number;
   // Iteration 28 (Alpha doctrine): a per-round derived flag, not a played
   // effect — computed fresh in advanceRound from CombatState.alphaDoctrineActive
   // and the current round number, not carried in freshRoundModifiers()'s
@@ -102,11 +104,13 @@ function isAlive(ship: CombatShip): boolean {
 // combat can never stall with no legal target). Taunt beats cloak: a
 // cloaked taunter is still targetable. Only player parts ever set
 // `taunt`/`cloak`, so both are no-ops when the defenders are an enemy group.
-function pickTarget(defenders: CombatShip[], preferHighest = false): CombatShip | null {
+// `ignoreTaunt` (iteration 42, Homing missile): skips the taunt-forcing
+// branch entirely — the cloak all-cloaked exception below still applies.
+function pickTarget(defenders: CombatShip[], preferHighest = false, ignoreTaunt = false): CombatShip | null {
   const alive = defenders.filter(isAlive);
   if (alive.length === 0) return null;
 
-  const taunters = alive.filter((d) => d.stats.taunt);
+  const taunters = ignoreTaunt ? [] : alive.filter((d) => d.stats.taunt);
   let candidates: CombatShip[];
   if (taunters.length > 0) {
     candidates = taunters;
@@ -316,26 +320,27 @@ function fireShip(
           : undefined;
       const preferHighest =
         ship.side === 'player' ? weapon.targetHighest || targetingStance === 'strongest' : !!weapon.targetHighest;
-      const target = priority ?? pickTarget(defenders, preferHighest);
+      // Homing missile (iteration 42): ignores the player's priority click,
+      // targeting stance, AND taunt — always the plain lowest-HP defender.
+      // Cloak's all-cloaked exception still applies (pickTarget handles it).
+      const target = weapon.bypassTaunt ? pickTarget(defenders, false, true) : (priority ?? pickTarget(defenders, preferHighest));
       if (!target) return checkWinner(); // no legal target — the barrage finds nothing
 
-      // Shield capacitors add bonus shield only during the missile phase
-      // and the first cannon round — gone from round 2 on. The shield
-      // modulator active adds a flat bonus to the whole player fleet.
+      // Piloting capacitors add bonus piloting only during the missile
+      // phase and the first cannon round — gone from round 2 on. The
+      // piloting modulator active adds a flat bonus to the whole player
+      // fleet. (Evasion suite, iteration 23's other "shield"-named part,
+      // no longer touches the enemy — see its 'disruptor' case in
+      // useActive, a permanent self-buff folded into stats.shield
+      // directly, not a round modifier.)
       const capacitorActive = phase === 'missile' || (phase === 'cannon' && round === 1);
       const modulatorBonus = target.side === 'player' ? roundModifiers.playerShieldBonus : 0;
-      // Shield disruptor (iteration 23): the enemy penalty applies only to
-      // enemy defenders, symmetric with modulatorBonus applying only to
-      // player defenders. Folded in before the shield-pierce clamp below,
-      // same as every other shield modifier.
-      const disruptorPenalty = target.side === 'enemy' ? roundModifiers.enemyShieldPenalty : 0;
       // Alpha doctrine (iteration 28): the player's base shield stat is
       // zeroed for the opening exchange — everything else (capacitor,
-      // shield modulator) is additive and still applies on top of that 0.
+      // piloting modulator) is additive and still applies on top of that 0.
       const targetBaseShield =
         target.side === 'player' && roundModifiers.playerBaseShieldZeroed ? 0 : target.stats.shield;
-      const baseShield =
-        targetBaseShield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus - disruptorPenalty;
+      const baseShield = targetBaseShield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus;
       const effectiveShield = Math.max(
         0,
         baseShield - (ship.stats.shieldPierce ?? 0) - (weapon.shieldPierce ?? 0),
@@ -448,7 +453,45 @@ function fireShip(
         log.push({ kind: 'part-effect', text: 'Interceptor jinks aside — dodges the first hit of the fight.' });
       }
 
-      let damage = hit ? weapon.damage + overchargeBonus : 0;
+      // Graviton beam (iteration 42): a miss still grazes for chip damage —
+      // its own dedicated branch, same shape as Arc projector's AOE branch
+      // above, since a miss otherwise never touches `target.damage`.
+      if (!hit && weapon.chipOnMiss) {
+        log.push({
+          kind: 'roll',
+          phase,
+          round,
+          side: ship.side,
+          shooterIndex: ship.index,
+          targetIndex: target.index,
+          raw: finalRaw,
+          computer: attackerComputer,
+          shield: effectiveShield,
+          hit: false,
+          damage: 0,
+        });
+        log.push({ kind: 'part-effect', text: `Graviton beam grazes for ${weapon.chipOnMiss} damage despite the miss.` });
+        target.damage += weapon.chipOnMiss;
+        if (!isAlive(target)) {
+          log.push({ kind: 'destroyed', side: target.side, shipIndex: target.index });
+          const prowWinner = applyOnDestroyTrigger(target, opponentsOf, log, checkWinner);
+          if (prowWinner) return prowWinner;
+          const winner = checkWinner();
+          if (winner) return winner;
+        }
+        continue;
+      }
+
+      // Executioner cannon (iteration 42): a hit against a target already
+      // at or below `executeAtHp` deals its full remaining HP instead of
+      // the normal per-die damage — read BEFORE this die's own damage is
+      // applied, so it's "already at 1" as of the moment the die lands, not
+      // after. Reactive armor and ablative coating still apply as normal
+      // below (a called shot is still a shot).
+      const preHitHp = remainingHp(target);
+      const executed = hit && weapon.executeAtHp !== undefined && preHitHp <= weapon.executeAtHp;
+
+      let damage = hit ? (executed ? preHitHp : weapon.damage + overchargeBonus) : 0;
       let reactiveSaved = false;
       let ablativeAbsorbed = 0;
 
@@ -482,6 +525,9 @@ function fireShip(
         if (reactiveSaved) {
           log.push({ kind: 'part-effect', text: 'Reactive armor negates the hit.' });
         } else {
+          if (executed) {
+            log.push({ kind: 'part-effect', text: 'Executioner cannon finishes the job.' });
+          }
           if (ablativeAbsorbed > 0) {
             log.push({ kind: 'part-effect', text: `Ablative coating absorbs ${ablativeAbsorbed} damage.` });
           }
@@ -489,6 +535,33 @@ function fireShip(
           if (!isAlive(target)) {
             log.push({ kind: 'destroyed', side: target.side, shipIndex: target.index });
             const prowWinner = applyOnDestroyTrigger(target, opponentsOf, log, checkWinner);
+            if (prowWinner) return prowWinner;
+            const winner = checkWinner();
+            if (winner) return winner;
+          }
+        }
+      }
+
+      // Flechette cannon (iteration 42): on a hit, also splashes a second
+      // target — a fresh pickTarget call against the same defender pool
+      // with the primary excluded, reusing the exact lowest-HP/taunt
+      // logic the primary pick just used. A guaranteed hit (no separate
+      // roll), gated on the primary landing at all (see plans/iteration-
+      // 42.md's decision points).
+      if (hit && weapon.cleaveDamage) {
+        const secondary = pickTarget(
+          defenders.filter((d) => d.index !== target.index),
+          preferHighest,
+        );
+        if (secondary) {
+          secondary.damage += weapon.cleaveDamage;
+          log.push({
+            kind: 'part-effect',
+            text: `Flechette cannon's splash deals ${weapon.cleaveDamage} damage to a second target.`,
+          });
+          if (!isAlive(secondary)) {
+            log.push({ kind: 'destroyed', side: secondary.side, shipIndex: secondary.index });
+            const prowWinner = applyOnDestroyTrigger(secondary, opponentsOf, log, checkWinner);
             if (prowWinner) return prowWinner;
             const winner = checkWinner();
             if (winner) return winner;
@@ -509,7 +582,6 @@ function freshRoundModifiers(): RoundModifiers {
     evadingShipIndices: [],
     chaffShipIndices: [],
     enemyComputerPenalty: 0,
-    enemyShieldPenalty: 0,
     playerBaseShieldZeroed: false, // always recomputed per-round in advanceRound, never carried
   };
 }
@@ -897,7 +969,7 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
       return {
         ...state,
         usedActives,
-        log: armed('Shield modulator armed — +2 piloting for your fleet this round.'),
+        log: armed('Piloting modulator armed — +2 piloting for your fleet this round.'),
         roundModifiers: { ...state.roundModifiers, playerShieldBonus: state.roundModifiers.playerShieldBonus + 2 },
       };
     case 'dcbay': {
@@ -974,16 +1046,23 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
           enemyComputerPenalty: state.roundModifiers.enemyComputerPenalty + 2,
         },
       };
-    case 'disruptor':
+    // Evasion suite (reworked 2026-08-07 from "Shield disruptor", which
+    // used to reduce the enemy fleet's piloting): a permanent self-buff,
+    // not a round modifier — mutates this ship's own live stats.shield
+    // directly, same "clone + mutate" shape dcbay/injector use for
+    // .damage, just on a different field. Persists for the rest of the
+    // fight since CombatShip.stats is a live object, not recomputed.
+    case 'disruptor': {
+      const playerShips = cloneShips(state.playerShips);
+      const ship = playerShips[shipIndex];
+      playerShips[shipIndex] = { ...ship, stats: { ...ship.stats, shield: ship.stats.shield + 3 } };
       return {
         ...state,
         usedActives,
-        log: armed("Shield disruptor armed — the enemy fleet's piloting is reduced by 2 this round."),
-        roundModifiers: {
-          ...state.roundModifiers,
-          enemyShieldPenalty: state.roundModifiers.enemyShieldPenalty + 2,
-        },
+        playerShips,
+        log: armed('Evasion suite armed — this ship gains +3 piloting for the rest of the fight.'),
       };
+    }
     default:
       return state;
   }

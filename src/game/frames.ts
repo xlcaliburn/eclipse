@@ -97,7 +97,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     cost: 30,
     rarity: 'legendary',
     maxWeapons: 4,
-    blurb: 'One giant instead of Flagship-plus-escorts. 8 slots, max 4 weapons. Arrives fitted with 2 ion cannons and a Gauss shield.',
+    blurb: 'One giant instead of Flagship-plus-escorts. 8 slots, max 4 weapons. Arrives fitted with 2 ion cannons and Gauss coils.',
   },
   // The midrange step: no gimmick, no cap, priced as the real "second
   // ship" investment between a cheap Interceptor and a premium Dreadnought.
@@ -109,7 +109,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 4,
     cost: 22,
     rarity: 'epic',
-    blurb: 'No gimmick — the only escort that can carry a real multi-weapon loadout. Arrives fitted with an ion cannon and a Gauss shield.',
+    blurb: 'No gimmick — the only escort that can carry a real multi-weapon loadout. Arrives fitted with an ion cannon and Gauss coils.',
   },
   // 5 slots for less than a 3-slot Bastion used to be the exact
   // underpricing this pass corrects — still cheaper than the Cruiser (its
@@ -186,7 +186,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     cost: 9,
     rarity: 'common',
     maxWeapons: 1,
-    blurb: 'Thin hull built to broadcast a shield harmonic. 2 slots.',
+    blurb: 'Thin hull built to broadcast a piloting harmonic. 2 slots.',
   },
   tender: {
     id: 'tender',
@@ -219,7 +219,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     cost: 8,
     rarity: 'common',
     maxWeapons: 1,
-    blurb: 'Strips enemy shields before the shooting starts. 3 slots, at most 1 weapon.',
+    blurb: 'Strips enemy piloting before the shooting starts. 3 slots, at most 1 weapon.',
   },
 };
 

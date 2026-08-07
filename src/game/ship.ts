@@ -77,6 +77,10 @@ export function deriveStats(
         aoeDamage: part.weapon.aoeDamage,
         targetHighest: part.weapon.targetHighest,
         overcharge: part.weapon.overcharge || (overchargedRounds && part.weapon.kind === 'cannon'),
+        chipOnMiss: part.weapon.chipOnMiss,
+        executeAtHp: part.weapon.executeAtHp,
+        cleaveDamage: part.weapon.cleaveDamage,
+        bypassTaunt: part.weapon.bypassTaunt,
       };
       if (part.weapon.kind === 'cannon') stats.cannons.push(entry);
       else stats.missiles.push(entry);
@@ -105,14 +109,11 @@ export function deriveStats(
       case 'drives':
         stats.initiative += 2;
         break;
-      case 'optics':
-        stats.shieldPierce = (stats.shieldPierce ?? 0) + 1;
-        break;
       case 'autoloader':
         stats.cannons.push({ diceCount: 1, damage: 1 });
         break;
-      // 'regen' and 'salvage' are reducer-level (applied when a reward is
-      // computed) — they have no combat-stat effect.
+      // 'regen' is reducer-level (applied when a reward is computed) — it
+      // has no combat-stat effect.
       default:
         break;
     }

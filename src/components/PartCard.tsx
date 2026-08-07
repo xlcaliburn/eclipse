@@ -10,10 +10,12 @@ interface PartCardProps {
 }
 
 // Iteration 29: the Shield stat is displayed as "Piloting" everywhere a
-// player reads it — the underlying `PartType`/`ShipStats.shield`
-// identifiers, and every shield-*themed* part's own flavor name (Gauss
-// shield, Shield modulator, ...), are deliberately untouched; only this
-// category label (and every other player-facing "Shield" string) changed.
+// player reads it. The underlying `PartType`/`ShipStats.shield`
+// identifiers are deliberately untouched (internal data category, not
+// player-facing) — this category label is the display text that changed.
+// 2026-08-07: every shield-*themed* part's own flavor NAME was also
+// renamed off "shield" (Gauss coils, Piloting modulator, ...) in a
+// separate pass — see parts.ts.
 const TYPE_LABEL: Record<Part['type'], string> = {
   weapon: 'Weapon',
   computer: 'Computer',

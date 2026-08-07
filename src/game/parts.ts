@@ -83,9 +83,16 @@ export const PARTS: Part[] = [
     cost: 9,
     computer: 3,
   },
+  // 2026-08-07: "Gauss/Phase/Absorption shield" renamed off "shield" —
+  // the underlying stat has been "Piloting" since iteration 29 (a pilot's
+  // evasive skill, not a physical barrier), so the name kept implying a
+  // mechanic the game no longer has. New suffix "coils" (maneuvering
+  // coils) reads as piloting/evasion hardware instead. `type: 'shield'`
+  // (the PartType enum value / shop-pool category) is untouched — this is
+  // a display-text-only rename, same scope as 29's own stat rename.
   {
     id: 'shield1',
-    name: 'Gauss shield',
+    name: 'Gauss coils',
     type: 'shield',
     rarity: 'common',
     description: '+1 piloting',
@@ -94,7 +101,7 @@ export const PARTS: Part[] = [
   },
   {
     id: 'shield2',
-    name: 'Phase shield',
+    name: 'Phase coils',
     type: 'shield',
     rarity: 'rare',
     description: '+2 piloting',
@@ -184,6 +191,20 @@ export const PARTS: Part[] = [
     cost: 3,
     flak: 1,
   },
+  // 2026-08-07: a rare-tier anti-missile option — Flak battery had no
+  // on-ramp above common. Same mechanism (`flak`, a plain fleet-wide pool
+  // summed across every alive ship — see combatEngine.ts's `flakState`),
+  // no new engine code, just a bigger number. Priced on the common->rare
+  // stat-ladder gap (+2cr per iteration 36's rule) off Flak battery's 3cr.
+  {
+    id: 'flak2',
+    name: 'Point-defense grid',
+    type: 'shield',
+    rarity: 'rare',
+    description: 'Cancels 2 enemy missile dice each combat (stacks with itself and Flak battery)',
+    cost: 5,
+    flak: 2,
+  },
   {
     id: 'lure',
     name: 'Lure beacon',
@@ -246,15 +267,107 @@ export const PARTS: Part[] = [
     cost: 9,
     weapon: { kind: 'cannon', diceCount: 1, damage: 3 },
   },
+  // 2026-08-07: renamed from "Ion battery" — swapped with 'twinauto' below
+  // so "Twin" (2 dice) and "battery" (a bigger rack, 3 dice) actually
+  // match their dice counts. Stats/rarity/cost untouched, id kept for
+  // save/reference stability (same pattern as the Flagship/'cruiser' id).
   {
     id: 'battery',
-    name: 'Ion battery',
+    name: 'Twin autocannon',
     type: 'weapon',
     rarity: 'rare',
     description: '2 cannon dice, 1 damage each',
     cost: 6, // 2 dmg total x 3cr/dmg (was 5cr)
     weapon: { kind: 'cannon', diceCount: 2, damage: 1 },
   },
+
+  // --- Iteration 42: eight new weapons (2026-08-07). See
+  // plans/iteration-42.md for the full pricing/engine-work rationale — two
+  // of the original ten (Ion disruptor cannon, Boarding torpedo) are
+  // parked, not cut; see plans/parking-lot.md. ---
+  // 2026-08-07: renamed from "Twin autocannon" — see 'battery' above.
+  {
+    id: 'twinauto',
+    name: 'Ion battery',
+    type: 'weapon',
+    rarity: 'epic',
+    description: '3 cannon dice, 1 damage each',
+    cost: 9, // 3 dmg total x 3cr/dmg, same ceiling as Siege cannon — volume over punch
+    weapon: { kind: 'cannon', diceCount: 3, damage: 1 },
+  },
+  {
+    id: 'clustermissile',
+    name: 'Cluster missile',
+    type: 'weapon',
+    rarity: 'epic',
+    description: '3 missile dice, 1 damage each (fires once, before cannons)',
+    cost: 8, // missile-discounted off Twin autocannon's 9cr
+    weapon: { kind: 'missile', diceCount: 3, damage: 1 },
+  },
+  {
+    id: 'protoovercharge',
+    name: 'Prototype overcharge cannon',
+    type: 'weapon',
+    rarity: 'epic',
+    description: '1 cannon die, 2 damage. Rolls on 7: a natural 7 always hits and deals +1 damage',
+    cost: 8, // 2 dmg (6cr) + a permanent taste of the Overcharged rounds protocol on one weapon
+    weapon: { kind: 'cannon', diceCount: 1, damage: 2, overcharge: true },
+  },
+  // Iteration 36's negative-shield mechanism (`shield1`/`shield2` add
+  // piloting; this subtracts it) already flows through deriveStats and
+  // effectiveShield's existing floor-at-0 clamp — no engine change needed.
+  {
+    id: 'railgun',
+    name: 'Railgun',
+    type: 'weapon',
+    rarity: 'legendary',
+    description: '1 cannon die, 5 damage. -2 piloting on this ship, for the whole fight',
+    cost: 13, // 5 dmg (15cr) discounted for the real self-debuff — the hardest single hit in the game
+    weapon: { kind: 'cannon', diceCount: 1, damage: 5 },
+    shield: -2,
+  },
+  {
+    id: 'gravitonbeam',
+    name: 'Graviton beam',
+    type: 'weapon',
+    rarity: 'epic',
+    description: '1 cannon die, 2 damage. A miss still deals 1 damage anyway',
+    cost: 7, // 2 dmg (6cr) + a consistency premium for the guaranteed floor
+    weapon: { kind: 'cannon', diceCount: 1, damage: 2, chipOnMiss: 1 },
+  },
+  // 2026-08-07: executeAtHp raised 1 -> 2 after a test caught the launch
+  // numbers making the clause numerically inert — a target at exactly 1 HP
+  // already dies to the plain 1 damage, so the override never changed an
+  // actual outcome. At 2, a 2-HP target that would otherwise take two
+  // hits to kill instead dies to this one, which is the whole point.
+  {
+    id: 'executioner',
+    name: 'Executioner cannon',
+    type: 'weapon',
+    rarity: 'rare',
+    description: '1 cannon die, 1 damage. A hit against a target at 2 HP or less deals its full remaining HP',
+    cost: 5, // priced as a situational finisher, not a routine damage multiplier
+    weapon: { kind: 'cannon', diceCount: 1, damage: 1, executeAtHp: 2 },
+  },
+  {
+    id: 'flechette',
+    name: 'Flechette cannon',
+    type: 'weapon',
+    rarity: 'rare',
+    description: '1 cannon die, 1 damage; on a hit, also deals 1 damage to a second target',
+    cost: 5, // cheap and shotgun-flavored — splash only lands when the primary pellet does
+    weapon: { kind: 'cannon', diceCount: 1, damage: 1, cleaveDamage: 1 },
+  },
+  {
+    id: 'homing',
+    name: 'Homing missile',
+    type: 'weapon',
+    rarity: 'epic',
+    description: '1 missile die, 2 damage. Ignores taunt and priority targeting — always finds the lowest-HP enemy',
+    cost: 7, // Missile rack's 2dmg/5cr precedent + a real premium for bypassing taunt/priority entirely
+    weapon: { kind: 'missile', diceCount: 1, damage: 2, bypassTaunt: true },
+  },
+
   {
     id: 'prow',
     name: 'Ramming prow',
@@ -275,11 +388,12 @@ export const PARTS: Part[] = [
   },
   {
     id: 'capacitor',
-    // Was +2 for 5cr, which the Phase shield (+2 always, 5cr) strictly
-    // dominated. Now it is the anti-alpha-strike answer instead: cheaper and
-    // stronger than a Phase shield while it lasts, useless once a fight
-    // grinds past the opening exchange.
-    name: 'Shield capacitor',
+    // Was +2 for 5cr, which Phase coils (+2 always, 5cr) strictly
+    // dominated. Now it is the anti-alpha-strike answer instead: cheaper
+    // and stronger than Phase coils while it lasts, useless once a fight
+    // grinds past the opening exchange. 2026-08-07: renamed off "Shield
+    // capacitor" — see shield1/shield2's note.
+    name: 'Piloting capacitor',
     type: 'shield',
     rarity: 'common',
     description: '+3 piloting during the missile phase and the first cannon round only',
@@ -306,10 +420,15 @@ export const PARTS: Part[] = [
   // click it, the number goes down. Weaker than dcbay's repair-2 (hence
   // rare, not epic, and priced under it) — dcbay stays the bigger,
   // signature-tier version of the same idea.
+  // 2026-08-07: `type` corrected 'drive' -> 'hull' — the redesign made it a
+  // +HP/repair part (identical shape to dcbay, which is already type
+  // 'hull'), so it belongs in the shop's defense pool now, not
+  // computer-drive. Purely a shop-draw-pool classification fix; no stat or
+  // behavior change.
   {
     id: 'injector',
     name: 'Overdrive injector',
-    type: 'drive',
+    type: 'hull',
     rarity: 'rare',
     description: '+1 HP. Active (1/combat): repair 1 HP on this ship immediately.',
     cost: 5,
@@ -357,9 +476,10 @@ export const PARTS: Part[] = [
     initiative: 1,
     active: true,
   },
+  // 2026-08-07: renamed off "Shield modulator" — see shield1/shield2's note.
   {
     id: 'modulator',
-    name: 'Shield modulator',
+    name: 'Piloting modulator',
     type: 'shield',
     rarity: 'epic',
     description: '+1 piloting. Active (1/combat): this round, all your ships gain +2 piloting.',
@@ -397,9 +517,10 @@ export const PARTS: Part[] = [
   // A fleet-wide always-on aura (not a once-per-combat button, not a
   // bigger stat stick) is the roster's one effect that's actually
   // legendary-grade rather than just an expensive rare.
+  // 2026-08-07: renamed off "Shield harmonic" — see shield1/shield2's note.
   {
     id: 'shieldharmonic',
-    name: 'Shield harmonic',
+    name: 'Piloting harmonic',
     type: 'shield',
     rarity: 'legendary',
     description: 'While equipped, +1 piloting to every ship in the fleet, for the whole fight.',
@@ -426,12 +547,22 @@ export const PARTS: Part[] = [
     computer: 1,
     active: true,
   },
+  // 2026-08-07: reworked from "Shield disruptor" (enemy piloting -2 for a
+  // round) into a pure player-side piloting bonus — the "piloting &
+  // defenses" category no longer touches the enemy fleet at all (see
+  // modulator/shield1-3/capacitor/shieldharmonic's own renames, same
+  // pass). Differentiated from Piloting modulator's fleet-wide-but-
+  // 1-round spike: this is single-ship but PERMANENT for the rest of the
+  // fight — a genuinely different shape, not a reskin. Mutates this
+  // ship's own live stats.shield directly (a new pattern — every other
+  // active either mutates .damage or a 1-round roundModifier; see
+  // combatEngine.ts's 'disruptor' case).
   {
     id: 'disruptor',
-    name: 'Shield disruptor',
+    name: 'Evasion suite',
     type: 'shield',
     rarity: 'epic',
-    description: "+1 piloting. Active (1/combat): this round, the enemy fleet's piloting is reduced by 2.",
+    description: '+1 piloting. Active (1/combat): this ship gains +3 piloting for the rest of the fight.',
     cost: 8,
     shield: 1,
     active: true,
@@ -441,9 +572,12 @@ export const PARTS: Part[] = [
   // every flat stat, common/rare/epic at 3/5/9cr — the rare->epic gap (+4)
   // deliberately wider than common->rare (+2), so the +3 tier reads as a
   // real find, priced AND rarity-gated as one. ---
+  // 2026-08-07: renamed off "Absorption shield" — see shield1/shield2's
+  // note; "Vector" completes the coils family instead of "Absorption"
+  // (which implied tanking a hit, not evading it).
   {
     id: 'shield3',
-    name: 'Absorption shield',
+    name: 'Vector coils',
     type: 'shield',
     rarity: 'epic',
     description: '+3 piloting',

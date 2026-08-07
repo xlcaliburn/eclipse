@@ -32,7 +32,7 @@ import { PROTOCOLS } from '../game/protocols';
 import type { ProtocolDef } from '../game/protocols';
 import { fusionCost } from '../game/ship';
 import type { FusionStat } from '../game/ship';
-import { ELITE_UPGRADE_POOL, getUpgrade, HULL_BONUS_UPGRADE_POOL } from '../game/upgrades';
+import { UPGRADES } from '../game/upgrades';
 import type { EnemyDef, Part, PlayerShipState, Rarity, WeaponStats } from '../game/types';
 // Reused straight from the game's own presentation layer — same code-
 // authored inline-SVG ship/enemy art and commander crests the game itself
@@ -366,45 +366,20 @@ export function Wiki() {
         <section id="upgrades">
           <h2>Upgrades</h2>
           <p className="wiki-note">
-            Slotless and permanent, attached to one ship. Lost only if that ship is destroyed. Iteration 39 split
-            the pool in two: elites/the act-1 boss draw from a small pool; a shipyard hull purchase grants the rest,
-            scaled to the hull's own rarity.
-          </p>
-          <h3>Elite &amp; boss rewards</h3>
-          <p className="wiki-note">Drafted 1-of-{ELITE_UPGRADE_POOL.length} without duplicates.</p>
-          <TableWrap>
-            <table className="wiki-table">
-              <tbody>
-                {ELITE_UPGRADE_POOL.map((id) => {
-                  const u = getUpgrade(id);
-                  return (
-                    <tr key={u.id}>
-                      <td>{u.name}</td>
-                      <td>{u.description}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </TableWrap>
-          <h3>Hull purchase bonuses</h3>
-          <p className="wiki-note">
-            A shipyard (pristine) hull purchase grants +1 max HP and 1 random upgrade below, without duplicates,
-            per rarity level above common (rare = 1, epic = 2, legendary = 3). A store (second-hand) purchase is
-            always treated as common — cheaper, but no bonus.
+            Slotless and permanent, attached to one ship. Lost only if that ship is destroyed. Elites, the act-1
+            boss, and a shipyard hull purchase (+1 max HP and 1 random upgrade per rarity level above common —
+            rare = 1, epic = 2, legendary = 3) all draw from the same list below, without duplicates. A
+            second-hand (store) hull purchase is always treated as common — cheaper, but no upgrade bonus.
           </p>
           <TableWrap>
             <table className="wiki-table">
               <tbody>
-                {HULL_BONUS_UPGRADE_POOL.map((id) => {
-                  const u = getUpgrade(id);
-                  return (
-                    <tr key={u.id}>
-                      <td>{u.name}</td>
-                      <td>{u.description}</td>
-                    </tr>
-                  );
-                })}
+                {UPGRADES.map((u) => (
+                  <tr key={u.id}>
+                    <td>{u.name}</td>
+                    <td>{u.description}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </TableWrap>

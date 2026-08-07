@@ -263,21 +263,24 @@ describe('support hulls (iteration 23)', () => {
     expect(enemyRoll2?.computer).toBe(3);
   });
 
-  it('disruptor: enemy shield -2 for exactly one round, player shield untouched', () => {
+  // 2026-08-07: reworked from an enemy-piloting-debuff round modifier into
+  // Evasion suite, a permanent self-buff — no longer touches
+  // roundModifiers at all, and (unlike every other active) does NOT reset
+  // at the next round.
+  it('disruptor (Evasion suite): +3 piloting on this ship, permanently for the fight — not a round modifier', () => {
     const fleet = [
-      {
-        stats: blankStats({ hp: 10, cannons: [{ diceCount: 1, damage: 1 }], actives: ['disruptor'] }),
-        initialDamage: 0,
-      },
+      { stats: blankStats({ hp: 10, cannons: [{ diceCount: 1, damage: 1 }], actives: ['disruptor'] }), initialDamage: 0 },
     ];
-    const foe = enemy({}, { hp: 10, shield: 3 });
+    const foe = enemy({}, { hp: 10 });
     let state = initCombat(fleet, foe, 1);
-    state = advanceRound(state); // missile (no-op) — round modifiers reset here, so trigger the active AFTER
+    expect(state.playerShips[0].stats.shield).toBe(0);
     state = useActive(state, 0, 0);
-    expect(state.roundModifiers.enemyShieldPenalty).toBe(2);
+    expect(state.playerShips[0].stats.shield).toBe(3);
+
+    // Persists across rounds — unlike a round modifier, nothing resets it.
+    state = advanceRound(state); // missile
     state = advanceRound(state); // cannon round 1
-    const playerRoll = state.log.find((e) => e.kind === 'roll' && e.side === 'player') as { shield: number };
-    expect(playerRoll.shield).toBe(1); // 3 - 2
+    expect(state.playerShips[0].stats.shield).toBe(3);
   });
 });
 
@@ -1629,5 +1632,183 @@ describe('Overcharged rounds — the 7-face die (iteration 40)', () => {
       }
     }
     expect(sawSeven).toBe(true); // if this ever fails, the 7-face roll path is broken, not just unlucky
+  });
+});
+
+// --- Iteration 42: four new per-die weapon mechanics ---------------------
+
+describe('Graviton beam — chipOnMiss (iteration 42)', () => {
+  it('a miss still deals the chip damage instead of the normal 0', () => {
+    let found = false;
+    for (let seed = 1; seed <= 200 && !found; seed++) {
+      const fleet = [
+        { stats: blankStats({ hp: 20, cannons: [{ diceCount: 1, damage: 2, chipOnMiss: 1 }] }), initialDamage: 0 },
+      ];
+      // computer 0 vs shield 100: every roll misses except a natural 6
+      // (which always auto-hits regardless of the math) — so most seeds
+      // land at least one real miss in round 1.
+      const foe = enemy({}, { hp: 20, shield: 100 });
+      let state = initCombat(fleet, foe, seed);
+      state = advanceRound(state); // missile (no-op, no missiles equipped)
+      state = advanceRound(state); // cannon round 1
+
+      const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 1);
+      const miss = rollEvents.find((e) => e.kind === 'roll' && !e.hit);
+      if (miss) {
+        found = true;
+        expect(state.enemyShips[0].damage).toBe(1); // the chip damage landed despite the miss
+      }
+    }
+    expect(found).toBe(true); // if this ever fails, chipOnMiss is broken, not just unlucky
+  });
+
+  it('a hit deals normal damage, not chip damage', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 10, cannons: [{ diceCount: 1, damage: 2, chipOnMiss: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 20, shield: 0 });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1
+    const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 1);
+    const hit = rollEvents.find((e) => e.kind === 'roll' && e.hit);
+    expect(hit).toBeTruthy();
+    if (hit && hit.kind === 'roll') expect(hit.damage).toBe(2); // full weapon damage, not the 1-point chip
+  });
+});
+
+describe('Executioner cannon — executeAtHp (iteration 42)', () => {
+  // Exercised via a synthetic weapon (damage 1, execute-at-3) rather than
+  // the shipped Executioner cannon's own numbers — with the shipped part's
+  // damage(1) equal to its own executeAtHp(1), a target at exactly 1 HP
+  // dies to the *normal* damage anyway, so its own stats can never actually
+  // exercise the override. The field itself needs a real gap to prove out.
+  it('a hit against a target at or below the threshold deals full remaining HP, not the base damage', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 10, cannons: [{ diceCount: 1, damage: 1, executeAtHp: 3 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 2, shield: 0 }); // remaining HP 2, at/below the threshold of 3
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1
+    const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 1);
+    const hit = rollEvents.find((e) => e.kind === 'roll' && e.hit);
+    expect(hit).toBeTruthy();
+    if (hit && hit.kind === 'roll') expect(hit.damage).toBe(2); // remaining HP, not the base 1
+    expect(state.enemyShips[0].damage).toBeGreaterThanOrEqual(2);
+    expect(state.winner).toBe('player'); // the "1 dmg" cannon actually finished a 2-HP target in one die
+  });
+
+  it('a hit against a target above the threshold deals only the base damage', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 10, cannons: [{ diceCount: 1, damage: 1, executeAtHp: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 5, shield: 0 }); // remaining HP 5, well above the threshold of 1
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1
+    const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 1);
+    const hit = rollEvents.find((e) => e.kind === 'roll' && e.hit);
+    expect(hit).toBeTruthy();
+    if (hit && hit.kind === 'roll') expect(hit.damage).toBe(1); // base damage, the execute never triggers
+  });
+});
+
+describe('Flechette cannon — cleaveDamage (iteration 42)', () => {
+  it('a hit also splashes a second target for the cleave amount', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 10, cannons: [{ diceCount: 1, damage: 1, cleaveDamage: 1 }] }), initialDamage: 0 },
+    ];
+    // Two same-HP enemies: pickTarget's stable tie-break keeps the first
+    // as primary; the second call (primary excluded) lands on the other.
+    const foe = enemy({ count: 2 }, { hp: 5, shield: 0 });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1
+    expect(state.enemyShips[0].damage).toBe(1); // primary
+    expect(state.enemyShips[1].damage).toBe(1); // splash
+  });
+
+  it('a miss deals no splash — cleave is gated on the primary die landing', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 0, cannons: [{ diceCount: 1, damage: 1, cleaveDamage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({ count: 2 }, { hp: 5, shield: 100 });
+    let found = false;
+    for (let seed = 1; seed <= 200 && !found; seed++) {
+      let state = initCombat(fleet, foe, seed);
+      state = advanceRound(state); // missile
+      state = advanceRound(state); // cannon round 1
+      const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 1);
+      const miss = rollEvents.find((e) => e.kind === 'roll' && !e.hit);
+      if (miss) {
+        found = true;
+        expect(state.enemyShips[0].damage + state.enemyShips[1].damage).toBe(0);
+      }
+    }
+    expect(found).toBe(true); // if this ever fails, the miss-gate is broken, not just unlucky
+  });
+
+  it('with only one enemy alive, cleave finds no second target and is a silent no-op', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 10, cannons: [{ diceCount: 1, damage: 1, cleaveDamage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 5, shield: 0 }); // just one enemy ship
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile
+    state = advanceRound(state); // cannon round 1 — should not throw
+    expect(state.enemyShips[0].damage).toBe(1);
+  });
+});
+
+describe('Homing missile — bypassTaunt (iteration 42)', () => {
+  it('ignores an alive taunter and lands on the plain lowest-HP defender instead', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, missiles: [{ diceCount: 1, damage: 2, bypassTaunt: true }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({
+      groups: [
+        { label: 'taunter', count: 1, stats: blankStats({ hp: 10, taunt: true }) },
+        { label: 'squishy', count: 1, stats: blankStats({ hp: 2 }) },
+      ],
+    });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile phase
+    const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile' && e.side === 'player');
+    expect(rollEvents).toHaveLength(1);
+    if (rollEvents[0].kind === 'roll') expect(rollEvents[0].targetIndex).toBe(1); // the squishy, not the taunter at index 0
+  });
+
+  it('ignores the player priority-click and the "strongest" targeting stance too', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, missiles: [{ diceCount: 1, damage: 2, bypassTaunt: true }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({ count: 2 }, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'strongest');
+    state = setPriorityTarget(state, 1); // click the second ship
+    state = advanceRound(state); // missile phase
+    const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile' && e.side === 'player');
+    expect(rollEvents).toHaveLength(1);
+    // Same HP on both — pickTarget's stable tie-break lands on index 0
+    // (the lowest-HP default), neither the clicked priority(1) nor
+    // "strongest" would have picked.
+    if (rollEvents[0].kind === 'roll') expect(rollEvents[0].targetIndex).toBe(0);
+  });
+
+  it('a plain (non-homing) missile still respects taunt, for contrast', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, missiles: [{ diceCount: 1, damage: 2 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({
+      groups: [
+        { label: 'taunter', count: 1, stats: blankStats({ hp: 10, taunt: true }) },
+        { label: 'squishy', count: 1, stats: blankStats({ hp: 2 }) },
+      ],
+    });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile phase
+    const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile' && e.side === 'player');
+    expect(rollEvents).toHaveLength(1);
+    if (rollEvents[0].kind === 'roll') expect(rollEvents[0].targetIndex).toBe(0); // the taunter, as usual
   });
 });

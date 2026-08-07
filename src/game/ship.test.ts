@@ -278,3 +278,34 @@ describe('the Foundry — fusions (iteration 31)', () => {
     expect(fusionSummary({ initiative: 3 })).toBe('+3 INIT');
   });
 });
+
+// --- Iteration 42: eight new weapons — data-layer checks only; the
+// per-die mechanics (chipOnMiss, executeAtHp, cleaveDamage, bypassTaunt)
+// are exercised in combatEngine.test.ts instead. ---
+describe('iteration 42 weapons — deriveStats threading', () => {
+  it('Railgun: -2 shield flows through as a plain negative stat, same mechanism +N parts already use', () => {
+    const stats = deriveStats('interceptor', ['railgun']);
+    expect(stats.shield).toBe(0 - 2); // interceptor base shield is 0
+    expect(stats.cannons).toHaveLength(1);
+    expect(stats.cannons[0].damage).toBe(5);
+  });
+
+  it('Prototype overcharge cannon: overcharge is baked in without the Overcharged rounds protocol', () => {
+    const stats = deriveStats('interceptor', ['protoovercharge']);
+    expect(stats.cannons[0].overcharge).toBe(true);
+  });
+
+  it("'twinauto' (Ion battery, 3 dice) and Cluster missile carry their multi-die counts through", () => {
+    const stats = deriveStats('interceptor', ['twinauto', 'clustermissile']);
+    expect(stats.cannons[0].diceCount).toBe(3);
+    expect(stats.missiles[0].diceCount).toBe(3);
+  });
+
+  it('Graviton beam, Executioner cannon, Flechette cannon, and Homing missile carry their new fields through', () => {
+    const stats = deriveStats('interceptor', ['gravitonbeam', 'executioner', 'flechette', 'homing']);
+    expect(stats.cannons.find((c) => c.chipOnMiss)?.chipOnMiss).toBe(1);
+    expect(stats.cannons.find((c) => c.executeAtHp !== undefined)?.executeAtHp).toBe(2);
+    expect(stats.cannons.find((c) => c.cleaveDamage)?.cleaveDamage).toBe(1);
+    expect(stats.missiles.find((m) => m.bypassTaunt)?.bypassTaunt).toBe(true);
+  });
+});

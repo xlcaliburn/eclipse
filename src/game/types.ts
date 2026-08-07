@@ -50,6 +50,25 @@ export interface Part {
     // deriveStats): this die rolls on a 7-face die instead of 6 — a natural
     // 7 always hits (like 6) AND deals +1 bonus damage.
     overcharge?: boolean;
+    // Iteration 42 (Graviton beam): a miss still deals this much direct
+    // damage instead of the usual 0 — consistency over burst.
+    chipOnMiss?: number;
+    // Iteration 42 (Executioner cannon): if this die hits and the target's
+    // HP *before* the hit is at or below this threshold, the hit deals the
+    // target's full remaining HP instead of `damage` — a finisher, not a
+    // routine damage multiplier (threshold is deliberately narrow, see
+    // plans/iteration-42.md's decision points).
+    executeAtHp?: number;
+    // Iteration 42 (Flechette cannon): on a hit, also deals this much
+    // direct damage to a second target (chosen the same way the primary
+    // target is — lowest HP, taunt/priority still apply to the primary
+    // pick, the second pick just excludes whoever the primary landed on).
+    cleaveDamage?: number;
+    // Iteration 42 (Homing missile): ignores taunt and any player
+    // priority-click/targeting-stance — always resolves to the plain
+    // lowest-remaining-HP alive defender (cloak's all-cloaked exception
+    // still applies).
+    bypassTaunt?: boolean;
   };
   computer?: number;
   shield?: number;
@@ -60,13 +79,14 @@ export interface Part {
   reactiveArmor?: number; // hits negated per round (stacks)
   onDestroyDamage?: number; // ramming prow: dealt to the lowest-HP enemy the instant this ship dies
   ablative?: number; // ablative coating: temporary HP, absorbed before real HP, not carried between fights
-  capacitorShield?: number; // shield capacitor: bonus shield, missile phase + first cannon round only
+  capacitorShield?: number; // piloting capacitor: bonus piloting, missile phase + first cannon round only
   cloak?: boolean; // cloaking field: untargetable unless every surviving player ship is also cloaked
   active?: boolean; // this part has a once-per-combat activated ability (id doubles as the ability id)
-  // Shield harmonic (iteration 23): a pure passive, no active button. While
-  // equipped anywhere in the fleet, adds this much shield to every ship's
-  // derived stats for the whole fight (folded in once at fleet-derive time
-  // — see ship.ts — not dynamically removed if the carrier dies mid-combat).
+  // Piloting harmonic (iteration 23): a pure passive, no active button.
+  // While equipped anywhere in the fleet, adds this much piloting to every
+  // ship's derived stats for the whole fight (folded in once at
+  // fleet-derive time — see ship.ts — not dynamically removed if the
+  // carrier dies mid-combat).
   fleetShieldAura?: number;
 }
 
@@ -82,6 +102,10 @@ export interface WeaponStats {
   aoeDamage?: number;
   targetHighest?: boolean;
   overcharge?: boolean; // see Part['weapon'].overcharge
+  chipOnMiss?: number; // see Part['weapon'].chipOnMiss
+  executeAtHp?: number; // see Part['weapon'].executeAtHp
+  cleaveDamage?: number; // see Part['weapon'].cleaveDamage
+  bypassTaunt?: boolean; // see Part['weapon'].bypassTaunt
 }
 
 export interface ShipStats {
@@ -91,9 +115,12 @@ export interface ShipStats {
   shield: number;
   cannons: WeaponStats[];
   missiles: WeaponStats[];
-  // How many points of a defender's shield this ship's attacks ignore
-  // (from the `optics` upgrade). Absent/0 for anything without it. Stacks
-  // with any per-die `shieldPierce` on the weapon itself (the Gauss lance).
+  // How many points of a defender's shield this ship's attacks ignore.
+  // Stacks with any per-die `shieldPierce` on the weapon itself (the
+  // Gauss lance). 2026-08-07: currently dormant — the one upgrade that
+  // used to set this ('optics', Piercing optics) was removed outright;
+  // kept as a live engine hook for a future part/upgrade to reuse rather
+  // than ripped out.
   shieldPierce?: number;
   flak?: number;
   taunt?: boolean;

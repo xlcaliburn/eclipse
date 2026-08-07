@@ -49,7 +49,7 @@ import {
   playerShipLabel,
 } from './ship';
 import type { FusionStat } from './ship';
-import { ELITE_UPGRADE_POOL, getUpgrade, HULL_BONUS_UPGRADE_POOL, randomUpgradeIds } from './upgrades';
+import { getUpgrade, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
 import { emptyRunStats } from './daily';
 import { shipName } from './shipNames';
@@ -164,8 +164,8 @@ export const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   bastion: ['ion'],
   dreadnought: ['ion', 'ion', 'shield1'],
   // 2026-08-06 (the same midrange-progression repricing): now arrives with
-  // a Gauss shield alongside its ion cannon — a real starting stat, not
-  // just a bare identity part, matching the Dreadnought's fuller fit above.
+  // Gauss coils alongside its ion cannon — a real starting stat, not just
+  // a bare identity part, matching the Dreadnought's fuller fit above.
   'light-cruiser': ['ion', 'shield1'],
   freighter: ['ion'],
   derelict: ['light-missile'],
@@ -296,15 +296,16 @@ export function frameCost(
 // purchase arrives with a bonus scaled to the hull's own rarity tier: +1
 // max HP (via `fusions.hp`, the same permanent slotless mechanic the
 // Foundry uses — stacks cleanly with any Foundry fusion bought later) and
-// +1 random upgrade (from HULL_BONUS_UPGRADE_POOL, without replacement),
-// PER rarity level above common (rare=1, epic=2, legendary=3; common
-// itself = 0, no bonus). A second-hand (store) purchase is always treated
-// as common regardless of the frame's real rarity — buying a Bastion
-// second-hand is cheap and plain; buying it from a shipyard is full price
-// but arrives already fused and upgraded.
+// +1 random upgrade (without replacement, from the full UPGRADES list —
+// see randomUpgradeIds's own comment for why there's no restricted pool
+// any more), PER rarity level above common (rare=1, epic=2, legendary=3;
+// common itself = 0, no bonus). A second-hand (store) purchase is always
+// treated as common regardless of the frame's real rarity — buying a
+// Bastion second-hand is cheap and plain; buying it from a shipyard is
+// full price but arrives already fused and upgraded.
 function hullRarityBonus(rarity: Rarity, rng: RngFn): { hp: number; upgrades: UpgradeId[] } {
   const level = RARITY_ORDER.indexOf(rarity);
-  return { hp: level, upgrades: randomUpgradeIds(level, rng, HULL_BONUS_UPGRADE_POOL) };
+  return { hp: level, upgrades: randomUpgradeIds(level, rng) };
 }
 
 // Credits earned for winning a combat node at the given (global) column.
@@ -1446,14 +1447,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         foundParts.push(CAPTURED_SCHEMATIC_PART_ID);
       }
 
-      // 'regen' heals damage after a win; 'salvage' pays extra credits per
-      // win. Both are per-upgrade-instance, so duplicates stack. The
-      // Engineer commander adds a flat +1 heal on top, stacking with regen.
+      // 'regen' heals damage after a win — per-upgrade-instance, so
+      // duplicates stack. The Engineer commander adds a flat +1 heal on
+      // top, stacking with regen.
       const engineerHeal = state.commanderId === 'engineer' ? 1 : 0;
-      let salvageTotal = 0;
       const healedFleet = survivingFleet.map((ship) => {
         const regenCount = ship.upgrades.filter((u) => u === 'regen').length;
-        salvageTotal += ship.upgrades.filter((u) => u === 'salvage').length * 3;
         const totalHeal = regenCount + engineerHeal;
         if (totalHeal === 0) return ship;
         // The Engineer banks a heal that outran actual damage instead of
@@ -1476,14 +1475,14 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // here via `baseReward` above — this stacks on top the same way
       // merchantBonus does).
       const salvageRigsBonus = hasProtocol(state.protocols, 'salvage-rigs') ? 2 : 0;
-      const creditsEarned =
-        baseReward + merchantBonus + eliteOrCommandBonus + salvageTotal + ambushBonusCredits + salvageRigsBonus;
+      const creditsEarned = baseReward + merchantBonus + eliteOrCommandBonus + ambushBonusCredits + salvageRigsBonus;
       const credits = state.credits + creditsEarned;
-      // Iteration 39: the elite pool trimmed to 2 entries (optics, salvage —
-      // the other seven moved to the hull-purchase rarity bonus). Offers
-      // exactly as many as the pool holds, so "pick one" never has to
-      // recycle into a forced duplicate.
-      const upgradeOptions = isElite ? randomUpgradeIds(ELITE_UPGRADE_POOL.length, rng, ELITE_UPGRADE_POOL) : undefined;
+      // Iteration 39 trimmed the elite pool to 2 entries (optics, salvage);
+      // both were removed outright 2026-08-07 (see upgrades.ts), so elites
+      // are back to a 3-option pick off the full remaining list — the
+      // pre-39 default, restored now that nothing makes the elite pool
+      // exclusive any more.
+      const upgradeOptions = isElite ? randomUpgradeIds(3, rng) : undefined;
 
       // The Spymaster's free intelligence, drawn from the same rng stream so
       // the whole run stays reproducible from its seed.
@@ -1625,8 +1624,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // elite-pool upgrade, no longer one option competing against a heal
       // or a flat credit bonus that used to make boss kills feel optional
       // to actually build around.
-      // Iteration 39: same trimmed elite pool as a normal elite kill above.
-      const upgradeId = randomUpgradeIds(1, rng, ELITE_UPGRADE_POOL)[0];
+      // Draws from the full remaining upgrade list, same as a normal elite
+      // kill above (see randomUpgradeIds's comment in upgrades.ts).
+      const upgradeId = randomUpgradeIds(1, rng)[0];
       const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, upgradeId, state.commanderId) : s));
       // Into act 2: a fresh sector — position/visited/fled/fog reset, the
       // boss dossier resets (a second reveal purchase awaits). Iteration

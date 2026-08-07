@@ -12,7 +12,7 @@ import { getProtocol } from './protocols';
 import type { CargoTag, GameMap, MapPosition, NodeType } from './map';
 import { CAPTURED_SCHEMATIC_PART_ID, getPart } from './parts';
 import { deriveStats, fusionCost } from './ship';
-import { getUpgrade, HULL_BONUS_UPGRADE_POOL } from './upgrades';
+import { getUpgrade, UPGRADES } from './upgrades';
 import {
   applyCargoReward,
   eliteReward,
@@ -269,7 +269,7 @@ describe('PICK_NODE — map flow', () => {
 
   it('REPAIR_CHOOSE overhaul refuses an upgradeId not among the drawn options', () => {
     const state = runReducer(stateWithMap('repair'), { type: 'PICK_NODE', row: 0 });
-    const notOffered = (['spine', 'reactor', 'lattice', 'drives', 'optics', 'autoloader', 'regen', 'salvage', 'bay'] as const).find(
+    const notOffered = (['spine', 'reactor', 'lattice', 'drives', 'autoloader', 'regen', 'bay'] as const).find(
       (id) => !state.repairUpgradeOptions!.includes(id),
     )!;
     const result = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'overhaul', shipIndex: 0, upgradeId: notOffered });
@@ -434,7 +434,7 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
     expect(state.fleet).toHaveLength(4);
   });
 
-  it('adds a Dreadnought (2026-08-06 repricing): 30cr, arrives fitted with 2 ion cannons + a Gauss shield, 8 slots and a 4-weapon cap enforced', () => {
+  it('adds a Dreadnought (2026-08-06 repricing): 30cr, arrives fitted with 2 ion cannons + Gauss coils, 8 slots and a 4-weapon cap enforced', () => {
     let state = stateWithMap('shop', {
       phase: 'shop',
       act: 2,
@@ -459,7 +459,7 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
     expect(overCap.fleet[1].equipped).toHaveLength(5); // 5th weapon refused — max 4 weapons total
   });
 
-  it('adds a Cruiser (2026-08-06 repricing): 22cr, pre-fitted with an ion cannon + a Gauss shield, 4 slots, no weapon cap', () => {
+  it('adds a Cruiser (2026-08-06 repricing): 22cr, pre-fitted with an ion cannon + Gauss coils, 4 slots, no weapon cap', () => {
     let state = stateWithMap('shop', { phase: 'shop', credits: 22, shopFrameOffers: ['light-cruiser'] });
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'light-cruiser' });
     expect(state.fleet).toHaveLength(2);
@@ -582,7 +582,7 @@ describe('BUY_SHIP — store vs. shipyard (iteration 33; rarity bonus reworked i
     expect(shipyardResult.fleet[1].upgrades).toHaveLength(1);
     expect(shipyardResult.fleet[1].equipped).toEqual(['ion']);
     for (const id of shipyardResult.fleet[1].upgrades) {
-      expect(HULL_BONUS_UPGRADE_POOL).toContain(id);
+      expect(UPGRADES.map((u) => u.id)).toContain(id);
     }
   });
 
@@ -1152,10 +1152,13 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
     expect(left.pendingReward).toBeUndefined();
   });
 
-  it('an elite win offers exactly 2 upgrade options (iteration 39: the trimmed elite pool) and blocks leaving until resolved', () => {
+  // 2026-08-07: back to 3 options — the elite-exclusive pool (iteration 39)
+  // relied entirely on 'optics'/'salvage', both removed outright, so
+  // elites draw 3 from the full remaining list again.
+  it('an elite win offers exactly 3 upgrade options and blocks leaving until resolved', () => {
     const state = runReducer(wonNonBossState({}, true), { type: 'CONTINUE' });
     expect(state.phase).toBe('reward');
-    expect(state.pendingReward?.upgradeOptions).toHaveLength(2);
+    expect(state.pendingReward?.upgradeOptions).toHaveLength(3);
 
     const blocked = runReducer(state, { type: 'LEAVE_REWARD' });
     expect(blocked.phase).toBe('reward'); // still blocked
@@ -1173,7 +1176,7 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
     const state = runReducer(wonNonBossState({}, true), { type: 'CONTINUE' });
     const result = runReducer(state, { type: 'PICK_UPGRADE', upgradeId: 'zzz-not-real' as never, shipIndex: 0 });
     expect(result.fleet[0].upgrades).toHaveLength(0);
-    expect(result.pendingReward?.upgradeOptions).toHaveLength(2);
+    expect(result.pendingReward?.upgradeOptions).toHaveLength(3);
   });
 
   it('a second upgrade replaces (destroys) the first — at most 1 permanent upgrade per ship (addendum A.4)', () => {
@@ -1235,7 +1238,7 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
   });
 });
 
-describe('upgrades — regen and salvage', () => {
+describe('upgrades — regen', () => {
   it('regen heals damage on the surviving ship after a win', () => {
     // Constructed (not simulated) combat state, held at its initial values —
     // no rounds resolved, so the ship's end damage is exactly the 4 it
@@ -1251,16 +1254,6 @@ describe('upgrades — regen and salvage', () => {
     });
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.fleet[0].damage).toBe(3); // healed by exactly 1
-  });
-
-  it('salvage adds 3 credits per instance on a win', () => {
-    const state = wonNonBossState({
-      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: ['salvage', 'salvage'] }],
-    });
-    const before = state.credits;
-    const result = runReducer(state, { type: 'CONTINUE' });
-    // base reward (winReward(0) = floor(7/2) = 3, act-1 halved) + 2x salvage (3 each) = 9
-    expect(result.credits - before).toBe(3 + 6);
   });
 });
 
