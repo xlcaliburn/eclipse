@@ -21,6 +21,7 @@ import {
   hasLineOfRetreat,
   initialRunState,
   partCost,
+  rollRarity,
   runReducer,
   secondHandDamage,
   SHIPYARD_UPGRADE_COST,
@@ -2414,6 +2415,93 @@ describe('shop rework (iteration 7): stratified draw + selling', () => {
     state = runReducer(state, { type: 'SELL_PART', partId: 'plasma' });
     expect(state.credits).toBe(0);
     expect(state.inventory).toContain('plasma');
+  });
+});
+
+function fixedRng(...values: number[]): () => number {
+  let i = 0;
+  return () => values[Math.min(i++, values.length - 1)];
+}
+
+describe('rollRarity — tier-boundary math (iteration 36)', () => {
+  // Weights: common 0.73, rare 0.20 (cumulative 0.93), epic 0.05
+  // (cumulative 0.98), legendary 0.02 (cumulative 1.00). rollRarity picks
+  // the first tier whose cumulative weight exceeds the roll, so the
+  // boundary itself belongs to the NEXT tier up.
+  it('selects the tier the cumulative-weight boundaries say it should, on both sides of every edge', () => {
+    expect(rollRarity(fixedRng(0))).toBe('common');
+    expect(rollRarity(fixedRng(0.729))).toBe('common');
+    expect(rollRarity(fixedRng(0.731))).toBe('rare');
+    expect(rollRarity(fixedRng(0.929))).toBe('rare');
+    expect(rollRarity(fixedRng(0.931))).toBe('epic');
+    expect(rollRarity(fixedRng(0.979))).toBe('epic');
+    expect(rollRarity(fixedRng(0.981))).toBe('legendary');
+    expect(rollRarity(fixedRng(0.999))).toBe('legendary');
+  });
+});
+
+describe('rarity (iteration 36): shop draws are rarity-weighted, every offer slot always fills', () => {
+  it('every part and every purchasable frame has a rarity tier assigned', () => {
+    for (const id of ['ion', 'plasma', 'antimatter', 'shieldharmonic', 'shield3', 'hull3', 'init2'] as const) {
+      expect(['common', 'rare', 'epic', 'legendary']).toContain(getPart(id).rarity);
+    }
+    for (const id of PURCHASABLE_FRAME_IDS) {
+      expect(['common', 'rare', 'epic', 'legendary']).toContain(getFrame(id).rarity);
+    }
+  });
+
+  it('a shop draw of many visits always fills all 6 part slots and all frame slots — the fallback never leaves a gap', () => {
+    for (let i = 0; i < 40; i++) {
+      const state = runReducer(stateWithMap('shop'), { type: 'PICK_NODE', row: 0 });
+      expect(state.shopOffers).toHaveLength(SHOP_OFFER_COUNT);
+      expect(new Set(state.shopOffers).size).toBe(SHOP_OFFER_COUNT); // still unique
+      expect(state.shopFrameOffers).toHaveLength(2); // a store, this act/kind
+    }
+  });
+
+  // The Dreadnought is filtered out of the draw pool entirely in an act-1
+  // store (not merely "wrong tier") — proof that a legendary roll there
+  // can never leak it, whatever tier actually got rolled. Same invariant
+  // the pre-existing "never offers the Dreadnought in act 1" test already
+  // covers; restated here under the rarity describe block since it's the
+  // fallback behavior 36.2 specifically calls out.
+  it('a legendary roll in an act-1 store can never surface the Dreadnought (filtered from the pool, not just mistiered)', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 40; i++) {
+      const state = runReducer(stateWithMap('shop'), { type: 'PICK_NODE', row: 0 }); // act defaults to 1
+      state.shopFrameOffers!.forEach((id) => seen.add(id));
+    }
+    expect(seen.has('dreadnought')).toBe(false);
+  });
+});
+
+describe('the stat-item ladder (iteration 36): full +1/+2/+3 coverage, common/rare/epic at 3/5/9cr', () => {
+  it('every stat has all three rungs, priced and rarity-gated correctly', () => {
+    const ladder: [PartId, PartId, PartId, number][] = [
+      ['comp1', 'comp2', 'comp3', 1],
+      ['shield1', 'shield2', 'shield3', 1],
+      ['hull1', 'hull2', 'hull3', 1],
+      ['init1', 'init2', 'init3', 1],
+    ];
+    for (const [tier1, tier2, tier3] of ladder) {
+      const p1 = getPart(tier1);
+      const p2 = getPart(tier2);
+      const p3 = getPart(tier3);
+      expect(p1.rarity).toBe('common');
+      expect(p1.cost).toBe(3);
+      expect(p2.rarity).toBe('rare');
+      expect(p2.cost).toBe(5);
+      expect(p3.rarity).toBe('epic');
+      expect(p3.cost).toBe(9);
+      // The rare -> epic price gap (4) is wider than common -> rare (2).
+      expect(p3.cost - p2.cost).toBeGreaterThan(p2.cost - p1.cost);
+    }
+  });
+
+  it('the two new mid-ladder stat items derive the stat they claim to', () => {
+    expect(deriveStats('cruiser', ['shield3']).shield).toBe(3);
+    expect(deriveStats('cruiser', ['hull3']).hp - deriveStats('cruiser', []).hp).toBe(3);
+    expect(deriveStats('cruiser', ['init2']).initiative).toBe(2);
   });
 });
 

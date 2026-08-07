@@ -598,7 +598,10 @@ const RARITY_WEIGHTS: Record<Rarity, number> = {
 // fallback walk below.
 const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
 
-function rollRarity(rng: RngFn): Rarity {
+// Exported for a direct unit test of the tier-boundary math (same
+// discipline as applyCargoReward's export above) — the reducer-level
+// integration tests can't cheaply pin an exact rng value mid-draw.
+export function rollRarity(rng: RngFn): Rarity {
   const roll = rng();
   let cumulative = 0;
   for (const tier of RARITY_ORDER) {

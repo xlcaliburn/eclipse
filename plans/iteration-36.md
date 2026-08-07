@@ -6,7 +6,7 @@
 > (`Rarity` type + required field, `drawRarityWeighted` driving both part
 > and frame shop offers, UI tinting via the four `--rarity-*` tokens), the
 > stat-item ladder (`shield3`/`hull3`/`init2` new, comp3/init3 repriced to
-> 9cr), and the wiki's rarity columns. 655 tests passing, `tsc -b` and
+> 9cr), and the wiki's rarity columns. 661 tests passing, `tsc -b` and
 > `vite build` clean. No browser pass, per the standing policy — verify
 > live at your convenience. Per 36.2's determinism note: existing seed
 > codes now produce different shop offers (one extra rng draw per offer
