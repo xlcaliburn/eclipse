@@ -333,6 +333,13 @@ h1, h2, h3 {
   max-width: 560px;
 }
 
+/* Onboarding popups (iteration 29) — the same overlay, one topic at a
+   time, so a shorter max-width reads as a focused prompt rather than a
+   mostly-empty reference panel. */
+.onboarding-popup {
+  max-width: 420px;
+}
+
 .tutorial-body {
   max-height: 60vh;
   overflow-y: auto;

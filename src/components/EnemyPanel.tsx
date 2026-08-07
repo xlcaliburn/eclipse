@@ -199,8 +199,8 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId, protocols }:
 
       {enemyShield > 0 && (
         <p className={short ? 'warning' : 'hint'}>
-          Shield {enemyShield} — needs computer <strong>{requiredComputer}+</strong>
-          {pierceRecommended ? ' — or shield pierce' : ''} to hit on anything but a natural 6.
+          Piloting {enemyShield} — needs computer <strong>{requiredComputer}+</strong>
+          {pierceRecommended ? ' — or a part that ignores piloting' : ''} to hit on anything but a natural 6.
           {bestComputer !== undefined && ` Your best ship: computer ${bestComputer}.`}
         </p>
       )}

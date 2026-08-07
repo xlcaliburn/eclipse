@@ -1,6 +1,6 @@
 # Iteration 29 — Piloting rename, roll legibility, and progressive onboarding (specced 2026-08-06)
 
-> **Status: specced, not implemented.**
+> **Status: implemented 2026-08-06.**
 
 Three related asks from the same player-feedback thread that led to
 iteration 26's boss re-tune. The bug report investigation ("Cybernetic
@@ -250,3 +250,56 @@ on a second fight/second run once dismissed; the roll log correctly shows
 offsets the attacker's computer — including a case built specifically to
 reproduce the original bug report's shape (a computer-boosting active used
 against a piloting stat that fully absorbs it).
+
+## Implementation notes (2026-08-06)
+
+All three sub-sections landed as specced, with a couple of small deviations
+noted below.
+
+- **29.1** landed exactly as specced — every listed file/line was
+  find-replaced, part/enemy/upgrade flavor names left untouched. Verified
+  with a `grep -rn` sweep for stray "shield" in quoted/JSX text: only
+  deliberately-kept identifiers and flavor names remained.
+- **29.2** landed as a new pure function, `src/components/combatRollText.ts`
+  (`describeRoll`), extracted following the existing `replaySteps.ts`
+  precedent rather than left inline — this was called out as the
+  "recommended" path in the spec, and a focused unit test file
+  (`combatRollText.test.ts`, 8 cases) covers the needed-roll math, the
+  natural-6 omission, and the nullified-callout text on both the miss and
+  hit branch. `CombatScreen.tsx`'s `describeEvent` roll case now just calls
+  it. The optional "NULLIFIED" card-badge stretch goal was **not** built —
+  the log-line fix alone was verified to fully resolve the original bug
+  report (reproduced the exact scenario: a +2 computer active against a
+  shield-2 enemy, confirmed both the pre-fix silent miss and the post-fix
+  "only a natural 6 gets through" callout live in the browser).
+- **29.3** landed with one deliberate deviation from the spec:
+  `onboardingProgress.ts` does **not** include the subscriber-set plumbing
+  `motionPreference.ts`/`soundPreference.ts` carry. Nothing outside
+  `CombatScreen`'s own mount-time check needs to react live to this state
+  changing, so a plain module-level read/write pair was used instead — noted
+  in the module's own header comment. Sequencing, triggers, and persistence
+  otherwise match the spec exactly: `useEffect` gated by a `useRef` so it
+  only evaluates once per mount, priority order dice-roll → missiles →
+  piloting, `localStorage['eclipse.onboardingSeen']` persistence with
+  fail-soft try/catch.
+- **Verification:** `tsc -b --force` clean, `npx vitest run` 562/562
+  passing, `npx vite build` clean. Live browser passes (hand-edited
+  `localStorage` saves, same technique as prior iterations) confirmed: the
+  dice-roll popup fires on a fresh browser's first `ENGAGE`; a fleet with a
+  missile-equipped ship triggers the missiles popup; an enemy with
+  `shield > 0` triggers the piloting popup; all three fire in the correct
+  priority order back-to-back in one fight built to trip all three at once;
+  `localStorage['eclipse.onboardingSeen']` correctly persists
+  `{diceRoll:true, missiles:true, piloting:true}` after dismissal; a
+  **second, later fight** with the same trigger conditions still true shows
+  **no** popup, confirming once-per-browser persistence rather than
+  once-per-fight suppression. The roll-legibility fix was separately
+  verified against the original bug report's exact scenario (see 29.2
+  above).
+- **Not part of this iteration:** the three mid-turn requests that arrived
+  during this implementation pass — Dreadnought/Cruiser/Freighter repricing
+  with new starting fits, and escalating shop-reroll pricing — were
+  implemented and verified in the same session but are out of this plan's
+  scope; they aren't covered by iteration 29's spec and have no dedicated
+  plan doc (treated as directly-actionable trivial-scope changes per project
+  convention).

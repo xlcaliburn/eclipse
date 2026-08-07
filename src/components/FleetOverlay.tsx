@@ -29,7 +29,7 @@ function fleetBody(fleet: PlayerShipState[], inventory: PartId[], protocols?: Pr
               <span className="ship-card__name">{playerShipLabel(fleet, shipIndex)}</span>
               <span className="ship-card__stats">
                 HP {Math.max(0, stats.hp - ship.damage)}/{stats.hp} · Init {stats.initiative} · Comp{' '}
-                {stats.computer} · Shield {stats.shield}
+                {stats.computer} · Piloting {stats.shield}
               </span>
             </div>
             {ship.upgrades.length > 0 && (

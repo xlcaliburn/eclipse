@@ -20,9 +20,9 @@ export interface Upgrade {
 export const UPGRADES: Upgrade[] = [
   { id: 'spine', name: 'Reinforced spine', description: '+2 max HP' },
   { id: 'reactor', name: 'Auxiliary reactor', description: '+1 computer' },
-  { id: 'lattice', name: 'Deflector lattice', description: '+1 shield' },
+  { id: 'lattice', name: 'Deflector lattice', description: '+1 piloting' },
   { id: 'drives', name: 'Overtuned drives', description: '+2 initiative' },
-  { id: 'optics', name: 'Piercing optics', description: 'Ignores 1 point of enemy shield' },
+  { id: 'optics', name: 'Piercing optics', description: 'Ignores 1 point of enemy piloting' },
   { id: 'autoloader', name: 'Autoloader', description: '+1 cannon die (1 dmg)' },
   { id: 'regen', name: 'Regenerative plating', description: 'Repairs 1 damage after each combat won' },
   { id: 'salvage', name: 'Salvage rig', description: '+3 credits per combat won' },

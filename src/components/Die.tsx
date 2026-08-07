@@ -57,7 +57,7 @@ function diceFor(weapons: WeaponStats[], kind: 'cannon' | 'missile'): { damage: 
     Array.from({ length: w.diceCount }, () => ({
       damage: w.damage,
       kind,
-      title: `${w.diceCount}× ${kind} (${w.damage} dmg${w.shieldPierce ? `, pierces ${w.shieldPierce} shield` : ''}${w.aoeDamage ? ', hits every ship' : ''}${w.targetHighest ? ', targets strongest' : ''}${w.selfDamageOnNatOne ? ', backfires on a natural 1' : ''})`,
+      title: `${w.diceCount}× ${kind} (${w.damage} dmg${w.shieldPierce ? `, ignores ${w.shieldPierce} piloting` : ''}${w.aoeDamage ? ', hits every ship' : ''}${w.targetHighest ? ', targets strongest' : ''}${w.selfDamageOnNatOne ? ', backfires on a natural 1' : ''})`,
     })),
   );
 }

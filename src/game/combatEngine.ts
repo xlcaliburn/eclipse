@@ -952,7 +952,7 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
       return {
         ...state,
         usedActives,
-        log: armed('Shield modulator armed — +2 shield for your fleet this round.'),
+        log: armed('Shield modulator armed — +2 piloting for your fleet this round.'),
         roundModifiers: { ...state.roundModifiers, playerShieldBonus: state.roundModifiers.playerShieldBonus + 2 },
       };
     case 'dcbay': {
@@ -1033,7 +1033,7 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
       return {
         ...state,
         usedActives,
-        log: armed("Shield disruptor armed — the enemy fleet's shield is reduced by 2 this round."),
+        log: armed("Shield disruptor armed — the enemy fleet's piloting is reduced by 2 this round."),
         roundModifiers: {
           ...state.roundModifiers,
           enemyShieldPenalty: state.roundModifiers.enemyShieldPenalty + 2,

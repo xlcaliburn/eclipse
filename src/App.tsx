@@ -353,6 +353,7 @@ function App() {
               inventory={state.inventory}
               commanderId={state.commanderId}
               protocols={state.protocols}
+              rerollsUsed={state.shopRerollCount}
               commodityLotSellable={commodityLotSellable}
               onBuyPart={(offerIndex) => dispatch({ type: 'BUY_PART', offerIndex })}
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}

@@ -25,8 +25,8 @@ export function StatBar({
         <span className="stat-bar__stat" title="Computer — added to every attack roll">
           <abbr>COMP</abbr> {stats.computer}
         </span>
-        <span className="stat-bar__stat" title="Shield — subtracted from every roll against this ship">
-          <abbr>SHD</abbr> {stats.shield}
+        <span className="stat-bar__stat" title="Piloting — subtracted from every roll against this ship">
+          <abbr>PLT</abbr> {stats.shield}
         </span>
       </div>
       {showWeapons && <WeaponDiceRow stats={stats} />}

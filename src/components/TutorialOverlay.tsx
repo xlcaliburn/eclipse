@@ -15,10 +15,11 @@ function TutorialBody() {
           Every shot rolls one 6-sided die. A natural <strong>6</strong> always hits, no matter what. A natural{' '}
           <strong>1</strong> always misses, no matter what. Anything else hits if:
         </p>
-        <p className="tutorial-row__formula">roll + Computer − Shield ≥ 6</p>
+        <p className="tutorial-row__formula">roll + Computer − Piloting ≥ 6</p>
         <p className="tutorial-row__hint">
-          Example: your Computer is 2, their Shield is 1. Roll a 4 → 4 + 2 − 1 = 5, not enough — miss. Roll a 5 →
-          5 + 2 − 1 = 6 — hit.
+          Example: your Computer is 2, their Piloting is 1. Roll a 4 → 4 + 2 − 1 = 5, not enough — miss. Roll a 5 →
+          5 + 2 − 1 = 6 — hit. The combat log shows this math on every roll, including a callout on any roll where
+          Piloting fully cancels out your Computer (only a natural 6 gets through then).
         </p>
       </section>
 
@@ -31,10 +32,20 @@ function TutorialBody() {
       </section>
 
       <section className="tutorial-row">
-        <h3 className="tutorial-row__label">Shield</h3>
+        <h3 className="tutorial-row__label">Piloting</h3>
         <p className="tutorial-row__hint">
-          Subtracted from the attacker's roll before it's checked against that ship. Higher Shield makes a ship
-          harder to hit — but a natural 6 ignores it completely, so shields alone are never a perfect wall.
+          Subtracted from the attacker's roll before it's checked against your ship. Higher Piloting makes a ship
+          harder to hit — but a natural 6 ignores it completely, so piloting alone is never a perfect wall.
+        </p>
+      </section>
+
+      <section className="tutorial-row">
+        <h3 className="tutorial-row__label">Missiles</h3>
+        <p className="tutorial-row__hint">
+          Before the first cannon round, one missile phase fires — only if at least one fleet is actually carrying
+          missiles (skipped outright otherwise). Missiles roll the same hit math as cannons, but there's no return
+          fire that phase: it's a free opening volley, not a trade. Flak batteries can shoot missile dice down
+          before they land, cancelling them before they're even rolled.
         </p>
       </section>
 

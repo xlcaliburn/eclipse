@@ -51,7 +51,7 @@ export const GAUNTLET: EnemyDef[] = [
     // (comp 1 now lets a 5 also hit): col3-typical fleet's win rate moved
     // 44% -> see scripts/balance.ts's table. See plans/iteration-22.md 22.0
     // for the full diagnosis.
-    blurb: 'Computers beat shields.',
+    blurb: 'Computers beat piloting.',
     groups: solo('cruiser', 1, {
       initiative: 1,
       hp: 3,
@@ -90,7 +90,7 @@ export const GAUNTLET: EnemyDef[] = [
   {
     id: 'sniper',
     name: 'Sniper',
-    blurb: 'Shields blunt high computers.',
+    blurb: 'Piloting blunts high computers.',
     groups: solo('sniper', 1, {
       initiative: 2,
       hp: 2,
@@ -265,7 +265,7 @@ const TORPEDO_BOATS: EnemyDef = {
 const LANCE_FRIGATE: EnemyDef = {
   id: 'lance-frigate',
   name: 'Lance frigate',
-  blurb: "Your shields don't work here.",
+  blurb: "Your piloting doesn't work here.",
   groups: solo('frigate', 1, {
     initiative: 1,
     hp: 5,
@@ -372,7 +372,7 @@ const ESCORTED_SNIPER: EnemyDef = {
 const SNIPER_PAIR: EnemyDef = {
   id: 'sniper-pair',
   name: 'Sniper pair',
-  blurb: 'Shields blunt high computers — twice over.',
+  blurb: 'Piloting blunts high computers — twice over.',
   groups: solo('sniper', 2, {
     initiative: 2,
     hp: 2,
@@ -396,7 +396,7 @@ const CARRIER_GROUP: EnemyDef = {
 const COMMAND_WING: EnemyDef = {
   id: 'command-wing',
   name: 'Command wing',
-  blurb: 'The commander hides behind lancers that pierce your shields.',
+  blurb: 'The commander hides behind lancers that pierce your piloting.',
   groups: [
     {
       label: 'commander',
@@ -799,7 +799,7 @@ const VOID_CITADEL: EnemyDef = {
   id: 'citadel',
   name: 'Void Citadel',
   blurb:
-    'Demands lances, optics, or computer 6 — shield 5 is a statement — and cannons, not missiles. Its pickets you can actually hit.',
+    'Demands lances, optics, or computer 6 — piloting 5 is a statement — and cannons, not missiles. Its pickets you can actually hit.',
   groups: [
     {
       label: 'citadel',

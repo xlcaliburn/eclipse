@@ -8,10 +8,15 @@ interface PartCardProps {
   showCost?: boolean;
 }
 
+// Iteration 29: the Shield stat is displayed as "Piloting" everywhere a
+// player reads it — the underlying `PartType`/`ShipStats.shield`
+// identifiers, and every shield-*themed* part's own flavor name (Gauss
+// shield, Shield modulator, ...), are deliberately untouched; only this
+// category label (and every other player-facing "Shield" string) changed.
 const TYPE_LABEL: Record<Part['type'], string> = {
   weapon: 'Weapon',
   computer: 'Computer',
-  shield: 'Shield',
+  shield: 'Piloting',
   hull: 'Hull',
   drive: 'Drive',
   cargo: 'Cargo',

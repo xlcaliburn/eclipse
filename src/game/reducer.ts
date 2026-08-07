@@ -110,7 +110,6 @@ export type RunAction =
   | { type: 'LOAD_STATE'; state: RunState };
 
 export const SHOP_OFFER_COUNT = 6;
-export const REROLL_COST = 2;
 // How many columns beyond the current vision high-water mark a long-range
 // sweep reveals.
 const SECTOR_SCAN_DEPTH = 2;
@@ -128,15 +127,22 @@ export const SETUP_ALLOWED_PARTS: PartId[] = ['ion', 'hull1', 'shield1', 'comp1'
 // A purchased ship arrives pre-fitted with one signature part, like the
 // Flagship's own starting loadout — an Interceptor with an ion cannon, a
 // Bastion with the lure beacon its whole role depends on, a Cruiser with
-// the same ion cannon (its identity is having no gimmick). The Dreadnought,
-// Freighter, and Derelict have no signature identity part — blank slates
-// for whatever the fleet needs at that point in the run (or, for the
-// Derelict, simply too cheap to arrive with anything at all).
+// the same ion cannon (its identity is having no gimmick). The Freighter
+// and Derelict have no signature identity part — blank slates for whatever
+// the fleet needs at that point in the run (or, for the Derelict, simply
+// too cheap to arrive with anything at all). The Dreadnought (2026-08-06:
+// repriced to 30cr as the top of the interceptor/cruiser/dreadnought
+// progression) now arrives combat-ready instead of an empty premium hull —
+// 2 ion cannons + a Gauss shield, 3 of its 8 slots, matching frames.ts's
+// own blurb.
 const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   interceptor: ['ion'],
   bastion: ['lure'],
-  dreadnought: [],
-  'light-cruiser': ['ion'],
+  dreadnought: ['ion', 'ion', 'shield1'],
+  // 2026-08-06 (the same midrange-progression repricing): now arrives with
+  // a Gauss shield alongside its ion cannon — a real starting stat, not
+  // just a bare identity part, matching the Dreadnought's fuller fit above.
+  'light-cruiser': ['ion', 'shield1'],
   freighter: [],
   derelict: [],
   frigate: ['tacrelay'],
@@ -461,9 +467,21 @@ function grantCommanderIntel(state: RunState, rng: RngFn): { state: RunState; te
   return grantIntel(state, rng);
 }
 
-// Shop rerolls cost 1cr instead of 2 for the Merchant.
-export function rerollCost(commanderId: CommanderId | undefined): number {
-  return commanderId === 'merchant' ? 1 : REROLL_COST;
+// 2026-08-06: rerolls escalate within a shop visit instead of a flat
+// price — the Nth reroll this visit (1-indexed: the very first reroll is
+// N=1) costs N credits, so idle rerolling for a perfect offer has a real,
+// rising cost instead of being free money to burn. `rerollsUsedThisVisit`
+// is RunState.shopRerollCount (0 before any reroll this visit), reset
+// every time a shop is (re-)entered — see PICK_NODE's shop branch — so
+// the price resets on the next visit rather than punishing the whole run.
+// The Merchant still prices better than everyone else ("better prices
+// everywhere"): half of the escalating cost, rounded up, floored at 1cr —
+// their 1st-4th rerolls are noticeably cheaper, and the discount keeps
+// compounding as the price climbs rather than staying a flat -1cr forever.
+export function rerollCost(commanderId: CommanderId | undefined, rerollsUsedThisVisit: number): number {
+  const nextRerollNumber = rerollsUsedThisVisit + 1;
+  if (commanderId === 'merchant') return Math.max(1, Math.ceil(nextRerollNumber / 2));
+  return nextRerollNumber;
 }
 
 function removeOnce<T>(list: T[], item: T): T[] {
@@ -878,6 +896,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           phase: 'shop',
           shopOffers: drawShopOffers(rng, state.commanderId, state.protocols),
           shopFrameOffers: drawFrameOffers(rng),
+          shopRerollCount: undefined, // fresh visit — reroll pricing starts back at 1cr
           heat,
           rngCounter: nextCounter(),
         };
@@ -1613,13 +1632,15 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'REROLL': {
       if (state.phase !== 'shop') return state;
-      const cost = rerollCost(state.commanderId);
+      const rerollsUsed = state.shopRerollCount ?? 0;
+      const cost = rerollCost(state.commanderId, rerollsUsed);
       if (state.credits < cost) return state;
       const { rng, nextCounter } = runRng(state);
       return {
         ...state,
         credits: state.credits - cost,
         shopOffers: drawShopOffers(rng, state.commanderId, state.protocols),
+        shopRerollCount: rerollsUsed + 1,
         rngCounter: nextCounter(),
       };
     }
@@ -1631,6 +1652,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         phase: 'map',
         shopOffers: undefined,
         shopFrameOffers: undefined,
+        shopRerollCount: undefined,
         currentEnemy: undefined,
       };
     }

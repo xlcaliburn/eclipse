@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { canPlayCard, canUseActive, incomingFirePreview, outspeedingShipIndices } from '../game/combatEngine';
+import { canPlayCard, canUseActive, hasMissilePhase, incomingFirePreview, outspeedingShipIndices } from '../game/combatEngine';
 import type { CombatState } from '../game/combatEngine';
 import { getCard } from '../game/cards';
 import type { CardId } from '../game/cards';
@@ -10,11 +10,30 @@ import type { UpgradeId } from '../game/upgrades';
 import { classifyArchetype } from './ShipSilhouette';
 import { ActiveSparkIcon } from './PartIcon';
 import { CombatFleetView } from './CombatFleetView';
+import { OnboardingPopup } from './OnboardingPopup';
 import { TheaterFxLayer } from './TheaterFx';
 import type { FxItem, FxSpawn } from './TheaterFx';
 import { usePrefersReducedMotion } from './useReducedMotion';
 import { countRevealSteps, revealStepEnd } from './replaySteps';
+import { describeRoll } from './combatRollText';
+import { hasSeenOnboarding, markOnboardingSeen } from '../onboardingProgress';
+import type { OnboardingKey } from '../onboardingProgress';
 import { playSfx } from '../audio';
+
+// Iteration 29: the first-run onboarding sequence — dice roll, then
+// missiles, then piloting, checked in that fixed priority order every time
+// a popup closes (not just once), so a fight that trips two conditions at
+// once (e.g. a first-ever fight that also happens to have a live missile
+// phase) shows them back-to-back instead of only ever surfacing one.
+// `hasMissilePhase`/the piloting check are pure functions of the fight's
+// starting composition (neither changes mid-fight), so it's safe to
+// re-derive from `combat`/`enemy` on every check rather than caching them.
+function nextOnboardingPopup(combat: CombatState, enemy: EnemyDef): OnboardingKey | null {
+  if (!hasSeenOnboarding('diceRoll')) return 'diceRoll';
+  if (!hasSeenOnboarding('missiles') && hasMissilePhase(combat)) return 'missiles';
+  if (!hasSeenOnboarding('piloting') && enemy.groups.some((g) => g.stats.shield > 0)) return 'piloting';
+  return null;
+}
 
 // ~1.5s replay budget per round (10.5) — spread evenly across however many
 // events landed this round, clamped so a single-event round doesn't linger
@@ -107,10 +126,7 @@ function describeEvent(event: CombatEvent, enemy: EnemyDef, playerLabels: string
       const attacker = shipLabel(event.side, event.shooterIndex, enemy, playerLabels);
       const defenderSide = event.side === 'player' ? 'enemy' : 'player';
       const target = shipLabel(defenderSide, event.targetIndex, enemy, playerLabels);
-      if (event.hit) {
-        return `${attacker} rolls ${event.raw} — hits ${target} for ${event.damage} damage.`;
-      }
-      return `${attacker} rolls ${event.raw} — misses ${target}.`;
+      return describeRoll(event, attacker, target);
     }
     case 'destroyed': {
       const label = shipLabel(event.side, event.shipIndex, enemy, playerLabels);
@@ -149,6 +165,24 @@ export function CombatScreen({
   const finished = Boolean(combat.winner);
   const won = combat.winner === 'player';
   const withdrawEnabled = canWithdraw && combat.round >= 1;
+
+  // Iteration 29: the first-run onboarding sequence. Checked once when
+  // CombatScreen first mounts for this fight (a ref, not a dependency
+  // array, so it never re-fires as `combat` changes every round) and again
+  // each time a popup is dismissed, so multiple first-time conditions in
+  // the same fight surface one after another instead of only the first.
+  const [onboardingPopup, setOnboardingPopup] = useState<OnboardingKey | null>(null);
+  const onboardingCheckedRef = useRef(false);
+  useEffect(() => {
+    if (onboardingCheckedRef.current) return;
+    onboardingCheckedRef.current = true;
+    setOnboardingPopup(nextOnboardingPopup(combat, enemy));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately once per mount, see comment above
+  }, []);
+  function dismissOnboardingPopup() {
+    if (onboardingPopup) markOnboardingSeen(onboardingPopup);
+    setOnboardingPopup(nextOnboardingPopup(combat, enemy));
+  }
 
   // Iteration 13: the priority lock only *displays* while its target lives —
   // the engine already ignores a dead priority, but a ring on a wreck reads
@@ -716,6 +750,7 @@ export function CombatScreen({
       {!finished && !canWithdraw && (
         <p className="hint">No line of retreat here — this fight must be finished.</p>
       )}
+      {onboardingPopup && <OnboardingPopup topic={onboardingPopup} onClose={dismissOnboardingPopup} />}
     </div>
   );
 }

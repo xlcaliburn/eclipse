@@ -324,6 +324,12 @@ export interface RunState {
   pendingReward?: RewardSummary;
   shopOffers?: PartId[]; // parts currently for sale
   shopFrameOffers?: Exclude<FrameId, 'cruiser'>[]; // ships currently for sale — a random subset, drawn per visit
+  // 2026-08-06: rerolls escalate within a single shop visit (1cr, 2cr,
+  // 3cr, ...) instead of a flat price — this counts how many have already
+  // been used THIS visit. Reset to undefined every time a shop is entered
+  // (PICK_NODE), so the price resets on the next visit rather than
+  // punishing the whole run. Absent/0 means "no rerolls used yet."
+  shopRerollCount?: number;
   currentEvent?: CurrentEventState;
   lastEventId?: EventId; // avoids repeating the same event back-to-back
   // Iteration 14.3: set by the defector's "take them aboard" choice. The

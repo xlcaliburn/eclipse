@@ -153,7 +153,7 @@ export function LandingScreen({
         </button>
       </div>
       <button type="button" className="landing-screen__tutorial-link" onClick={onOpenTutorial}>
-        How to play — dice, computers, shields
+        How to play — dice, computers, piloting
       </button>
 
       {/* Iteration 26 (placeholder + input fixed in 27): replay a specific

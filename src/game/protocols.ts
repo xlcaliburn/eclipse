@@ -86,7 +86,7 @@ export const PROTOCOLS: Record<ProtocolId, ProtocolDef> = {
     id: 'bastion-doctrine',
     tier: 'gold',
     name: 'Bastion doctrine',
-    blurb: 'Taunting ships gain +1 shield.',
+    blurb: 'Taunting ships gain +1 piloting.',
   },
   'deep-space-relays': {
     id: 'deep-space-relays',
@@ -120,7 +120,7 @@ export const PROTOCOLS: Record<ProtocolId, ProtocolDef> = {
     tier: 'prismatic',
     name: 'Alpha doctrine',
     blurb: 'Your cannons fire in the opening missile phase too — a true alpha strike.',
-    cost: 'Your ships count shield 0 during the opening exchange (the missile phase and cannon round 1).',
+    cost: 'Your ships count piloting 0 during the opening exchange (the missile phase and cannon round 1).',
   },
 };
 

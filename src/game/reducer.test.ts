@@ -421,36 +421,38 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
     expect(state.fleet).toHaveLength(4);
   });
 
-  it('adds a Dreadnought (iteration 8): 20cr, no starting fit, 8 slots and a 4-weapon cap enforced', () => {
-    let state = stateWithMap('shop', { phase: 'shop', credits: 20 });
+  it('adds a Dreadnought (2026-08-06 repricing): 30cr, arrives fitted with 2 ion cannons + a Gauss shield, 8 slots and a 4-weapon cap enforced', () => {
+    let state = stateWithMap('shop', { phase: 'shop', credits: 30 });
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'dreadnought' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1].frameId).toBe('dreadnought');
-    expect(state.fleet[1].equipped).toEqual([]);
-    expect(state.credits).toBe(0); // 20cr cost
+    expect(state.fleet[1].equipped).toEqual(['ion', 'ion', 'shield1']);
+    expect(state.credits).toBe(0); // 30cr cost
 
-    state = { ...state, inventory: ['plasma', 'plasma', 'plasma', 'plasma', 'plasma'] };
-    for (let i = 0; i < 4; i++) {
+    state = { ...state, inventory: ['plasma', 'plasma', 'plasma'] };
+    // The starting fit already carries 2 weapons (the two ion cannons)
+    // toward the 4-weapon cap — only 2 more fit before it's enforced.
+    for (let i = 0; i < 2; i++) {
       state = runReducer(state, { type: 'EQUIP', shipIndex: 1, partId: 'plasma' });
     }
-    expect(state.fleet[1].equipped).toHaveLength(4); // 4 weapons fit (well under 8 slots)
+    expect(state.fleet[1].equipped).toHaveLength(5); // 2 ion + shield + 2 plasma, well under 8 slots
     const overCap = runReducer(state, { type: 'EQUIP', shipIndex: 1, partId: 'plasma' });
-    expect(overCap.fleet[1].equipped).toHaveLength(4); // 5th weapon refused — max 4
+    expect(overCap.fleet[1].equipped).toHaveLength(5); // 5th weapon refused — max 4 weapons total
   });
 
-  it('adds a Cruiser (iteration 9): 10cr, pre-fitted with an ion cannon, 4 slots, no weapon cap', () => {
-    let state = stateWithMap('shop', { phase: 'shop', credits: 10 });
+  it('adds a Cruiser (2026-08-06 repricing): 22cr, pre-fitted with an ion cannon + a Gauss shield, 4 slots, no weapon cap', () => {
+    let state = stateWithMap('shop', { phase: 'shop', credits: 22 });
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'light-cruiser' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1].frameId).toBe('light-cruiser');
-    expect(state.fleet[1].equipped).toEqual(['ion']);
-    expect(state.credits).toBe(0); // 10cr cost
+    expect(state.fleet[1].equipped).toEqual(['ion', 'shield1']);
+    expect(state.credits).toBe(0); // 22cr cost
 
-    state = { ...state, inventory: ['plasma', 'plasma', 'plasma'] };
-    for (let i = 0; i < 3; i++) {
+    state = { ...state, inventory: ['plasma', 'plasma'] };
+    for (let i = 0; i < 2; i++) {
       state = runReducer(state, { type: 'EQUIP', shipIndex: 1, partId: 'plasma' });
     }
-    expect(state.fleet[1].equipped).toHaveLength(4); // ion + 3 plasma fill all 4 slots, no weapon-cap refusal
+    expect(state.fleet[1].equipped).toHaveLength(4); // ion + shield + 2 plasma fill all 4 slots, no weapon-cap refusal
   });
 
   // Iteration 23: the five support hulls each arrive pre-fitted with their
@@ -479,13 +481,13 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
     const cases: ['interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser', number][] = [
       ['interceptor', 4], // 6cr -> floor(4.5) = 4
       ['bastion', 9], // 12cr -> floor(9) = 9
-      ['dreadnought', 15], // 20cr -> floor(15) = 15
-      ['light-cruiser', 7], // 10cr -> floor(7.5) = 7
+      ['dreadnought', 22], // 30cr (2026-08-06 repricing) -> floor(22.5) = 22
+      ['light-cruiser', 16], // 22cr (2026-08-06 repricing) -> floor(16.5) = 16
     ];
     for (const [frameId, expectedCost] of cases) {
-      const state = stateWithMap('shop', { phase: 'shop', credits: 20, commanderId: 'admiral' });
+      const state = stateWithMap('shop', { phase: 'shop', credits: 30, commanderId: 'admiral' });
       const result = runReducer(state, { type: 'BUY_SHIP', frameId });
-      expect(result.credits).toBe(20 - expectedCost);
+      expect(result.credits).toBe(30 - expectedCost);
     }
   });
 
@@ -493,8 +495,8 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
   // and flatly (5cr) rather than by percentage — everything else is full
   // price, unlike the Admiral's blanket discount.
   it('the Warlord buys only the Dreadnought cheaper (flat -5cr); other frames are full price', () => {
-    const dread = stateWithMap('shop', { phase: 'shop', credits: 20, commanderId: 'warlord' });
-    expect(runReducer(dread, { type: 'BUY_SHIP', frameId: 'dreadnought' }).credits).toBe(20 - 15); // 20 - 5
+    const dread = stateWithMap('shop', { phase: 'shop', credits: 30, commanderId: 'warlord' });
+    expect(runReducer(dread, { type: 'BUY_SHIP', frameId: 'dreadnought' }).credits).toBe(30 - 25); // 30 - 5 (2026-08-06 repricing)
 
     const interceptor = stateWithMap('shop', { phase: 'shop', credits: 20, commanderId: 'warlord' });
     expect(runReducer(interceptor, { type: 'BUY_SHIP', frameId: 'interceptor' }).credits).toBe(20 - 6); // full price
@@ -1508,6 +1510,60 @@ describe('fog of war + info broker (iteration 6)', () => {
   });
 });
 
+describe('REROLL pricing escalates within a shop visit (2026-08-06)', () => {
+  it('the Nth reroll this visit costs N credits: 1, 2, 3, 4...', () => {
+    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 100, shopOffers: ['ion'] };
+    const spent: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const before = state.credits;
+      state = runReducer(state, { type: 'REROLL' });
+      spent.push(before - state.credits);
+    }
+    expect(spent).toEqual([1, 2, 3, 4]);
+    expect(state.shopRerollCount).toBe(4);
+  });
+
+  it('a fresh shop visit (PICK_NODE) resets the price back to 1cr', () => {
+    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 100, shopOffers: ['ion'] };
+    state = runReducer(state, { type: 'REROLL' }); // 1cr
+    state = runReducer(state, { type: 'REROLL' }); // 2cr
+    expect(state.shopRerollCount).toBe(2);
+
+    const reentered = runReducer(stateWithMap('shop', { credits: 100 }), { type: 'PICK_NODE', row: 0 });
+    expect(reentered.shopRerollCount).toBeUndefined();
+    const before = reentered.credits;
+    const afterOneReroll = runReducer(reentered, { type: 'REROLL' });
+    expect(before - afterOneReroll.credits).toBe(1); // back to the first-reroll price
+  });
+
+  it('LEAVE_SHOP clears the reroll count too', () => {
+    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 100, shopOffers: ['ion'] };
+    state = runReducer(state, { type: 'REROLL' });
+    expect(state.shopRerollCount).toBe(1);
+    state = runReducer(state, { type: 'LEAVE_SHOP' });
+    expect(state.shopRerollCount).toBeUndefined();
+  });
+
+  it('an unaffordable reroll is refused without incrementing the counter', () => {
+    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 0, shopOffers: ['ion'] };
+    const result = runReducer(state, { type: 'REROLL' });
+    expect(result).toBe(state); // no-op, exactly like every other unaffordable-purchase guard
+    expect(result.shopRerollCount).toBeUndefined();
+  });
+
+  it("the Merchant's reroll price is half the standard price, rounded up, floored at 1cr", () => {
+    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 100, shopOffers: ['ion'], commanderId: 'merchant' };
+    const spent: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const before = state.credits;
+      state = runReducer(state, { type: 'REROLL' });
+      spent.push(before - state.credits);
+    }
+    // Standard sequence would be 1,2,3,4,5,6 — Merchant pays ceil(N/2).
+    expect(spent).toEqual([1, 1, 2, 2, 3, 3]);
+  });
+});
+
 
 describe('BUY_COMMODITY_LOT / SELL_COMMODITY_LOT (iteration 20)', () => {
   it('loads the lot onto the chosen ship, charges 4cr, and records the global column bought at on that ship', () => {
@@ -2023,7 +2079,9 @@ describe('shop rework (iteration 7): stratified draw + selling', () => {
     // the typed ones (every active part also has a type), so slot 6 could
     // duplicate slots 1-5 too. Redraw many times via REROLL and assert
     // uniqueness every time; the strata invariants must survive the fix.
-    let state = runReducer(stateWithMap('shop', { credits: 1000 }), { type: 'PICK_NODE', row: 0 });
+    // credits: 2000 — escalating reroll pricing (2026-08-06) means the sum
+    // of 60 rerolls (1+2+...+60 = 1830cr) must fit, not 60x a flat cost.
+    let state = runReducer(stateWithMap('shop', { credits: 2000 }), { type: 'PICK_NODE', row: 0 });
     for (let i = 0; i < 60; i++) {
       const offers = state.shopOffers!;
       expect(new Set(offers).size).toBe(offers.length);
@@ -2748,7 +2806,7 @@ describe('iteration 28: Protocols', () => {
     const fleet: PlayerShipState[] = [
       { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
       { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] }, // cost 6 -> 3cr
-      { frameId: 'light-cruiser', equipped: [], damage: 0, upgrades: [] }, // cost 10 -> 5cr
+      { frameId: 'light-cruiser', equipped: [], damage: 0, upgrades: [] }, // cost 22 -> 11cr (2026-08-06 repricing)
     ];
     const state: RunState = {
       ...initialRunState(),

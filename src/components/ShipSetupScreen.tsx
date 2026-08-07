@@ -44,7 +44,7 @@ export function ShipSetupScreen({ equipped, onAddPart, onRemovePart, onConfirm }
         </div>
 
         <div className="setup-screen__stats">
-          HP {stats.hp} · Init {stats.initiative} · Comp {stats.computer} · Shield {stats.shield}
+          HP {stats.hp} · Init {stats.initiative} · Comp {stats.computer} · Piloting {stats.shield}
         </div>
 
         <button type="button" className="engage-button" disabled={!canConfirm} onClick={onConfirm}>

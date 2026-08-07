@@ -32,6 +32,11 @@ interface ShopScreenProps {
   inventory: PartId[];
   commanderId?: CommanderId;
   protocols?: ProtocolId[];
+  // 2026-08-06: how many rerolls this shop visit has already used — the
+  // Nth reroll costs N credits (half that, rounded up, for the Merchant),
+  // so this is what the "Reroll stock" button's displayed price derives
+  // from. Reset to undefined on every fresh shop visit (reducer.ts).
+  rerollsUsed?: number;
   // Iteration 20 (commodity runs): whether the fleet's currently-carried lot
   // (if any) was bought at an earlier station than this one — the shop
   // itself doesn't know the global column math, so App.tsx precomputes it.
@@ -58,6 +63,7 @@ export function ShopScreen({
   inventory,
   commanderId,
   protocols,
+  rerollsUsed,
   commodityLotSellable,
   onBuyPart,
   onSellPart,
@@ -76,7 +82,7 @@ export function ShopScreen({
   const safeSelectedIndex = Math.min(selectedShipIndex, fleet.length - 1);
   const currentFleetCap = fleetCap(commanderId, protocols);
   const fleetFull = fleet.length >= currentFleetCap;
-  const effectiveRerollCost = rerollCost(commanderId);
+  const effectiveRerollCost = rerollCost(commanderId, rerollsUsed ?? 0);
   const lotsCarried = fleet.filter((s) => s.equipped.includes(COMMODITY_LOT_PART_ID)).length;
   const lotCap = commodityLotCap(commanderId);
   const canBuyMoreLots = lotsCarried < lotCap;

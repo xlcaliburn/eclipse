@@ -8,7 +8,7 @@ export interface EscalationDef {
 
 export const ESCALATIONS: EscalationDef[] = [
   { id: 'hardened', name: 'Hardened hulls', description: '+1 HP per ship' },
-  { id: 'deflectors', name: 'Deflector refit', description: '+1 shield' },
+  { id: 'deflectors', name: 'Deflector refit', description: '+1 piloting' },
   { id: 'firecontrol', name: 'Fire control upgrade', description: '+1 computer' },
   { id: 'overdrive', name: 'Overcharged drives', description: '+1 initiative' },
   { id: 'squadrons', name: 'Reinforced squadrons', description: 'groups of 2+ gain one extra ship' },

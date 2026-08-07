@@ -58,34 +58,49 @@ export const FRAMES: Record<FrameId, Frame> = {
     maxWeapons: 1,
     blurb: 'Durable protector. 3 slots, at most 1 weapon, arrives with a lure beacon.',
   },
+  // 2026-08-06: repriced as the top of a deliberate 3-step progression —
+  // "interceptors, then something more midrange, then finally Dreadnoughts
+  // if you're somehow super rich" — and every frame with 5+ slots got a
+  // real premium on top of that (a high-slot hull was previously cheaper
+  // per slot than several LOWER-slot specialty hulls, which read as
+  // underpriced rather than "cheap for a reason"). Arrives pre-fitted with
+  // a small starting loadout (mirrors STARTING_FIT in reducer.ts) so a
+  // 30cr purchase doesn't land as an empty hull needing a second shopping
+  // pass to be worth anything.
   dreadnought: {
     id: 'dreadnought',
     name: 'Dreadnought',
     slots: 8,
     baseInitiative: 0,
     baseHp: 8,
-    cost: 20,
+    cost: 30,
     maxWeapons: 4,
-    blurb: 'One giant instead of Flagship-plus-escorts. 8 slots, max 4 weapons.',
+    blurb: 'One giant instead of Flagship-plus-escorts. 8 slots, max 4 weapons. Arrives fitted with 2 ion cannons and a Gauss shield.',
   },
+  // The midrange step: no gimmick, no cap, priced as the real "second
+  // ship" investment between a cheap Interceptor and a premium Dreadnought.
   'light-cruiser': {
     id: 'light-cruiser',
     name: 'Cruiser',
     slots: 4,
     baseInitiative: 1,
     baseHp: 4,
-    cost: 10,
-    blurb: 'No gimmick — the only escort that can carry a real multi-weapon loadout.',
+    cost: 22,
+    blurb: 'No gimmick — the only escort that can carry a real multi-weapon loadout. Arrives fitted with an ion cannon and a Gauss shield.',
   },
+  // 5 slots for less than a 3-slot Bastion used to be the exact
+  // underpricing this pass corrects — still cheaper than the Cruiser (its
+  // ceiling is genuinely lower: a cargo hull leaning into utility slots,
+  // not raw combat), but no longer a strictly-better slot count for less.
   freighter: {
     id: 'freighter',
     name: 'Freighter',
     slots: 5,
     baseInitiative: 0,
     baseHp: 3,
-    cost: 8,
+    cost: 15,
     maxWeapons: 2,
-    blurb: 'Built for freight, not fighting. 5 slots for the price of light armor, at most 2 weapons.',
+    blurb: 'Built for freight, not fighting. 5 slots, at most 2 weapons.',
   },
   derelict: {
     id: 'derelict',
