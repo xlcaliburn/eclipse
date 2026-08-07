@@ -15,10 +15,23 @@ body {
   line-height: 1.55;
 }
 
+/* Desktop layout: a sticky TOC sidebar on the left, reading column on the
+   right — a `flex` row rather than `grid` so the mobile override below can
+   just switch to `display: block` and let the two children stack in
+   source order (sidebar first, content second) with no area reshuffling. */
 .wiki {
-  max-width: 960px;
+  display: flex;
+  align-items: flex-start;
+  gap: 32px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 24px 16px 80px;
+}
+
+.wiki-content {
+  flex: 1;
+  min-width: 0; /* lets wide tables shrink for their own scroll lane instead of stretching the column */
+  max-width: 860px;
 }
 
 .wiki h1 {
@@ -57,20 +70,53 @@ body {
   max-width: 70ch;
 }
 
-.wiki-nav {
+/* Reused game art (FrameSilhouette/EnemySilhouette/CommanderCrest, from
+   src/components) — these components render bare SVG shapes and expect
+   their color/fill from surrounding CSS classes, normally styles.css. This
+   page never loads styles.css (by design — see the file header), so the
+   handful of rules that actually matter here are duplicated rather than
+   pulling in the whole game stylesheet. */
+.silhouette {
+  display: block;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.silhouette--player {
+  color: var(--accent);
+}
+
+.silhouette--enemy {
+  color: var(--danger);
+}
+
+.commander-crest {
+  fill: currentColor;
+}
+
+/* The table-of-contents nav — a scrolling sidebar on desktop (this block),
+   a wrapped quick-jump bar pinned to the top on mobile (the max-width:720px
+   override below restores the previous top-bar look). */
+.wiki-sidebar {
+  flex: 0 0 190px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  padding: 10px 12px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   position: sticky;
-  top: 8px;
-  z-index: 2;
+  top: 16px;
+  align-self: flex-start;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 
-.wiki-nav a {
+.wiki-sidebar a {
+  display: block;
+  padding: 5px 8px;
+  border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -79,8 +125,9 @@ body {
   color: var(--text-dim);
 }
 
-.wiki-nav a:hover {
+.wiki-sidebar a:hover {
   color: var(--accent);
+  background: var(--panel-2);
 }
 
 .wiki-note {
@@ -154,6 +201,13 @@ body {
   margin: 0;
 }
 
+.wiki-hull-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
 /* Tags & tiers */
 .wiki-tag {
   font-family: var(--font-mono);
@@ -210,6 +264,11 @@ body {
   padding: 10px 12px;
 }
 
+.wiki-enemy__art {
+  float: left;
+  margin: 0 8px 4px 0;
+}
+
 .wiki-enemy h4 {
   margin: 0 0 4px;
   font-family: var(--font-display);
@@ -255,6 +314,43 @@ body {
   font-size: 0.78rem;
 }
 
+/* Commander cards */
+.wiki-commander-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 8px 0 16px;
+}
+
+.wiki-commander {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 12px;
+}
+
+.wiki-commander__art {
+  color: var(--accent);
+}
+
+.wiki-commander h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
+}
+
+.wiki-commander p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
 /* Events */
 .wiki-options {
   margin: 0;
@@ -280,6 +376,10 @@ body {
    sticky nav, and the enemy-card grid's column width. */
 @media (max-width: 720px) {
   .wiki {
+    /* The sidebar/content flex row collapses to a single column — the
+       sidebar (first in source) becomes a wrapped quick-jump bar sitting
+       above the content instead of a left rail. */
+    display: block;
     padding: 16px 12px 64px;
   }
 
@@ -296,17 +396,24 @@ body {
     font-size: 0.88rem;
   }
 
-  .wiki-nav {
+  .wiki-sidebar {
+    flex-direction: row;
+    flex-wrap: wrap;
     gap: 5px 10px;
     padding: 8px 10px;
+    margin-bottom: 16px;
     /* The header itself scrolls with the page on mobile — a sticky bar
        pinned this close to the top ate too much of a phone's shorter
        viewport height once the fixed offset was added up with the
        browser chrome. */
     position: static;
+    max-height: none;
+    overflow-y: visible;
   }
 
-  .wiki-nav a {
+  .wiki-sidebar a {
+    display: inline;
+    padding: 0;
     font-size: 0.68rem;
   }
 
