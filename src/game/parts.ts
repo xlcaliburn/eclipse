@@ -351,7 +351,31 @@ const COMMODITY_LOT_PART: Part = {
   cost: 0,
 };
 
-const PARTS_BY_ID: Record<PartId, Part> = Object.fromEntries([...PARTS, COMMODITY_LOT_PART].map((p) => [p.id, p]));
+// Iteration 34 (the relic chain): the quest capstone — assembled from
+// three relic fragments found at different event nodes (see events.ts's
+// relic-signal/relic-vault/relic-core), never sold in any shop. Kept out
+// of `PARTS` for the same reason as the commodity lot above: every shop
+// offer pool filters from that array, so absence there is the only gate
+// this part needs — no special-case exclusion logic anywhere else.
+// Otherwise a completely normal part: equips/unequips freely, salvages to
+// inventory if its ship is scuttled, lost with the ship if it's destroyed
+// while equipped, sellable (badly — floor(12/2) = 6cr against parts of
+// comparable power costing 5-7cr to begin with).
+export const ANCIENT_ARTIFACT_PART_ID: PartId = 'ancient-artifact';
+
+const ANCIENT_ARTIFACT_PART: Part = {
+  id: ANCIENT_ARTIFACT_PART_ID,
+  name: 'Ancient artifact',
+  type: 'computer',
+  description: '+4 computer, +4 piloting. Assembled from three relic fragments — irreplaceable.',
+  cost: 12,
+  computer: 4,
+  shield: 4,
+};
+
+const PARTS_BY_ID: Record<PartId, Part> = Object.fromEntries(
+  [...PARTS, COMMODITY_LOT_PART, ANCIENT_ARTIFACT_PART].map((p) => [p.id, p]),
+);
 
 export function getPart(id: PartId): Part {
   const part = PARTS_BY_ID[id];

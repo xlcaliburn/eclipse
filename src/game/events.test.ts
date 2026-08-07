@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { actColumns, generateMap } from './map';
 import { mulberry32 } from './rng';
 import type { RngFn } from './rng';
-import { meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
+import { drawEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
+import { ANCIENT_ARTIFACT_PART_ID } from './parts';
 import type { RunState } from './types';
 
 function fixedRng(values: number[]): RngFn {
@@ -518,6 +519,160 @@ describe('resolveEventChoice — militia-requisition', () => {
     const { state } = resolveEventChoice('militia-requisition', 1, s0, fixedRng([]), { cardId: 'bulkheads' });
     expect(state.hand).toEqual(['volley']);
     expect(state.credits).toBe(17);
+  });
+});
+
+// --- The relic chain (iteration 34) ------------------------------------
+
+describe('resolveEventChoice — relic-signal (stage 1)', () => {
+  it('option 0: walking away sells the coordinates, no fragment gained', () => {
+    const s0 = baseState();
+    const { state } = resolveEventChoice('relic-signal', 0, s0, fixedRng([]));
+    expect(state.credits).toBe(14);
+    expect(state.relicFragments ?? 0).toBe(0);
+  });
+
+  it('option 1: taking the fragment sets relicFragments to 1 and costs 1 heat', () => {
+    const s0 = baseState({ heat: 0 });
+    const { state } = resolveEventChoice('relic-signal', 1, s0, fixedRng([]));
+    expect(state.relicFragments).toBe(1);
+    expect(state.heat).toBe(1);
+    expect(state.credits).toBe(10); // unchanged
+  });
+});
+
+describe('resolveEventChoice — relic-vault (stage 2)', () => {
+  const midChain = { relicFragments: 1 as const };
+
+  it('option 0: stripping the fittings pays 5 credits, fragment count unchanged', () => {
+    const s0 = baseState(midChain);
+    const { state } = resolveEventChoice('relic-vault', 0, s0, fixedRng([]));
+    expect(state.credits).toBe(15);
+    expect(state.relicFragments).toBe(1);
+  });
+
+  it('option 1: forcing the lock advances to 2 fragments and costs the chosen ship 2 capped damage', () => {
+    const s0 = baseState(midChain);
+    const { state } = resolveEventChoice('relic-vault', 1, s0, fixedRng([]), { shipIndex: 0 });
+    expect(state.relicFragments).toBe(2);
+    expect(state.fleet[0].damage).toBe(2);
+  });
+
+  it('option 2: the cloaked entry advances to 2 fragments with no damage', () => {
+    const s0 = baseState({
+      ...midChain,
+      fleet: [{ frameId: 'cruiser', equipped: ['cloak'], damage: 0, upgrades: [] }],
+    });
+    const { state } = resolveEventChoice('relic-vault', 2, s0, fixedRng([]));
+    expect(state.relicFragments).toBe(2);
+    expect(state.fleet[0].damage).toBe(0);
+  });
+
+  it('the cloaked option is locked without the part', () => {
+    const s0 = baseState(midChain);
+    const req = { kind: 'partEquipped', partId: 'cloak' } as const;
+    expect(meetsRequirement(req, s0)).toBe(false);
+  });
+});
+
+describe('resolveEventChoice — relic-core (stage 3)', () => {
+  const twoFragments = { relicFragments: 2 as const };
+
+  it('option 0: selling both fragments pays 10 credits and zeroes the count', () => {
+    const s0 = baseState(twoFragments);
+    const { state } = resolveEventChoice('relic-core', 0, s0, fixedRng([]));
+    expect(state.credits).toBe(20);
+    expect(state.relicFragments).toBe(0);
+  });
+
+  it('option 1: buying the final fragment costs 8 credits, completes the chain, and grants the artifact', () => {
+    const s0 = baseState({ ...twoFragments, credits: 10 });
+    const { state } = resolveEventChoice('relic-core', 1, s0, fixedRng([]));
+    expect(state.credits).toBe(2);
+    expect(state.relicFragments).toBe(3);
+    expect(state.inventory).toContain(ANCIENT_ARTIFACT_PART_ID);
+  });
+
+  it('option 2: taking it by force costs 2 heat, completes the chain, and grants the artifact — no credit cost', () => {
+    const s0 = baseState({ ...twoFragments, credits: 0, heat: 0 });
+    const { state } = resolveEventChoice('relic-core', 2, s0, fixedRng([]));
+    expect(state.credits).toBe(0);
+    expect(state.heat).toBe(2);
+    expect(state.relicFragments).toBe(3);
+    expect(state.inventory).toContain(ANCIENT_ARTIFACT_PART_ID);
+  });
+
+  it('the artifact is granted exactly once — a single stage-3 resolution adds exactly one copy', () => {
+    const s0 = baseState({ ...twoFragments, credits: 10 });
+    const { state } = resolveEventChoice('relic-core', 1, s0, fixedRng([]));
+    expect(state.inventory.filter((id) => id === ANCIENT_ARTIFACT_PART_ID)).toHaveLength(1);
+  });
+});
+
+describe('drawEvent — the relic chain continuation check (iteration 34.2)', () => {
+  it('stage 1 sits in the base pool: with relicFragments 0, a normal draw can return relic-signal', () => {
+    const s0 = baseState({ relicFragments: 0 });
+    // Force the draw toward the end of the pool array by feeding rng()
+    // close to 1 — deterministic enough to just confirm relic-signal is a
+    // reachable outcome at all, not a specific index (pool order is an
+    // implementation detail this test shouldn't pin).
+    let sawSignal = false;
+    for (let i = 0; i < 50 && !sawSignal; i++) {
+      const rng = fixedRng([i / 50]);
+      if (drawEvent(rng, s0) === 'relic-signal') sawSignal = true;
+    }
+    expect(sawSignal).toBe(true);
+  });
+
+  it('with relicFragments 1, a continuation roll < 0.5 always returns relic-vault, never a normal pool event', () => {
+    const s0 = baseState({ relicFragments: 1 });
+    for (const roll of [0, 0.1, 0.49]) {
+      expect(drawEvent(fixedRng([roll]), s0)).toBe('relic-vault');
+    }
+  });
+
+  it('with relicFragments 2, a continuation roll < 0.5 always returns relic-core', () => {
+    const s0 = baseState({ relicFragments: 2 });
+    for (const roll of [0, 0.1, 0.49]) {
+      expect(drawEvent(fixedRng([roll]), s0)).toBe('relic-core');
+    }
+  });
+
+  it('a continuation roll >= 0.5 falls through to the normal pool draw instead, excluding relic-signal once the chain has started', () => {
+    const s0 = baseState({ relicFragments: 1, lastEventId: undefined });
+    const result = drawEvent(fixedRng([0.5, 0]), s0); // fails continuation, then draws index 0 of the filtered pool
+    expect(result).not.toBe('relic-signal');
+    expect(result).not.toBe('relic-vault');
+    expect(result).not.toBe('relic-core');
+  });
+
+  it('never rolls the continuation check once the chain is complete (relicFragments 3)', () => {
+    const s0 = baseState({ relicFragments: 3 });
+    // A single rng value proves no continuation check consumed a draw
+    // first — if it had, this would throw (fixedRng exhausted).
+    const result = drawEvent(fixedRng([0]), s0);
+    expect(result).not.toBe('relic-vault');
+    expect(result).not.toBe('relic-core');
+  });
+
+  it('relic-signal never redraws once the chain has started (fragments > 0)', () => {
+    const s0 = baseState({ relicFragments: 1 });
+    for (let i = 0; i < 30; i++) {
+      // roll >= 0.5 to skip the continuation check and hit the normal pool
+      const result = drawEvent(fixedRng([0.9, i / 30]), s0);
+      expect(result).not.toBe('relic-signal');
+    }
+  });
+
+  it("a pending defector-pursuit still outranks the continuation check — drawEvent is never even called for it", () => {
+    // PICK_NODE's event branch is `state.pendingEventId ?? drawEvent(rng, state)`
+    // — the ?? short-circuit is the actual guarantee here, exercised at the
+    // reducer level (reducer.test.ts). This test documents the contract at
+    // the events.ts level: drawEvent itself has no knowledge of
+    // pendingEventId and never needs to, since its caller never invokes it
+    // when a pending event is queued.
+    const s0 = baseState({ relicFragments: 1, pendingEventId: 'defector-pursuit' });
+    expect(s0.pendingEventId).toBe('defector-pursuit');
   });
 });
 

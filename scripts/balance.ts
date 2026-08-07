@@ -333,6 +333,27 @@ for (const id of FINAL_BOSS_IDS) {
   finalBossFloor[id] = simulateFleet(STRONG_FLEET, getFinalBoss(id), SIMS).winRate;
 }
 
+// --- Iteration 34 (the relic chain) — the Ancient artifact, spot-checked --
+// not gated. A once-per-run, 3-event-gated capstone isn't tuned like a shop
+// part; this just answers "what does +4 computer/+4 piloting in one slot
+// actually do" against a representative mid-pool matchup, per the plan's
+// 34.3. "mid fleet" (16-18cr, fights 3-5 of a decent run) with its comp2
+// swapped for the artifact — a like-for-like computer-slot upgrade (both
+// are `type: 'computer'` parts), not a weapon removed, so this isolates the
+// artifact's own effect instead of measuring "one fewer cannon."
+const MID_FLEET = FLEETS.find((f) => f.name === 'mid fleet')!.fleet;
+const MID_FLEET_WITH_ARTIFACT: PlayerShipState[] = MID_FLEET.map((ship) => ({
+  ...ship,
+  equipped: ship.equipped.map((p) => (p === 'comp2' ? 'ancient-artifact' : p)),
+}));
+const ARTIFACT_MATCHUP = GAUNTLET[2]; // shield cruiser — a real accuracy check, benefits directly from +4 computer
+const artifactBaseline = forecastWinRate(MID_FLEET, ARTIFACT_MATCHUP, SIMS);
+const artifactWithPart = forecastWinRate(MID_FLEET_WITH_ARTIFACT, ARTIFACT_MATCHUP, SIMS);
+console.log('\nIteration 34 (the relic chain) — Ancient artifact spot-check (informational, not gated):');
+console.log(
+  `  mid fleet vs ${ARTIFACT_MATCHUP.name}: ${artifactBaseline}% baseline -> ${artifactWithPart}% with the artifact swapped in for comp2 (+${artifactWithPart - artifactBaseline}pp)`,
+);
+
 console.log('\nSanity checks:');
 
 const checks: { label: string; pass: boolean }[] = [

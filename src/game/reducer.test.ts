@@ -1448,6 +1448,78 @@ describe('defector pursuit chain (14.3)', () => {
   });
 });
 
+describe('iteration 34: the relic chain', () => {
+  it('a pending defector-pursuit still outranks the relic continuation check at PICK_NODE', () => {
+    // Both conditions are live at once: relicFragments 1 (continuation
+    // check would normally fire ~half the time) AND a queued
+    // pendingEventId — the `??` in PICK_NODE's event branch means
+    // drawEvent is never even called, so the pending event always wins
+    // regardless of what the continuation roll would have done.
+    const state = stateWithMap('event', {
+      relicFragments: 1,
+      pendingEventId: 'defector-pursuit',
+    });
+    const result = runReducer(state, { type: 'PICK_NODE', row: 0 });
+    expect(result.currentEvent?.eventId).toBe('defector-pursuit');
+    expect(result.pendingEventId).toBeUndefined();
+  });
+
+  it('a fresh event node with no relic progress can draw relic-signal from the base pool', () => {
+    // Seed sweep rather than a single fixed seed — pool order/rng mapping
+    // is an implementation detail; this just confirms relic-signal is a
+    // real, reachable outcome of a normal draw at relicFragments 0.
+    let sawSignal = false;
+    for (let seed = 1; seed <= 100 && !sawSignal; seed++) {
+      const state = stateWithMap('event', { relicFragments: 0 });
+      const result = runReducer({ ...state, rngCounter: 0, map: { ...state.map, seed } }, { type: 'PICK_NODE', row: 0 });
+      if (result.currentEvent?.eventId === 'relic-signal') sawSignal = true;
+    }
+    expect(sawSignal).toBe(true);
+  });
+
+  it('relicFragments 1 sometimes draws relic-vault at an event node (continuation check reachable end-to-end)', () => {
+    let sawVault = false;
+    for (let seed = 1; seed <= 100 && !sawVault; seed++) {
+      const state = stateWithMap('event', { relicFragments: 1 });
+      const result = runReducer({ ...state, rngCounter: 0, map: { ...state.map, seed } }, { type: 'PICK_NODE', row: 0 });
+      if (result.currentEvent?.eventId === 'relic-vault') sawVault = true;
+    }
+    expect(sawVault).toBe(true);
+  });
+
+  it('relicFragments 3 (complete) never draws relic-vault or relic-core again', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const state = stateWithMap('event', { relicFragments: 3 });
+      const result = runReducer({ ...state, rngCounter: 0, map: { ...state.map, seed } }, { type: 'PICK_NODE', row: 0 });
+      expect(result.currentEvent?.eventId).not.toBe('relic-vault');
+      expect(result.currentEvent?.eventId).not.toBe('relic-core');
+    }
+  });
+
+  it('completing stage 3 grants the artifact via the normal EVENT_CHOOSE path, end to end', () => {
+    let state = stateWithMap('event', {
+      phase: 'event',
+      relicFragments: 2,
+      credits: 10,
+      currentEvent: { eventId: 'relic-core' },
+    });
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 }); // buy the final fragment
+    expect(state.relicFragments).toBe(3);
+    expect(state.inventory).toContain('ancient-artifact');
+    expect(state.credits).toBe(2);
+  });
+
+  it('equipping the artifact moves a ship\'s computer and piloting readouts by 4 each (derive-time fold)', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    const before = deriveStats(fleet[0].frameId, fleet[0].equipped);
+    const state = stateWithMap('shop', { phase: 'shop', shopKind: 'store', fleet, inventory: ['ancient-artifact'] });
+    const equipped = runReducer(state, { type: 'EQUIP', shipIndex: 0, partId: 'ancient-artifact' });
+    const after = deriveStats(equipped.fleet[0].frameId, equipped.fleet[0].equipped);
+    expect(after.computer).toBe(before.computer + 4);
+    expect(after.shield).toBe(before.shield + 4);
+  });
+});
+
 describe('ambush win bonus (14.2/14.3)', () => {
   it('EVENT_CONTINUE carries the resolved ambush bonus onto RunState.pendingAmbushBonus', () => {
     let state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'distress-beacon' } });

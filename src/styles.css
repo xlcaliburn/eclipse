@@ -821,6 +821,17 @@ h1, h2, h3 {
   opacity: 0.45;
 }
 
+/* Iteration 32.2: a warp lane — visually distinct dashing from a normal
+   edge (this rule) AND from --reachable's marching-ants highlight (that
+   class still wins when a warp edge happens to also be the currently
+   pickable one, since it's declared after this and its own
+   stroke-dasharray/animation take over — a shortcut that's live to click
+   should still read as "the highlighted option," warp-ness secondary). */
+.map-edge--warp {
+  stroke-dasharray: 3 4;
+  opacity: 0.55;
+}
+
 .map-edge--reachable {
   stroke: var(--accent);
   stroke-width: 1.5;

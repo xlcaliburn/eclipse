@@ -136,8 +136,13 @@ export function MapScreen({
   interactive = true,
 }: MapScreenProps) {
   const columns = actColumns(map, act);
-  const reachable = reachableNodes(columns, position);
-  const reachableRows = new Set(reachable.map((n) => n.row));
+  // Iteration 32.2: act 1 never has shortcuts (the field is absent there).
+  const shortcuts = act === 2 ? (map.act2Shortcuts ?? []) : [];
+  const reachable = reachableNodes(columns, position, shortcuts);
+  // Keyed by both col and row now, not row alone — a shortcut target can
+  // share a row with the normal next-column node, and they're different
+  // columns, so row-only membership would conflate the two.
+  const reachableKeys = new Set(reachable.map((n) => `${n.col}:${n.row}`));
   const isFled = (col: number, row: number) => fled.some((p) => p.col === col && p.row === row);
   const [hovered, setHovered] = useState<MapPosition | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -161,6 +166,15 @@ export function MapScreen({
   // Only decrypted escalations are listed — an undecrypted one is a threat
   // you have no information about, so a placeholder row just adds noise.
   const revealedEscalations = escalations.filter((esc) => esc.act === act && esc.revealed);
+
+  // Iteration 32.3 (the pursuit clock): transparency law — a deterministic
+  // tax the player can count on their fingers, never a surprise. Shown
+  // once within 2 arrivals of the threshold (mirrors reducer.ts's own
+  // `pursuitThreshold = laneColumns(2) - 2` — same formula, so a future
+  // re-sizing keeps this warning's timing correct with no second edit).
+  const act2LaneVisits = act === 2 ? visited.filter((p) => p.col < laneColumns(2)).length : 0;
+  const pursuitThreshold = laneColumns(2) - 2;
+  const pursuitWarning = act === 2 && act2LaneVisits >= pursuitThreshold - 2;
 
   return (
     <div className="map-screen">
@@ -192,6 +206,12 @@ export function MapScreen({
             ? "Pick your next stop. Only nearby columns, repair yards, and the boss are known up front — the rest is fog until you scout it or get there."
             : 'Viewing the map — switch tabs to get back to what you were doing.'}
       </p>
+      {/* Iteration 32.3: a deterministic tax the player can count on their
+          fingers, never a surprise — shown 2 arrivals out from the
+          threshold, whichever screen this is (peek or live). */}
+      {pursuitWarning && (
+        <p className="warning">The armada is closing — every stop past the next one raises heat.</p>
+      )}
 
       {/* The cargo glyphs are the one marker on the chart with no visible
           label (node types already print their own name under the icon) —
@@ -231,12 +251,9 @@ export function MapScreen({
       {(() => {
         const rows = maxRows(columns);
         const size = chartSize(columns, rows);
-        const edges = chartEdges(columns);
+        const edges = chartEdges(columns, shortcuts);
         const canPickAt = (p: MapPosition) =>
-          interactive &&
-          !isFled(p.col, p.row) &&
-          p.col === (position === null ? 0 : position.col + 1) &&
-          reachableRows.has(p.row);
+          interactive && !isFled(p.col, p.row) && reachableKeys.has(`${p.col}:${p.row}`);
         const trail = visited.map((p) => nodeCenter(columns, p.col, p.row, rows));
         return (
           <div className="starchart" ref={scrollRef}>
@@ -259,6 +276,7 @@ export function MapScreen({
                     isReachableEdge ? 'map-edge--reachable' : '',
                     isOnwardEdge ? 'map-edge--onward' : '',
                     intoFled ? 'map-edge--fled' : '',
+                    edge.warp ? 'map-edge--warp' : '',
                   ]
                     .filter(Boolean)
                     .join(' ');
@@ -299,7 +317,7 @@ export function MapScreen({
                       className={classNames}
                       style={{ left: center.x - nodeSize / 2, top: center.y - nodeSize / 2 }}
                       disabled={!canPick}
-                      onClick={() => onPickNode(node.row)}
+                      onClick={() => onPickNode(node.row, node.col)}
                       onMouseEnter={canPick ? () => setHovered({ col: node.col, row: node.row }) : undefined}
                       onMouseLeave={canPick ? () => setHovered(null) : undefined}
                       onFocus={canPick ? () => setHovered({ col: node.col, row: node.row }) : undefined}

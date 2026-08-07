@@ -3,7 +3,7 @@ import { addHeat } from './heat';
 import { actColumns, globalColumn } from './map';
 import type { MapPosition } from './map';
 import { applyRepairBanking, deriveFleetStats, deriveStats } from './ship';
-import { getPart } from './parts';
+import { ANCIENT_ARTIFACT_PART_ID, getPart } from './parts';
 import { CARDS, getCard, MAX_HAND_SIZE } from './cards';
 import type { CardId } from './cards';
 import type { FrameId } from './frames';
@@ -24,7 +24,10 @@ export type EventId =
   | 'distress-beacon'
   | 'repair-tender'
   | 'militia-requisition'
-  | 'salvage-claim';
+  | 'salvage-claim'
+  | 'relic-signal'
+  | 'relic-vault'
+  | 'relic-core';
 
 // --- Requirement predicate library (14.1) -----------------------------
 // A small reusable set, deliberately limited to what the 14.2 content table
@@ -283,6 +286,57 @@ export const EVENTS: EventDef[] = [
       },
     ],
   },
+  // --- The relic chain (iteration 34) ------------------------------------
+  // Three distinct stages, not one repeatable event — an event node
+  // resolves once, so the "3 different event nodes" shape the user asked
+  // for is guaranteed by construction. Stage 1 sits in the normal random
+  // pool (RANDOM_EVENTS); stages 2/3 never do — see drawEvent's
+  // continuation check below, the same defector-pursuit precedent every
+  // other reducer-scheduled event follows.
+  {
+    id: 'relic-signal',
+    title: 'Ancient beacon',
+    flavor: 'A repeating signal pulses from a dead hulk, far older than the war.',
+    options: [
+      { label: 'Walk away — sell the coordinates (+4 credits)' },
+      { label: 'Take the fragment — prying it loose lights up every scanner in the sector (+1 heat)' },
+    ],
+  },
+  {
+    // Never drawn from the random pool — only reached via drawEvent's
+    // continuation check once relicFragments === 1.
+    id: 'relic-vault',
+    title: 'The sealed vault',
+    flavor: 'The fragment in your hold resonates, pulling you toward a derelict vault sealed since before the war.',
+    options: [
+      { label: "Strip the vault's fittings instead (+5 credits)" },
+      {
+        label: "Cut your way in — pick a ship to force the lock; the vault's defenses score its hull",
+        chooseShip: true,
+      },
+      {
+        label: 'Cloaking field: slip through the dead defenses — no damage',
+        requirement: { kind: 'partEquipped', partId: 'cloak' },
+        reqText: 'requires Cloaking field',
+      },
+    ],
+  },
+  {
+    // Never drawn from the random pool — only reached via drawEvent's
+    // continuation check once relicFragments === 2.
+    id: 'relic-core',
+    title: 'The reliquary',
+    flavor: "Two fragments hum in your hold as you close on a collector's automated reliquary — the final piece is close.",
+    options: [
+      { label: 'Sell your two fragments to the reliquary (+10 credits)' },
+      {
+        label: 'Buy the final fragment (-8 credits)',
+        requirement: { kind: 'creditsAtLeast', value: 8 },
+        reqText: 'requires 8+ credits',
+      },
+      { label: 'Take it by force — the reliquary screams an alarm (+2 heat)' },
+    ],
+  },
 ];
 
 const EVENTS_BY_ID: Record<EventId, EventDef> = Object.fromEntries(EVENTS.map((e) => [e.id, e])) as Record<
@@ -295,12 +349,36 @@ export function getEvent(id: EventId): EventDef {
 }
 
 // The defector's pursuit is only ever reached via RunState.pendingEventId
-// (set by `defector`'s "take them aboard" choice) — it never enters the
-// random pool a normal node draw picks from.
-const RANDOM_EVENTS: EventDef[] = EVENTS.filter((e) => e.id !== 'defector-pursuit');
+// (set by `defector`'s "take them aboard" choice); relic-vault/relic-core
+// are only ever reached via drawEvent's continuation check below — none
+// of the three ever enters the random pool a normal node draw picks from.
+const RANDOM_EVENTS: EventDef[] = EVENTS.filter(
+  (e) => e.id !== 'defector-pursuit' && e.id !== 'relic-vault' && e.id !== 'relic-core',
+);
 
-export function drawEvent(rng: RngFn, excludeId?: EventId): EventId {
-  const pool = RANDOM_EVENTS.filter((e) => e.id !== excludeId);
+// Iteration 34 (the relic chain, 34.2): once the chain has started
+// (relicFragments 1 or 2) and isn't complete, every event-node draw first
+// rolls a 50% continuation check — on a hit, the next stage fires instead
+// of the normal pool. Deliberately p=.5, not "stage 2/3 join the normal
+// pool": with ~9 reachable event nodes per run and a 14-event pool, three
+// uniform draws would complete the chain roughly never. This makes an
+// event-seeking player finish it most runs they start it early, while
+// still letting it slip away — the one knob to retune if playtesting says
+// too tight/loose. Stage 1 (relic-signal) is excluded from the normal
+// pool once taken (fragments > 0) — it's a one-shot opener, not something
+// that should keep reappearing once the chain is under way. `state` (not
+// a bare `excludeId`) is now the parameter because both fragment state and
+// lastEventId are needed here — see reducer.ts's PICK_NODE event branch,
+// the single call site.
+export function drawEvent(rng: RngFn, state: RunState): EventId {
+  const fragments = state.relicFragments ?? 0;
+  if (fragments === 1 || fragments === 2) {
+    if (rng() < 0.5) return fragments === 1 ? 'relic-vault' : 'relic-core';
+  }
+  const excluded = new Set<EventId>();
+  if (state.lastEventId) excluded.add(state.lastEventId);
+  if (fragments > 0) excluded.add('relic-signal');
+  const pool = RANDOM_EVENTS.filter((e) => !excluded.has(e.id));
   const options = pool.length > 0 ? pool : RANDOM_EVENTS;
   return options[Math.floor(rng() * options.length)].id;
 }
@@ -771,6 +849,76 @@ export function resolveEventChoice(
         outcomeText: spymaster
           ? 'A thorough sweep nets 12 credits — timed clean around the patrol schedule, no heat at all.'
           : 'A thorough sweep nets 12 credits — but lingering that long draws real attention: +2 heat.',
+      };
+    }
+
+    case 'relic-signal': {
+      if (choiceIndex === 0) {
+        return {
+          state: { ...state, credits: state.credits + 4 },
+          outcomeText: 'You sell the coordinates for 4 credits and leave the beacon behind.',
+        };
+      }
+      // choiceIndex 1: take the fragment.
+      return {
+        state: { ...state, relicFragments: 1, heat: addHeat(state.heat, 1) },
+        outcomeText:
+          'You pry the fragment loose — the effort lights up every scanner in the sector. First fragment secured.',
+      };
+    }
+
+    case 'relic-vault': {
+      if (choiceIndex === 0) {
+        return {
+          state: { ...state, credits: state.credits + 5 },
+          outcomeText: "You strip the vault's fittings for 5 credits, leaving the fragment sealed inside.",
+        };
+      }
+      if (choiceIndex === 1) {
+        const shipIndex = selection.shipIndex ?? 0;
+        return {
+          state: {
+            ...state,
+            relicFragments: 2,
+            fleet: applyCappedDamage(state.fleet, shipIndex, 2, state.protocols),
+          },
+          outcomeText: "You force the lock — the vault's defenses score your hull, but the second fragment is yours.",
+        };
+      }
+      // choiceIndex 2: cloaked entry — same fragment, no damage.
+      return {
+        state: { ...state, relicFragments: 2 },
+        outcomeText: 'Cloaked, you slip through the dead defenses and pull the second fragment free without a scratch.',
+      };
+    }
+
+    case 'relic-core': {
+      if (choiceIndex === 0) {
+        return {
+          state: { ...state, credits: state.credits + 10, relicFragments: 0 },
+          outcomeText: 'You sell both fragments to the reliquary for 10 credits — the chain ends here.',
+        };
+      }
+      if (choiceIndex === 1) {
+        return {
+          state: {
+            ...state,
+            credits: clampCredits(state.credits - 8),
+            relicFragments: 3,
+            inventory: [...state.inventory, ANCIENT_ARTIFACT_PART_ID],
+          },
+          outcomeText: 'You buy the final fragment for 8 credits. The three pieces lock together — the Ancient artifact is assembled.',
+        };
+      }
+      // choiceIndex 2: take it by force.
+      return {
+        state: {
+          ...state,
+          relicFragments: 3,
+          heat: addHeat(state.heat, 2),
+          inventory: [...state.inventory, ANCIENT_ARTIFACT_PART_ID],
+        },
+        outcomeText: 'You take the final fragment by force — the reliquary screams an alarm. The Ancient artifact is assembled.',
       };
     }
 

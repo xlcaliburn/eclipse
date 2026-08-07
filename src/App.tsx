@@ -226,7 +226,7 @@ function App() {
       bossRevealed={state.bossRevealed}
       onClose={isCompact ? undefined : () => setSurface('mission')}
       interactive={isCompact ? state.phase === 'map' : true}
-      onPickNode={(row) => dispatch({ type: 'PICK_NODE', row })}
+      onPickNode={(row, col) => dispatch({ type: 'PICK_NODE', row, col })}
     />
   );
 
@@ -310,7 +310,7 @@ function App() {
               bossRevealed={state.bossRevealed}
               onViewFleet={() => setSurface('fleet')}
               onAbandon={handleAbandon}
-              onPickNode={(row) => dispatch({ type: 'PICK_NODE', row })}
+              onPickNode={(row, col) => dispatch({ type: 'PICK_NODE', row, col })}
             />
           )}
 

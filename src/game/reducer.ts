@@ -1069,7 +1069,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // 14.3: the defector's "take them aboard" choice schedules the pursuit
       // as the very next event node instead of rolling the pool — a one-off
       // forced follow-up, consumed here and then cleared.
-      const eventId: EventId = state.pendingEventId ?? drawEvent(rng, state.lastEventId);
+      const eventId: EventId = state.pendingEventId ?? drawEvent(rng, state);
       return {
         ...base,
         phase: 'event',

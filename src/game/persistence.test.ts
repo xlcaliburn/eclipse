@@ -203,6 +203,36 @@ describe('save / load roundtrip (iteration 9.2)', () => {
     expect(loadRun(storage)).toEqual(state);
   });
 
+  it('a run mid-relic-chain (relicFragments 1 or 2) roundtrips (iteration 34)', () => {
+    const storage = fakeStorage();
+    for (const relicFragments of [1, 2] as const) {
+      const state: RunState = { ...initialRunState(), phase: 'map', relicFragments };
+      expect(saveRun(state, storage)).toBe(true);
+      expect(loadRun(storage)).toEqual(state);
+    }
+  });
+
+  it('a completed relic chain (relicFragments 3, artifact in inventory) roundtrips (iteration 34)', () => {
+    const storage = fakeStorage();
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'map',
+      relicFragments: 3,
+      inventory: ['ancient-artifact'],
+    };
+    expect(saveRun(state, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(state);
+  });
+
+  it('a pre-34 save with no relicFragments field loads cleanly (optional-additive, reads as 0)', () => {
+    const storage = fakeStorage();
+    const { relicFragments: _drop, ...withoutRelicFragments } = { ...initialRunState(), phase: 'map' as const };
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state: withoutRelicFragments }));
+    const loaded = loadRun(storage);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.relicFragments).toBeUndefined();
+  });
+
   it('loadRun discards a same-version save missing `heat` (added in v5, always required)', () => {
     const storage = fakeStorage();
     const { heat: _drop, ...withoutHeat } = initialRunState();

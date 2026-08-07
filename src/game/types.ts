@@ -360,6 +360,14 @@ export interface RunState {
   // anything except being consumed (if the run ends first, it just never
   // fires).
   pendingEventId?: EventId;
+  // Iteration 34 (the relic chain): fragments of the Ancient artifact
+  // collected so far, from three distinct event nodes (relic-signal ->
+  // relic-vault -> relic-core). Optional-additive — absent means 0, same
+  // as every pre-34 save. 3 means the artifact is already assembled and
+  // in inventory; the chain never offers stage 2/3 again once here (see
+  // events.ts's drawEvent). Reset to 0 only by the reliquary's sell-out
+  // choice — every other decline just leaves the count where it was.
+  relicFragments?: 0 | 1 | 2 | 3;
   // Set by EVENT_CONTINUE when an event choice's ambush carries a
   // win-conditional bonus (see `AmbushBonus`); consumed and cleared by
   // CONTINUE once that combat resolves, win or lose.

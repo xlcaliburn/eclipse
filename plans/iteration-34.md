@@ -1,7 +1,8 @@
-# Iteration 34 — The relic chain: a three-event artifact quest (specced 2026-08-07)
+# Iteration 34 — The relic chain: a three-event artifact quest (implemented 2026-08-07)
 
-> **Status: specced, not implemented.** Independent of iterations 30–33 —
-> implementable in any order relative to them.
+> **Status: implemented 2026-08-07.** Independent of iterations 30–33, as
+> specced. See "Implementation notes (2026-08-07)" at the end of this
+> file.
 
 User direction: "i want to add a event to the rotation where you could
 have the option to get 3 parts (1 from 3 different event nodes), and
@@ -170,3 +171,97 @@ never be bought):
   measurement recorded.
 - **34-M3** — browser pass end-to-end (start → 3 fragments → artifact →
   equipped and swinging fights), status notes here and in PLAN.md.
+
+## Implementation notes (2026-08-07)
+
+Implemented as specced end to end, no deviations of substance.
+
+**34.1/34.2 (the three stages + draw machinery).** Three new `EventId`s
+(`relic-signal`/`relic-vault`/`relic-core`) added to `events.ts` exactly
+per the plan's option/cost text. `RANDOM_EVENTS`'s filter grew to exclude
+`relic-vault`/`relic-core` alongside the existing `defector-pursuit`
+exclusion — same one-line pattern, same reasoning (both are reducer-
+scheduled, never randomly drawn). `drawEvent`'s signature changed from
+`(rng, excludeId?: EventId)` to `(rng, state: RunState)` — the single call
+site (`reducer.ts`'s PICK_NODE event branch) was the only caller, so this
+was a clean signature change, not an additive param. The continuation
+check is exactly the plan's `rng() < 0.5`, and `relic-signal` is excluded
+from the normal pool once `relicFragments > 0` (a one-shot opener, not
+something that should keep reappearing once the chain has started). The
+`??` short-circuit in PICK_NODE's `state.pendingEventId ?? drawEvent(rng,
+state)` was already exactly the right shape to make a pending
+defector-pursuit outrank the relic continuation check for free — no new
+code needed, only a test confirming it (both conditions live at once:
+`relicFragments: 1` and a queued `pendingEventId`).
+
+**34.3 (the artifact).** Added to `parts.ts` as its own const
+(`ANCIENT_ARTIFACT_PART`), mirroring `COMMODITY_LOT_PART`'s exact
+established pattern: merged into `PARTS_BY_ID` for `getPart` but kept out
+of the `PARTS` array itself, which is what every shop-offer pool
+(`WEAPON_POOL`, `COMPUTER_DRIVE_POOL`, etc. in `reducer.ts`) filters
+from — confirmed by reading those pool definitions before relying on it,
+not assumed. Stats exactly as specced: `type: 'computer'`, `computer: 4`,
+`shield: 4` (piloting, display-only renamed since iteration 29), `cost:
+12`. No special-case exclusion logic needed anywhere else in the codebase.
+
+**Balance spot-check (informational, not gated) — one self-caught
+methodology error along the way.** The first attempt swapped an ion
+cannon out for the artifact in "mid fleet" (16-18cr) against the shield
+cruiser and measured 84% → 0%, which looked like a bug at a glance but
+wasn't: removing a weapon to make room for a non-weapon part crashes win
+rate for a reason that has nothing to do with the artifact's own power —
+a genuinely bad comparison, caught before it was recorded as if it meant
+something. Corrected to swap the artifact in for `comp2` (a like-for-like
+`type: 'computer'` slot, not a weapon), which isolates the artifact's own
+effect: **84% → 97% (+13pp)**, mid fleet vs. shield cruiser, 1000 sims.
+Confirms the part is genuinely strong (as designed — "strictly best-in-
+slot") without distorting the fleet's weapon count to get there.
+
+**Files touched, matching the plan's anticipated list exactly**:
+`events.ts` (EventId union, 3 EventDefs, 3 resolveEventChoice cases,
+drawEvent rework), `types.ts` (`RunState.relicFragments`; no `PartId`
+union existed to touch — it's a plain `string` type, not a strict union),
+`parts.ts` (the artifact), `reducer.ts` (the one drawEvent call site),
+`persistence.ts` (no structural changes — optional-additive field, no
+field list to mirror, confirmed the same way iteration 32's shortcuts
+were: `grep` for map/state-shape validation in `persistence.ts` turned up
+nothing to update). `PartIcon.tsx`'s optional relic icon was **not**
+added — the plan itself called it a nice-to-have, and the existing
+computer-type icon already renders correctly via `PartCard` (confirmed
+live in the browser pass below); skipped to keep this iteration's scope
+to what was actually asked for.
+
+**Verification.** New tests: `events.test.ts` gained 3 `resolveEventChoice`
+describe blocks (one per stage — costs, fragment progression, requirement
+gating, artifact-granted-exactly-once) and a `drawEvent` describe block
+(stage 1 reachable from the base pool; continuation check fires
+deterministically for both stages; falls through correctly on a failed
+roll; never fires once complete; `relic-signal` never redraws once
+started). `reducer.test.ts` gained an "iteration 34: the relic chain"
+describe block: the pendingEventId-outranks-continuation-check contract
+exercised at the actual dispatch level (not just documented), seed
+sweeps confirming both `relic-signal` and `relic-vault` are genuinely
+reachable through the real `PICK_NODE` path, a
+never-redraws-once-complete sweep, an end-to-end EVENT_CHOOSE grant test,
+and a derive-time-fold confirmation (equip -> +4 computer/+4 piloting).
+`persistence.test.ts` gained 3 roundtrip tests: mid-chain (fragments 1
+and 2), complete (fragments 3 + artifact in inventory), and a pre-34 save
+with no `relicFragments` field loading cleanly with it read as
+`undefined` (falls back to 0 everywhere, same as the plan's
+optional-additive contract).
+
+Full bar: `npx tsc -b --force` clean, `npx vitest run` 663/663 passing (up
+from 637 pre-iteration — 26 new tests), `npx vite build` clean. Live
+browser pass via hand-edited saves at each stage: stage 1's two options
+both showed their costs and "Take the fragment" correctly set
+`relicFragments: 1` + heat 1; stage 2's cloak-gated option correctly
+showed "requires Cloaking field" locked, and "Cut your way in" correctly
+walked through the ship-pick sub-UI, applied 2 capped damage, and set
+`relicFragments: 2`; stage 3 correctly showed the in-fiction "Two
+fragments hum in your hold" progress line, and "Buy the final fragment"
+correctly deducted 8 credits, set `relicFragments: 3`, and placed
+`ancient-artifact` in inventory (confirmed via `PartCard`'s existing
+computer-type rendering, description text exact); equipping it in the
+shop's Fleet panel moved the ship's readout from COMP 1 -> 5 and PLT 0 ->
+4 (+4 each, exactly as designed) with zero extra wiring, confirming the
+derive-time fold really is automatic.
