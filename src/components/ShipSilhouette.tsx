@@ -67,89 +67,147 @@ function Svg({ size = 32, className, children }: SilhouetteProps & { children: R
 // pods, spikes, vanes — anything that extends past the hull's own outline
 // rather than sitting on top of its fill) stay `currentColor`, since those
 // were never the problem: a translucent shape over nothing is visible fine.
+// Iteration 37 (art pass): every active hull rebuilt as a recognizable
+// top-down spacecraft rather than a single abstract polygon. The shared
+// design language, so the fleet reads as one navy:
+//   - bow up / stern down, symmetric about x=50 (except the Derelict);
+//   - a ship is SEVERAL attached masses — fuselage + wings/nacelles/pods —
+//     never one convex blob;
+//   - dark (var(--bg)) canopy near the bow, dark engine nozzles at the
+//     stern, thin dark spine/panel seams for scale;
+//   - engine glows are currentColor shapes BELOW the stern outline — over
+//     transparent space, where translucent currentColor is actually
+//     visible (see the hard-won note above).
+// Details are kept chunky (>=2.5 viewBox units) — these render at 28-44px.
 const FRAME_SHAPES: Record<FrameId, React.ReactNode> = {
-  cruiser: ( // Flagship — elongated hexagon body + swept side wings
+  cruiser: ( // Flagship — broad command ship: bottle hull, swept wing sponsons, wingtip pods, twin engines
     <>
-      <polygon points="50,5 65,25 65,75 50,95 35,75 35,25" />
-      <polygon points="35,40 10,55 35,65" />
-      <polygon points="65,40 90,55 65,65" />
-      <circle cx="50" cy="23" r="5" fill="var(--bg)" opacity="0.8" />
-      <rect x="48.5" y="32" width="3" height="42" fill="var(--bg)" opacity="0.55" />
-      <polygon points="41,80 59,80 54,94 46,94" fill="var(--bg)" opacity="0.6" />
+      <polygon points="50,4 57,14 61,30 61,70 55,84 45,84 39,70 39,30 43,14" />
+      <polygon points="39,44 16,60 16,70 26,72 39,62" />
+      <polygon points="61,44 84,60 84,70 74,72 61,62" />
+      <polygon points="12,56 18,54 18,76 12,74" />
+      <polygon points="88,56 82,54 82,76 88,74" />
+      <ellipse cx="50" cy="18" rx="3.5" ry="5.5" fill="var(--bg)" opacity="0.8" />
+      <rect x="48.75" y="28" width="2.5" height="44" fill="var(--bg)" opacity="0.5" />
+      <rect x="44.5" y="77" width="3" height="6" fill="var(--bg)" opacity="0.75" />
+      <rect x="52.5" y="77" width="3" height="6" fill="var(--bg)" opacity="0.75" />
+      <polygon points="45,85 48,85 46.5,94" opacity="0.5" />
+      <polygon points="52,85 55,85 53.5,94" opacity="0.5" />
     </>
   ),
-  interceptor: ( // small, sharp — fast and fragile
+  interceptor: ( // dart fighter — needle fuselage, delta wings swept hard back, canards, one hot engine
     <>
-      <polygon points="50,5 70,90 50,75 30,90" />
-      <circle cx="50" cy="18" r="4" fill="var(--bg)" opacity="0.8" />
-      <polygon points="66,80 78,92 61,87" fill="var(--bg)" opacity="0.6" />
-      <polygon points="34,80 22,92 39,87" fill="var(--bg)" opacity="0.6" />
+      <polygon points="50,4 55,20 55,68 50,82 45,68 45,20" />
+      <polygon points="45,34 22,70 30,76 45,58" />
+      <polygon points="55,34 78,70 70,76 55,58" />
+      <polygon points="45,18 37,27 45,29" />
+      <polygon points="55,18 63,27 55,29" />
+      <ellipse cx="50" cy="16" rx="2.5" ry="4.5" fill="var(--bg)" opacity="0.8" />
+      <polygon points="46.5,76 53.5,76 52,82 48,82" fill="var(--bg)" opacity="0.75" />
+      <polygon points="46,83 54,83 50,97" opacity="0.55" />
     </>
   ),
-  'light-cruiser': ( // Cruiser — plain elongated diamond, no gimmick
+  'light-cruiser': ( // Cruiser — sleek destroyer: tapered hull, mid wings, twin engine nacelles astern
     <>
-      <polygon points="50,10 62,35 62,70 50,90 38,70 38,35" />
-      <rect x="40" y="36" width="3" height="34" fill="var(--bg)" opacity="0.5" />
-      <rect x="57" y="36" width="3" height="34" fill="var(--bg)" opacity="0.5" />
-      <circle cx="50" cy="21" r="4" fill="var(--bg)" opacity="0.8" />
-      <polygon points="43,78 57,78 53,92 47,92" fill="var(--bg)" opacity="0.6" />
+      <polygon points="50,6 58,20 58,72 53,84 47,84 42,72 42,20" />
+      <polygon points="42,40 26,56 26,64 35,64 42,54" />
+      <polygon points="58,40 74,56 74,64 65,64 58,54" />
+      <polygon points="34,64 42,66 42,88 34,86" />
+      <polygon points="66,64 58,66 58,88 66,86" />
+      <ellipse cx="50" cy="17" rx="3" ry="4.5" fill="var(--bg)" opacity="0.8" />
+      <rect x="48.75" y="26" width="2.5" height="40" fill="var(--bg)" opacity="0.5" />
+      <circle cx="38" cy="83" r="2" fill="var(--bg)" opacity="0.8" />
+      <circle cx="62" cy="83" r="2" fill="var(--bg)" opacity="0.8" />
+      <polygon points="35,88 41,88 38,97" opacity="0.5" />
+      <polygon points="59,88 65,88 62,97" opacity="0.5" />
     </>
   ),
-  bastion: ( // wide, blocky — durable protector
+  bastion: ( // armored bulwark — wide shield hull, bolted side slabs, chevron plating, twin heavy engines
     <>
-      <polygon points="35,10 65,10 85,30 85,70 65,90 35,90 15,70 15,30" />
-      <rect x="20" y="31.5" width="60" height="3" fill="var(--bg)" opacity="0.45" />
-      <rect x="20" y="65.5" width="60" height="3" fill="var(--bg)" opacity="0.45" />
-      <circle cx="50" cy="50" r="9" fill="var(--bg)" opacity="0.5" />
-      <circle cx="30" cy="25" r="3.5" fill="var(--bg)" opacity="0.85" />
-      <circle cx="70" cy="25" r="3.5" fill="var(--bg)" opacity="0.85" />
-      <circle cx="30" cy="75" r="3.5" fill="var(--bg)" opacity="0.85" />
-      <circle cx="70" cy="75" r="3.5" fill="var(--bg)" opacity="0.85" />
+      <polygon points="50,8 68,14 76,32 76,68 68,86 50,92 32,86 24,68 24,32 32,14" />
+      <polygon points="14,36 24,40 24,64 14,60" />
+      <polygon points="86,36 76,40 76,64 86,60" />
+      <polygon points="32,34 50,26 68,34 68,39 50,31 32,39" fill="var(--bg)" opacity="0.5" />
+      <polygon points="32,50 50,42 68,50 68,55 50,47 32,55" fill="var(--bg)" opacity="0.5" />
+      <circle cx="50" cy="66" r="6.5" fill="var(--bg)" opacity="0.55" />
+      <circle cx="32" cy="22" r="3" fill="var(--bg)" opacity="0.85" />
+      <circle cx="68" cy="22" r="3" fill="var(--bg)" opacity="0.85" />
+      <polygon points="41,86 46,86 45,92 42,92" fill="var(--bg)" opacity="0.75" />
+      <polygon points="54,86 59,86 58,92 55,92" fill="var(--bg)" opacity="0.75" />
+      <polygon points="42,93 46,93 44,99" opacity="0.45" />
+      <polygon points="54,93 58,93 56,99" opacity="0.45" />
     </>
   ),
-  dreadnought: ( // large body + side blocks + nose spike
+  dreadnought: ( // capital ship — long layered hull, spinal gun channel, turreted sponsons, lower fins, three engines
     <>
-      <polygon points="50,8 66,22 66,78 50,95 34,78 34,22" />
-      <polygon points="20,38 34,46 34,62 20,54" />
-      <polygon points="80,38 66,46 66,62 80,54" />
-      <polygon points="44,8 56,8 50,22" />
-      <circle cx="27" cy="50" r="3" fill="var(--bg)" opacity="0.85" />
-      <circle cx="73" cy="50" r="3" fill="var(--bg)" opacity="0.85" />
-      <rect x="48.5" y="28" width="3" height="42" fill="var(--bg)" opacity="0.5" />
-      <polygon points="42,82 58,82 53,96 47,96" fill="var(--bg)" opacity="0.6" />
+      <polygon points="50,3 60,10 64,26 64,74 58,88 42,88 36,74 36,26 40,10" />
+      <polygon points="40,12 34,24 40,28" />
+      <polygon points="60,12 66,24 60,28" />
+      <polygon points="20,32 36,36 36,62 20,58" />
+      <polygon points="80,32 64,36 64,62 80,58" />
+      <polygon points="36,70 26,84 33,84 39,77" />
+      <polygon points="64,70 74,84 67,84 61,77" />
+      <rect x="48.75" y="6" width="2.5" height="18" fill="var(--bg)" opacity="0.65" />
+      <circle cx="27" cy="42" r="2.2" fill="var(--bg)" opacity="0.85" />
+      <circle cx="27" cy="50" r="2.2" fill="var(--bg)" opacity="0.85" />
+      <circle cx="73" cy="42" r="2.2" fill="var(--bg)" opacity="0.85" />
+      <circle cx="73" cy="50" r="2.2" fill="var(--bg)" opacity="0.85" />
+      <rect x="43.75" y="30" width="2.5" height="42" fill="var(--bg)" opacity="0.4" />
+      <rect x="53.75" y="30" width="2.5" height="42" fill="var(--bg)" opacity="0.4" />
+      <polygon points="42,84 46,84 45,90 43,90" fill="var(--bg)" opacity="0.75" />
+      <polygon points="48,86 52,86 51.5,92 48.5,92" fill="var(--bg)" opacity="0.75" />
+      <polygon points="54,84 58,84 57,90 55,90" fill="var(--bg)" opacity="0.75" />
+      <polygon points="42.5,91 46.5,91 44.5,99" opacity="0.5" />
+      <polygon points="48,93 52,93 50,100" opacity="0.5" />
+      <polygon points="53.5,91 57.5,91 55.5,99" opacity="0.5" />
     </>
   ),
-  freighter: ( // boxy hauler — plain rectangular hull, cargo pods slung either side
+  freighter: ( // hauler — cab, thin spine, four slung cargo containers, engine block astern
     <>
-      <polygon points="40,10 60,10 60,90 40,90" />
-      <polygon points="15,30 35,35 35,65 15,70" />
-      <polygon points="85,30 65,35 65,65 85,70" />
-      <rect x="42" y="23.5" width="16" height="2.5" fill="var(--bg)" opacity="0.5" />
-      <rect x="42" y="43.5" width="16" height="2.5" fill="var(--bg)" opacity="0.5" />
-      <rect x="42" y="63.5" width="16" height="2.5" fill="var(--bg)" opacity="0.5" />
-      <circle cx="20" cy="35" r="2" fill="var(--bg)" opacity="0.85" />
-      <circle cx="80" cy="35" r="2" fill="var(--bg)" opacity="0.85" />
-      <polygon points="43,84 57,84 53,94 47,94" fill="var(--bg)" opacity="0.6" />
+      <polygon points="42,6 58,6 62,20 38,20" />
+      <rect x="47" y="20" width="6" height="58" />
+      <rect x="28" y="24" width="18" height="22" />
+      <rect x="28" y="50" width="18" height="22" />
+      <rect x="54" y="24" width="18" height="22" />
+      <rect x="54" y="50" width="18" height="22" />
+      <polygon points="40,78 60,78 57,90 43,90" />
+      <rect x="43" y="10" width="14" height="4" fill="var(--bg)" opacity="0.7" />
+      <rect x="30" y="34" width="14" height="2.5" fill="var(--bg)" opacity="0.5" />
+      <rect x="30" y="60" width="14" height="2.5" fill="var(--bg)" opacity="0.5" />
+      <rect x="56" y="34" width="14" height="2.5" fill="var(--bg)" opacity="0.5" />
+      <rect x="56" y="60" width="14" height="2.5" fill="var(--bg)" opacity="0.5" />
+      <polygon points="44,82 48,82 47,88 45,88" fill="var(--bg)" opacity="0.75" />
+      <polygon points="52,82 56,82 55,88 53,88" fill="var(--bg)" opacity="0.75" />
+      <polygon points="44,91 48,91 46,98" opacity="0.5" />
+      <polygon points="52,91 56,91 54,98" opacity="0.5" />
     </>
   ),
-  derelict: ( // small, irregular — a battered hulk patched more than built
+  derelict: ( // battered wreck of a cruiser — jagged hull, one stub wing, a breach, an engine barely alight
     <>
-      <polygon points="50,20 62,35 58,60 68,75 45,90 32,68 38,45 30,30" />
-      <polygon points="55,38 63,44 57,52 50,46" fill="var(--bg)" opacity="0.5" />
-      <polygon points="34,58 42,62 38,72 30,68" fill="var(--bg)" opacity="0.45" />
-      <circle cx="47" cy="50" r="2.5" fill="var(--bg)" opacity="0.7" />
+      <polygon points="50,8 58,20 56,42 64,52 58,60 60,82 50,90 44,76 40,58 46,48 38,32 44,18" />
+      <polygon points="42,44 26,56 31,62 44,54" />
+      <polygon points="48,28 56,34 50,44 44,34" fill="var(--bg)" opacity="0.6" />
+      <circle cx="52" cy="62" r="2.5" fill="var(--bg)" opacity="0.7" />
+      <polygon points="46,84 52,84 51,89 47,89" fill="var(--bg)" opacity="0.75" />
+      <polygon points="47,90 51,90 49,95" opacity="0.3" />
     </>
   ),
 
-  // Iteration 36: a plain, small utility hull — no gimmick shape (that's
-  // the point: identity lives on whatever part it's carrying, not the
-  // frame). Slimmer than the Interceptor, no wings, no antenna.
+  // Iteration 36: the plain utility carrier — deliberately the least
+  // flamboyant hull in the yard (identity lives on whatever part it
+  // carries). Iteration 37 art: a compact tug — short fuselage, twin
+  // mid-mounted thruster pods doing the work.
   corvette: (
     <>
-      <polygon points="50,12 58,30 58,88 50,96 42,88 42,30" />
-      <polygon points="42,50 26,60 42,68" fill="var(--bg)" opacity="0.5" />
-      <polygon points="58,50 74,60 58,68" fill="var(--bg)" opacity="0.5" />
-      <polygon points="45,82 55,82 52,94 48,94" fill="var(--bg)" opacity="0.6" />
+      <polygon points="50,10 57,20 57,64 50,72 43,64 43,20" />
+      <polygon points="35,34 43,38 43,60 35,62" />
+      <polygon points="65,34 57,38 57,60 65,62" />
+      <ellipse cx="50" cy="17" rx="3" ry="4" fill="var(--bg)" opacity="0.8" />
+      <polygon points="36,58 41,58 40,63 37,63" fill="var(--bg)" opacity="0.75" />
+      <polygon points="59,58 64,58 63,63 60,63" fill="var(--bg)" opacity="0.75" />
+      <polygon points="47.5,66 52.5,66 51.5,71 48.5,71" fill="var(--bg)" opacity="0.75" />
+      <polygon points="36,64 41,64 38.5,73" opacity="0.5" />
+      <polygon points="59,64 64,64 61.5,73" opacity="0.5" />
     </>
   ),
 
@@ -225,58 +283,78 @@ export function FrameSilhouette({ frameId, size, className }: { frameId: FrameId
   );
 }
 
+// Iteration 37 (art pass): the enemy fleet gets its own design language,
+// distinct from the player navy's winged-fuselage look — mandible prows,
+// forward-swept fins, waisted insectoid hulls, claw arms. Same rendering
+// rules as FRAME_SHAPES (dark recessed detail, glows only over
+// transparent space).
 const ENEMY_SHAPES: Record<EnemyArchetype, React.ReactNode> = {
-  // Kept deliberately spare — swarm renders 3+ copies on screen at once, so
-  // extra detail per unit reads as noise rather than texture at that count.
-  swarm: (
+  // Kept the sparest of the set — swarm renders 3-7 copies on screen at
+  // once, so it's body + mandibles + eye, no engine glow to multiply.
+  swarm: ( // insect dart — waisted body, twin mandible prongs reaching forward
     <>
-      <polygon points="50,15 75,50 50,85 25,50" />
-      <circle cx="50" cy="50" r="4" fill="var(--bg)" opacity="0.7" />
+      <polygon points="50,10 59,34 55,54 50,88 45,54 41,34" />
+      <polygon points="44,16 33,4 39,22" />
+      <polygon points="56,16 67,4 61,22" />
+      <circle cx="50" cy="30" r="3" fill="var(--bg)" opacity="0.8" />
     </>
   ),
-  frigate: (
+  frigate: ( // blade ship — waisted hull, fins swept FORWARD (the alien cue), visor slit
     <>
-      <polygon points="42,10 58,10 58,80 42,80" />
-      <polygon points="30,55 42,60 42,75" />
-      <polygon points="70,55 58,60 58,75" />
-      <circle cx="50" cy="20" r="3.5" fill="var(--bg)" opacity="0.85" />
-      <polygon points="45,72 55,72 51,86 49,86" fill="var(--bg)" opacity="0.6" />
+      <polygon points="50,6 59,18 55,44 59,78 50,88 41,78 45,44 41,18" />
+      <polygon points="45,32 28,18 33,38 45,44" />
+      <polygon points="55,32 72,18 67,38 55,44" />
+      <rect x="46" y="20" width="8" height="3" fill="var(--bg)" opacity="0.8" />
+      <polygon points="46.5,82 53.5,82 52,88 48,88" fill="var(--bg)" opacity="0.75" />
+      <polygon points="46,89 54,89 50,98" opacity="0.5" />
     </>
   ),
-  cruiser: (
+  cruiser: ( // beetle warship — notched carapace hull, blade wings, paired eyes, twin engines
     <>
-      <polygon points="50,8 70,30 70,70 50,92 30,70 30,30" />
-      <rect x="31.5" y="32" width="3" height="36" fill="var(--bg)" opacity="0.5" />
-      <rect x="65.5" y="32" width="3" height="36" fill="var(--bg)" opacity="0.5" />
-      <circle cx="50" cy="24" r="4" fill="var(--bg)" opacity="0.85" />
-      <polygon points="43,78 57,78 52,90 48,90" fill="var(--bg)" opacity="0.6" />
+      <polygon points="50,8 66,24 62,50 66,72 50,86 34,72 38,50 34,24" />
+      <polygon points="34,30 12,44 20,54 36,50" />
+      <polygon points="66,30 88,44 80,54 64,50" />
+      <polygon points="38,38 50,32 62,38 62,43 50,37 38,43" fill="var(--bg)" opacity="0.55" />
+      <rect x="48.75" y="46" width="2.5" height="26" fill="var(--bg)" opacity="0.5" />
+      <circle cx="44" cy="22" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <circle cx="56" cy="22" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <polygon points="41,80 46,80 45,86 42,86" fill="var(--bg)" opacity="0.75" />
+      <polygon points="54,80 59,80 58,86 55,86" fill="var(--bg)" opacity="0.75" />
+      <polygon points="41.5,87 45.5,87 43.5,95" opacity="0.5" />
+      <polygon points="54.5,87 58.5,87 56.5,95" opacity="0.5" />
     </>
   ),
-  fortress: (
+  fortress: ( // gun platform — heavy octagon, four turret spurs, dark reactor ring, radial seams
     <>
-      <polygon points="30,20 70,20 90,50 70,80 30,80 10,50" />
-      <polygon points="45,5 55,5 50,20" />
-      <polygon points="45,95 55,95 50,80" />
-      <polygon points="5,45 5,55 20,50" />
-      <polygon points="95,45 95,55 80,50" />
-      <circle cx="50" cy="50" r="10" fill="var(--bg)" opacity="0.5" />
-      <circle cx="35" cy="35" r="3" fill="var(--bg)" opacity="0.85" />
-      <circle cx="65" cy="35" r="3" fill="var(--bg)" opacity="0.85" />
-      <circle cx="35" cy="65" r="3" fill="var(--bg)" opacity="0.85" />
-      <circle cx="65" cy="65" r="3" fill="var(--bg)" opacity="0.85" />
+      <polygon points="36,14 64,14 82,36 82,64 64,86 36,86 18,64 18,36" />
+      <polygon points="45,4 55,4 50,15" />
+      <polygon points="45,96 55,96 50,85" />
+      <polygon points="4,45 4,55 15,50" />
+      <polygon points="96,45 96,55 85,50" />
+      <circle cx="50" cy="50" r="11" fill="none" stroke="var(--bg)" strokeWidth="3" opacity="0.55" />
+      <circle cx="50" cy="50" r="3" fill="var(--bg)" opacity="0.7" />
+      <rect x="24" y="48.75" width="52" height="2.5" fill="var(--bg)" opacity="0.4" />
+      <rect x="48.75" y="24" width="2.5" height="52" fill="var(--bg)" opacity="0.4" />
+      <circle cx="33" cy="30" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <circle cx="67" cy="30" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <circle cx="33" cy="70" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <circle cx="67" cy="70" r="2.5" fill="var(--bg)" opacity="0.85" />
     </>
   ),
-  boss: (
+  boss: ( // crowned monstrosity — bulked hull with a notched waist, horn crown, claw arms, dark maw, wide exhaust
     <>
-      <polygon points="50,10 75,30 75,70 50,95 25,70 25,30" />
-      <polygon points="25,40 0,30 5,60 25,60" />
-      <polygon points="75,40 100,30 95,60 75,60" />
-      <polygon points="45,0 55,0 50,15" />
-      <circle cx="50" cy="30" r="5" fill="var(--bg)" opacity="0.6" />
-      <circle cx="35" cy="45" r="3" fill="var(--bg)" opacity="0.85" />
-      <circle cx="65" cy="45" r="3" fill="var(--bg)" opacity="0.85" />
-      <rect x="48.5" y="35" width="3" height="50" fill="var(--bg)" opacity="0.5" />
-      <polygon points="42,86 58,86 52,96 48,96" fill="var(--bg)" opacity="0.6" />
+      <polygon points="50,4 64,12 72,34 68,56 74,76 58,92 42,92 26,76 32,56 28,34 36,12" />
+      <polygon points="38,12 27,0 33,18" />
+      <polygon points="62,12 73,0 67,18" />
+      <polygon points="28,38 6,28 10,56 28,56" />
+      <polygon points="72,38 94,28 90,56 72,56" />
+      <polygon points="42,24 58,24 50,38" fill="var(--bg)" opacity="0.6" />
+      <circle cx="43" cy="16" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <circle cx="57" cy="16" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <rect x="48.75" y="40" width="2.5" height="44" fill="var(--bg)" opacity="0.5" />
+      <polygon points="43,88 47,88 46,93 44,93" fill="var(--bg)" opacity="0.75" />
+      <polygon points="53,88 57,88 56,93 54,93" fill="var(--bg)" opacity="0.75" />
+      <polygon points="42,94 58,94 50,100" opacity="0.35" />
     </>
   ),
 };

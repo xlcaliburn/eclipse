@@ -65,6 +65,7 @@ Rules for working with these files:
 | [34](plans/iteration-34.md) | The relic chain: a three-stage event quest (fragment per event node, chosen costs) assembling the Ancient artifact — +4 computer / +4 piloting in one slot, the event pool's first run-spanning pull | implemented |
 | 35 | Reaction cards/hand removed (active parts now own that role; Flagship starts with the Overdrive injector as compensation; elite/command payouts flattened to credits; card events reworked to parts) + tutorial bottom-anchored on mobile + Mission tab removed, Chart → Map | implemented directly, no plan file |
 | [36](plans/iteration-36.md) | Hulls as bases: signature-part bundles stripped (support hulls retired into one Corvette), rarity tiers (common/rare/epic/legendary at 73/20/5/2% shop odds) on every part + hull, and the full +1/+2/+3 stat-item ladder (3/5/9cr) | implemented |
+| 37 | Ship art pass: every active hull + enemy archetype rebuilt as a recognizable top-down spacecraft (multi-mass fuselage/wings/nacelles, canopy + engine nozzles + thrust glows; enemies get their own mandible/claw design language) — same code-authored SVG pipeline, no assets, presentation only | implemented directly, no plan file |
 | [—](plans/parking-lot.md) | Parking lot: deferred + decided-against ideas | — |
 
 ## Standing notes
