@@ -94,20 +94,18 @@ describe('stepping vs one-shot equivalence', () => {
 });
 
 describe('active parts (iteration 7)', () => {
-  it('injector: this round, all player ships fire first (like the retired overdrive card)', () => {
+  // Iteration 41: redesigned from a round-modifier ("fire first this
+  // round") to an immediate self-heal, same shape as dcbay at half the
+  // repair.
+  it('injector: repairs 1 damage on this ship, immediately', () => {
     const fleet = [
-      {
-        stats: blankStats({ initiative: 0, hp: 5, cannons: [{ diceCount: 1, damage: 1 }], actives: ['injector'] }),
-        initialDamage: 0,
-      },
+      { stats: blankStats({ hp: 5, actives: ['injector'] }), initialDamage: 2 },
     ];
-    const foe = enemy({}, { initiative: 5, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] });
-    let state = initCombat(fleet, foe, 7);
-    state = advanceRound(state); // missile (no weapons involved)
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 3);
+    expect(state.playerShips[0].damage).toBe(2);
     state = useActive(state, 0, 0);
-    state = advanceRound(state); // cannon round 1 — player should fire first now
-    const round1Rolls = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon' && e.round === 1);
-    expect((round1Rolls[0] as { side: string }).side).toBe('player');
+    expect(state.playerShips[0].damage).toBe(1);
   });
 
   it('uplink2: +2 computer for exactly one round', () => {
@@ -1223,24 +1221,31 @@ describe('Outspeed (iteration 17)', () => {
     expect(state.log.some((e) => e.kind === 'outspeed' && e.side === 'enemy')).toBe(false);
   });
 
-  it('the injector active grants outspeed for exactly the round it is armed', () => {
+  // Iteration 41: injector no longer grants a round modifier (it's a
+  // self-heal now) — tacrelay takes over as this test's round-modifier
+  // initiative source; it's the same "temporary initiative bump for one
+  // round" shape the old injector used to be.
+  it('the tacrelay active grants outspeed for exactly the round it is armed', () => {
+    // Base initiative 3 sits one short of OUTSPEED_GAP (4) against a
+    // 0-initiative foe; tacrelay's +1 is exactly what closes it, only for
+    // the round it's armed.
     const fleet = [
       {
-        stats: blankStats({ hp: 20, cannons: [{ diceCount: 1, damage: 1 }], actives: ['injector'] }),
+        stats: blankStats({ initiative: 3, hp: 20, cannons: [{ diceCount: 1, damage: 1 }], actives: ['tacrelay'] }),
         initialDamage: 0,
       },
     ];
-    const foe = enemy({}, { hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }); // both sides initiative 0
+    const foe = enemy({}, { hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }); // initiative 0
     let state = initCombat(fleet, foe, 1);
     state = advanceRound(state); // missile (no-op)
-    state = useActive(state, 0, 0); // arm injector for the next round
+    state = useActive(state, 0, 0); // arm tacrelay for the next round
 
     const beforeRound1 = state.log.length;
-    state = advanceRound(state); // cannon round 1 — +99 initiative active this round only
+    state = advanceRound(state); // cannon round 1 — +1 initiative active this round only
     expect(state.log.slice(beforeRound1).some((e) => e.kind === 'outspeed' && e.side === 'player')).toBe(true);
 
     const beforeRound2 = state.log.length;
-    state = advanceRound(state); // cannon round 2 — injector already spent, roundModifiers reset
+    state = advanceRound(state); // cannon round 2 — tacrelay already spent, roundModifiers reset
     expect(state.log.slice(beforeRound2).some((e) => e.kind === 'outspeed')).toBe(false);
   });
 
@@ -1342,10 +1347,14 @@ describe('Outspeed (iteration 17)', () => {
     expect(playerRolls.every((r) => r.targetIndex === 0)).toBe(true);
   });
 
-  it('outspeedingShipIndices matches what advanceRound actually grants, live (incl. after injector arms)', () => {
+  // Iteration 41: injector no longer grants initiative — tacrelay takes
+  // over as this test's round-modifier source (see the outspeed-arming
+  // test above for the same swap and why).
+  it('outspeedingShipIndices matches what advanceRound actually grants, live (incl. after tacrelay arms)', () => {
+    // Base initiative 3, one short of OUTSPEED_GAP (4) — tacrelay's +1 closes it.
     const fleet = [
       {
-        stats: blankStats({ hp: 20, cannons: [{ diceCount: 1, damage: 1 }], actives: ['injector'] }),
+        stats: blankStats({ initiative: 3, hp: 20, cannons: [{ diceCount: 1, damage: 1 }], actives: ['tacrelay'] }),
         initialDamage: 0,
       },
     ];
@@ -1353,7 +1362,7 @@ describe('Outspeed (iteration 17)', () => {
     let state = initCombat(fleet, foe, 1);
     expect(outspeedingShipIndices(state)).toEqual({ player: [], enemy: [] });
 
-    state = useActive(state, 0, 0); // arm injector — badge should react immediately, before the round even resolves
+    state = useActive(state, 0, 0); // arm tacrelay — badge should react immediately, before the round even resolves
     expect(outspeedingShipIndices(state)).toEqual({ player: [0], enemy: [] });
   });
 
@@ -1577,5 +1586,48 @@ describe('Alpha doctrine (iteration 28)', () => {
     const rolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
     expect(rolls.length).toBeGreaterThan(0);
     expect(rolls.every((e) => e.kind === 'roll' && e.shield === 6)).toBe(true);
+  });
+});
+
+// Iteration 40 (Overcharged rounds / "digital dice"): a weapon with
+// `overcharge: true` rolls on a 7-face die instead of 6 — a natural 7
+// always hits and deals +1 bonus damage. Swept across many seeds (no
+// single fixed seed is known in advance to land a 7) rather than a
+// brute-forced exact seed, since the point is "this can happen and pays
+// off correctly when it does," not one specific sequence.
+describe('Overcharged rounds — the 7-face die (iteration 40)', () => {
+  it('an overcharged cannon can roll a natural 7, which always hits and deals +1 bonus damage; a plain cannon never rolls 7', () => {
+    let sawSeven = false;
+    for (let seed = 1; seed <= 300 && !sawSeven; seed++) {
+      const fleet = [
+        {
+          stats: blankStats({
+            hp: 50,
+            cannons: [
+              { diceCount: 1, damage: 1, overcharge: true },
+              { diceCount: 1, damage: 1 }, // plain control weapon, same ship
+            ],
+          }),
+          initialDamage: 0,
+        },
+      ];
+      const foe = enemy({}, { hp: 500, computer: 0, shield: 0 });
+      let state = initCombat(fleet, foe, seed);
+      for (let i = 0; i < 5 && !state.winner; i++) state = advanceRound(state);
+
+      const playerRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player');
+      const overchargedRolls = playerRolls.filter((_, i) => i % 2 === 0); // weapon 0 fires first each activation
+      const plainRolls = playerRolls.filter((_, i) => i % 2 === 1);
+
+      expect(plainRolls.every((e) => e.kind === 'roll' && e.raw <= 6)).toBe(true);
+
+      const seven = overchargedRolls.find((e) => e.kind === 'roll' && e.raw === 7);
+      if (seven && seven.kind === 'roll') {
+        sawSeven = true;
+        expect(seven.hit).toBe(true);
+        expect(seven.damage).toBe(2); // base 1 + the overcharge bonus
+      }
+    }
+    expect(sawSeven).toBe(true); // if this ever fails, the 7-face roll path is broken, not just unlucky
   });
 });

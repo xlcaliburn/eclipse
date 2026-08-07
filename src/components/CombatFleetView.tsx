@@ -48,19 +48,6 @@ interface CombatFleetViewProps {
   // numbers live in the enemy panel's readout; the card badge just marks
   // "this ship gets a second activation this round."
   outspeedingIndices?: { player: number[]; enemy: number[] };
-  // Iteration 19 (telegraphs): next round's opening fire, aggregated per
-  // player ship. Undefined while replaying / once finished — chips only
-  // show between rounds, when the player can still react.
-  incomingFire?: Map<number, { dice: number; maxDamage: number; outspeed: boolean; shooters: string[] }>;
-  incomingFlakNote?: string; // missile-phase preview only
-}
-
-interface IncomingChip {
-  dice: number;
-  maxDamage: number;
-  outspeed: boolean;
-  shooters: string[];
-  flakNote?: string;
 }
 
 function shipCard(
@@ -79,7 +66,6 @@ function shipCard(
   destructionPending = false,
   badge?: CardBadge,
   isOutspeeding = false,
-  incoming?: IncomingChip,
 ) {
   // Show the fight as of the revealed point in the replay, not the end of
   // the round: damage that has not been shown yet is rolled back, and a hull
@@ -142,15 +128,6 @@ function shipCard(
         ) : (
           <>
                   <StatBar stats={ship.stats} damage={shownDamage} />
-            {incoming && (
-              <span
-                className="combat-ship__incoming"
-                title={`Opening fire from ${incoming.shooters.join(', ')}. Dice retarget after kills, so this is the opening picture.${incoming.flakNote ? ` ${incoming.flakNote}` : ''}`}
-              >
-                ⚠ {incoming.dice} {incoming.dice === 1 ? 'die' : 'dice'} · up to {incoming.maxDamage} dmg
-                {incoming.outspeed ? ' · ×2 strike' : ''}
-              </span>
-            )}
             {upgrades && upgrades.length > 0 && (
               <div className="ship-card__upgrades">
                 {upgrades.map((upgradeId, i) => (
@@ -185,15 +162,12 @@ export function CombatFleetView({
   onSelectEnemy,
   priorityTargetIndex,
   outspeedingIndices,
-  incomingFire,
-  incomingFlakNote,
 }: CombatFleetViewProps) {
   return (
     <div className="combat-fleets">
       <div className="combat-fleets__side">
-        {playerShips.map((ship, i) => {
-          const agg = incomingFire?.get(i);
-          return shipCard(
+        {playerShips.map((ship, i) =>
+          shipCard(
             ship,
             'player',
             i,
@@ -209,9 +183,8 @@ export function CombatFleetView({
             pendingDestroyed?.has(`player:${i}`) ?? false,
             cardBadges?.[`player:${i}`],
             outspeedingIndices?.player.includes(i) ?? false,
-            agg ? { ...agg, flakNote: incomingFlakNote } : undefined,
-          );
-        })}
+          ),
+        )}
       </div>
       <div className="combat-fleets__side combat-fleets__side--enemy">
         {enemyShips.map((ship, i) =>

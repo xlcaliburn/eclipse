@@ -33,15 +33,18 @@ function pickTarget(defenders: CombatShip[]): CombatShip | null {
 }
 
 // `chaffActive` (iteration 8, addendum A.3): while the chaff launcher active
-// is armed for the defending ship this round, a natural 6 is no longer an
-// automatic hit — it resolves as a normal roll instead.
+// is armed for the defending ship this round, a natural 6 (or `maxRoll`,
+// iteration 40) is no longer an automatic hit — it resolves as a normal
+// roll instead. `maxRoll` defaults to 6; an overcharged die rolls on 7
+// faces, and its top face (7) is the one that always hits, not 6.
 export function resolveHit(
   raw: number,
   attackerComputer: number,
   defenderShield: number,
   chaffActive = false,
+  maxRoll = 6,
 ): boolean {
-  if (raw === 6 && !chaffActive) return true;
+  if (raw === maxRoll && !chaffActive) return true;
   if (raw === 1) return false;
   return raw + attackerComputer - defenderShield >= 6;
 }

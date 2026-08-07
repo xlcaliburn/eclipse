@@ -12,9 +12,13 @@ export function mulberry32(seed: number): RngFn {
   };
 }
 
-// Rolls a d6, returning an integer in [1, 6].
-export function rollD6(rng: RngFn): number {
-  return Math.floor(rng() * 6) + 1;
+// Rolls a die, returning an integer in [1, faces]. `faces` defaults to 6 —
+// the standard d6 every weapon rolls, except one whose derived stats carry
+// `overcharge` (iteration 40's Overcharged rounds protocol): that die gets
+// a 7th face. Still exactly one rng() draw either way, so this never
+// perturbs the rngCounter accounting.
+export function rollD6(rng: RngFn, faces = 6): number {
+  return Math.floor(rng() * faces) + 1;
 }
 
 // The only nondeterministic moment in a run (iteration 9): the seed rolled

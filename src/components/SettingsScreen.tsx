@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { isTutorialDisabled, setTutorialDisabled } from '../onboardingProgress';
 import { setMotionSetting } from '../motionPreference';
 import { setSoundSetting } from '../soundPreference';
 import { playSfx } from '../audio';
@@ -18,6 +19,7 @@ function settingsBody(seed: number | null, protocols: ProtocolId[] | undefined, 
     <>
       <MotionSetting />
       <SoundSetting />
+      <TutorialSetting />
       {protocols?.map((id) => (
         <ProtocolRow key={id} protocolId={id} />
       ))}
@@ -177,6 +179,42 @@ function SoundSetting() {
       >
         {on ? 'On' : 'Off'}
       </button>
+    </div>
+  );
+}
+
+// Suppresses the automatic contextual popups (dice roll / missiles /
+// piloting — OnboardingPopup.tsx) outright, for a player who's already
+// past needing them. The on-demand "How to play" reference (the "?"
+// button) is unaffected — this only stops things from appearing unasked.
+// Plain local state, not a shared hook like Motion/Sound above: nothing
+// else in the UI needs to react live to this changing.
+function TutorialSetting() {
+  const [disabled, setDisabled] = useState(isTutorialDisabled);
+
+  function toggle(checked: boolean) {
+    setDisabled(checked);
+    setTutorialDisabled(checked);
+  }
+
+  return (
+    <div className="settings-row">
+      <div className="settings-row__text">
+        <h3 className="settings-row__label">
+          <label className="settings-row__checkbox-label">
+            <input
+              type="checkbox"
+              checked={disabled}
+              onChange={(e) => toggle(e.target.checked)}
+            />
+            Dismiss tutorial popups
+          </label>
+        </h3>
+        <p className="settings-row__hint">
+          Skips the dice-roll/missiles/piloting popups that pop up the first time each matters in a fight. The "How
+          to play" reference is still there if you want it.
+        </p>
+      </div>
     </div>
   );
 }

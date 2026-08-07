@@ -14,7 +14,7 @@ import type { FxItem, FxSpawn } from './TheaterFx';
 import { usePrefersReducedMotion } from './useReducedMotion';
 import { countRevealSteps, revealStepEnd } from './replaySteps';
 import { describeRoll } from './combatRollText';
-import { hasSeenOnboarding, markOnboardingSeen } from '../onboardingProgress';
+import { hasSeenOnboarding, isTutorialDisabled, markOnboardingSeen } from '../onboardingProgress';
 import type { OnboardingKey } from '../onboardingProgress';
 import { playSfx } from '../audio';
 
@@ -27,6 +27,7 @@ import { playSfx } from '../audio';
 // starting composition (neither changes mid-fight), so it's safe to
 // re-derive from `combat`/`enemy` on every check rather than caching them.
 function nextOnboardingPopup(combat: CombatState, enemy: EnemyDef): OnboardingKey | null {
+  if (isTutorialDisabled()) return null;
   if (!hasSeenOnboarding('diceRoll')) return 'diceRoll';
   if (!hasSeenOnboarding('missiles') && hasMissilePhase(combat)) return 'missiles';
   if (!hasSeenOnboarding('piloting') && enemy.groups.some((g) => g.stats.shield > 0)) return 'piloting';
@@ -190,25 +191,6 @@ export function CombatScreen({
   // recomputed on every render from live state, so the badge reacts the
   // instant an active gets armed or an opposing fast ship dies.
   const outspeeding = outspeedingShipIndices(combat);
-
-  // Iteration 19 (telegraphs): next round's opening fire, recomputed from
-  // live state every render — arming an evade or a lure-swap visibly moves
-  // the telegraph before the round is committed.
-  const firePreview = !finished ? incomingFirePreview(combat) : null;
-  const incomingByTarget = new Map<
-    number,
-    { dice: number; maxDamage: number; outspeed: boolean; shooters: string[] }
-  >();
-  if (firePreview) {
-    for (const entry of firePreview.entries) {
-      const agg = incomingByTarget.get(entry.targetIndex) ?? { dice: 0, maxDamage: 0, outspeed: false, shooters: [] };
-      agg.dice += entry.diceCount;
-      agg.maxDamage += entry.maxDamage;
-      agg.outspeed = agg.outspeed || entry.outspeed;
-      agg.shooters.push(shipLabel('enemy', entry.shooterIndex, enemy, playerLabels));
-      incomingByTarget.set(entry.targetIndex, agg);
-    }
-  }
 
   // Every active part any player ship carries, identified by (shipIndex,
   // abilityIndex) — the same pair `canUseActive`/`onUseActive` key off of.
@@ -598,12 +580,6 @@ export function CombatScreen({
           onSelectEnemy={!finished && !isReplaying ? onSelectEnemy : undefined}
           priorityTargetIndex={effectivePriority}
           outspeedingIndices={outspeeding}
-          incomingFire={showTelegraph ? incomingByTarget : undefined}
-          incomingFlakNote={
-            showTelegraph && firePreview?.phase === 'missile' && firePreview.flakCancels > 0
-              ? `Your flak downs the first ${firePreview.flakCancels} missile ${firePreview.flakCancels === 1 ? 'die' : 'dice'}.`
-              : undefined
-          }
         />
       </div>
       {/* The static "click an enemy ship..." instruction is gone — onboarding

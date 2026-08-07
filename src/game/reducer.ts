@@ -31,7 +31,7 @@ import { addHeat, MAX_HEAT } from './heat';
 import { actColumns, bossColumn, generateMap, getNode, globalColumn, laneColumns, maxRows, reachableNodes } from './map';
 import type { CargoTag, GameMap, MapPosition } from './map';
 export { globalColumn } from './map';
-import { COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
+import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
 import { drawProtocolOffers, hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
 import { randomSeed, resumeRng } from './rng';
@@ -49,7 +49,7 @@ import {
   playerShipLabel,
 } from './ship';
 import type { FusionStat } from './ship';
-import { getUpgrade, randomUpgradeIds } from './upgrades';
+import { ELITE_UPGRADE_POOL, getUpgrade, HULL_BONUS_UPGRADE_POOL, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
 import { emptyRunStats } from './daily';
 import { shipName } from './shipNames';
@@ -125,7 +125,10 @@ export type RunAction =
   | { type: 'NEW_RUN'; seed?: number; mode?: 'daily'; dailyDate?: string }
   | { type: 'LOAD_STATE'; state: RunState };
 
-export const SHOP_OFFER_COUNT = 6;
+// Iteration 41: 6 -> 8 — one more weapon slot, one more defense slot, to
+// match the roster's own growth (light-missile joining the weapon pool,
+// etc.) without either category crowding out the other.
+export const SHOP_OFFER_COUNT = 8;
 // How many columns beyond the current vision high-water mark a long-range
 // sweep reveals.
 const SECTOR_SCAN_DEPTH = 2;
@@ -146,20 +149,27 @@ export const SETUP_ALLOWED_PARTS: PartId[] = ['ion', 'hull1', 'shield1', 'comp1'
 // whole role — identity now lives entirely on the part, which any hull can
 // carry. What's left here is pure "arrives combat-ready" QoL: an
 // Interceptor with an ion cannon, a Dreadnought/Cruiser with a fuller
-// starting fit matching their frames.ts blurb. Freighter, Derelict, and
-// Corvette have no starting fit at all — blank slates for whatever the
-// fleet needs.
-const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
+// starting fit matching their frames.ts blurb.
+// Iteration 41: every purchasable hull now arrives with at least one
+// weapon — an unarmed ship in the shop read wrong, however cheap. Bastion
+// and Freighter get an Ion cannon (each frame's own cost bumped to match,
+// see frames.ts); Derelict and Corvette get the new Light missile instead
+// (cheaper, and a missile still fits a hull too thin to reliably trade
+// blows). Frame prices are the single source of truth for what a starting
+// fit is "worth" — see frames.ts's own per-frame reprice notes.
+// Exported so ShopScreen's frame cards can preview what a hull arrives
+// fitted with — see the "Expand your fleet" section, iteration 41.
+export const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   interceptor: ['ion'],
-  bastion: [],
+  bastion: ['ion'],
   dreadnought: ['ion', 'ion', 'shield1'],
   // 2026-08-06 (the same midrange-progression repricing): now arrives with
   // a Gauss shield alongside its ion cannon — a real starting stat, not
   // just a bare identity part, matching the Dreadnought's fuller fit above.
   'light-cruiser': ['ion', 'shield1'],
-  freighter: [],
-  derelict: [],
-  corvette: [],
+  freighter: ['ion'],
+  derelict: ['light-missile'],
+  corvette: ['light-missile'],
   // Legacy support hulls (iteration 23, retired iteration 36) — never
   // purchasable any more (see frames.ts), so this never actually runs, but
   // every FrameId key is still required here. Left blank rather than
@@ -280,20 +290,26 @@ export function frameCost(
   return cost;
 }
 
-// Iteration 33: how much damage a second-hand hull arrives with — a third
-// of its fully-fitted max HP, rounded up (a scratch-and-dent discount you
-// pay for in HP, not raw stats). Shared by BUY_SHIP and ShopScreen's
-// display so the two numbers can never drift apart. Computed off the
-// frame's STARTING_FIT (defined below) so it reflects what actually gets
-// equipped, not the bare frame.
-export function secondHandDamage(frameId: Exclude<FrameId, 'cruiser'>): number {
-  const maxHp = deriveStats(frameId, STARTING_FIT[frameId], []).hp;
-  // Capped so a hull can never arrive already destroyed — same
-  // always-survivable law as applyCappedDamage in events.ts.
-  return Math.min(Math.ceil(maxHp / 3), Math.max(0, maxHp - 1));
+// Iteration 39: replaces the old arrival-damage mechanic (a second-hand
+// hull no longer arrives pre-damaged — its whole discount lives in price
+// now, via SECOND_HAND_MULTIPLIER above). Instead, a PRISTINE (shipyard)
+// purchase arrives with a bonus scaled to the hull's own rarity tier: +1
+// max HP (via `fusions.hp`, the same permanent slotless mechanic the
+// Foundry uses — stacks cleanly with any Foundry fusion bought later) and
+// +1 random upgrade (from HULL_BONUS_UPGRADE_POOL, without replacement),
+// PER rarity level above common (rare=1, epic=2, legendary=3; common
+// itself = 0, no bonus). A second-hand (store) purchase is always treated
+// as common regardless of the frame's real rarity — buying a Bastion
+// second-hand is cheap and plain; buying it from a shipyard is full price
+// but arrives already fused and upgraded.
+function hullRarityBonus(rarity: Rarity, rng: RngFn): { hp: number; upgrades: UpgradeId[] } {
+  const level = RARITY_ORDER.indexOf(rarity);
+  return { hp: level, upgrades: randomUpgradeIds(level, rng, HULL_BONUS_UPGRADE_POOL) };
 }
 
-// Credits earned for winning a combat node at the given column.
+// Credits earned for winning a combat node at the given (global) column.
+// `act` defaults to 1 since almost every call site is act-1 context
+// (act-2 callers pass `2` explicitly — see the CONTINUE case below).
 //
 // Iteration 22.6: base bumped 4->7. Simulation found the base pool
 // difficulty (mid-tier enemies re-tuned in 22.3, difficulty ramp de-stacked
@@ -304,18 +320,26 @@ export function secondHandDamage(frameId: Exclude<FrameId, 'cruiser'>): number {
 // column 6 than the old rate, which is the difference between the Flagship
 // reaching computer 2 by the mid pool or never reaching it at all (see
 // plans/iteration-22.md's status notes on the 0%-comp2-by-col6 finding).
-export function winReward(col: number): number {
-  return 7 + col;
+//
+// 2026-08-07: act 1 halved (floored) — a deliberate re-tightening of the
+// early game specifically, not a whole-run economy cut. Act 2 is
+// unaffected, which means the reward curve jumps sharply right at the act
+// boundary (global col 10 -> 11) — intentional, not a bug: the point is a
+// harder opening act, not a smoother ramp through it.
+export function winReward(col: number, act: 1 | 2 = 1): number {
+  const base = 7 + col;
+  return act === 1 ? Math.floor(base / 2) : base;
 }
 
-// Credits earned for winning an elite node at the given column. Iteration 35:
-// used to also grant a random reaction card (or +4cr if the hand was full)
-// on top of this — now a flat +4cr bonus every time (see the CONTINUE case).
-//
-// Iteration 22.6: base bumped 8->11, same reasoning as winReward above —
-// kept 3cr above it so an elite still reads as the bigger payout.
-export function eliteReward(col: number): number {
-  return 11 + col;
+// Credits earned for winning an elite node at the given (global) column.
+// Iteration 35: used to also grant a random reaction card (or +4cr if the
+// hand was full) on top of this — now a flat +4cr bonus every time (see
+// the CONTINUE case). Iteration 22.6: base bumped 8->11, same reasoning as
+// winReward above — kept 3cr above it so an elite still reads as the
+// bigger payout. 2026-08-07: act-1 halving, same as winReward.
+export function eliteReward(col: number, act: 1 | 2 = 1): number {
+  const base = 11 + col;
+  return act === 1 ? Math.floor(base / 2) : base;
 }
 
 function bossEnemyForAct(map: GameMap, act: 1 | 2): EnemyDef {
@@ -596,7 +620,9 @@ const RARITY_WEIGHTS: Record<Rarity, number> = {
 };
 // Ordered low -> high; index doubles as "distance from common" for the
 // fallback walk below.
-const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
+// Exported (iteration 39) so ShopScreen can preview a shipyard hull's
+// rarity-bonus level (hullRarityBonus below) without duplicating this list.
+export const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
 
 // Exported for a direct unit test of the tier-boundary math (same
 // discipline as applyCargoReward's export above) — the reducer-level
@@ -659,12 +685,13 @@ const SIGNATURE_DISCOUNT = 2;
 // stratified draw didn't already surface it — matched to the part's own
 // type so a guaranteed slot never distorts the offer's usual balance (one
 // weapon slot, one defense slot, etc. either way). Index into the fixed
-// 6-slot layout drawShopOffers builds below.
+// 8-slot layout drawShopOffers builds below (iteration 41: 3 weapon / 3
+// defense / 1 computer-drive / 1 active).
 const SIGNATURE_SLOT: Partial<Record<CommanderId, number>> = {
-  engineer: 5, // dcbay: hull + active -> the active slot
-  spymaster: 2, // cloak: shield -> the first defense slot
+  engineer: 7, // dcbay: hull + active -> the active slot
+  spymaster: 3, // cloak: shield -> the first defense slot
   warlord: 0, // siege: weapon -> the first weapon slot
-  admiral: 4, // uplink2: computer + active -> the computer/drive slot
+  admiral: 6, // uplink2: computer + active -> the computer/drive slot
 };
 
 // Iteration 28 (Munitions contracts): a flat -2cr on every part in every
@@ -684,11 +711,15 @@ export function partCost(partId: PartId, commanderId: CommanderId | undefined, p
 // below); with Armada mandate active, that insertion simply has nowhere to
 // land and is skipped — a deliberate, documented overlap between two
 // separate systems, not a bug.
+// Iteration 41: 8 slots — 3 weapon / 3 defense / 1 computer-drive / 1
+// active (was 2/2/1/1) — bumped alongside SHOP_OFFER_COUNT.
 function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: ProtocolId[]): PartId[] {
   const taken = new Set<PartId>();
   const offers = [
     drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
     drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
+    drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
+    drawRarityWeighted(DEFENSE_POOL, taken, rng) as PartId,
     drawRarityWeighted(DEFENSE_POOL, taken, rng) as PartId,
     drawRarityWeighted(DEFENSE_POOL, taken, rng) as PartId,
     drawRarityWeighted(COMPUTER_DRIVE_POOL, taken, rng) as PartId,
@@ -1343,7 +1374,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // reward for beating it, on top of these credits — a boss kill
         // used to be worth nothing more than a slightly bigger paycheck.
         const salvageRigsBonus = hasProtocol(state.protocols, 'salvage-rigs') ? 2 : 0;
-        const creditsEarned = eliteReward(globalCol) + salvageRigsBonus;
+        const creditsEarned = eliteReward(globalCol, state.act) + salvageRigsBonus;
         // Iteration 28 (Protocols): the act-1 boss's one-time augment draft
         // — drawn right here, the moment the boss is actually beaten (same
         // 9.1 discipline as a combat seed: a reload before the draft is
@@ -1380,7 +1411,10 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const columns = actColumns(state.map, state.act);
       const node = state.position ? getNode(columns, state.position) : undefined;
       const cargoTag: CargoTag | undefined = !isElite && !state.interceptionActive ? node?.cargo : undefined;
-      const baseReward = applyCargoReward(cargoTag, isElite ? eliteReward(globalCol) : winReward(globalCol));
+      const baseReward = applyCargoReward(
+        cargoTag,
+        isElite ? eliteReward(globalCol, state.act) : winReward(globalCol, state.act),
+      );
       // Iteration 35: an elite kill used to grant a random reaction card (or
       // +4cr if the hand was full); a command-ship cargo tag paid the same.
       // Now that cards are gone, both just pay flat credits — command stays
@@ -1388,10 +1422,28 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // mechanically identical to convoy's flat +4cr despite being rarer.
       const eliteOrCommandBonus = isElite ? 4 : cargoTag === 'command' ? 8 : 0;
 
+      // Iteration 41: tracked separately from `inventory` purely so the
+      // reward screen has something to point at — these parts arrive with
+      // no pick and no lost-ship tie, so they'd otherwise vanish into the
+      // inventory list unannounced.
+      const foundParts: PartId[] = [];
+
       // A wreck-field cargo tag also drops a random 5-credit-tier part
       // straight into inventory, on top of its (reduced) credit payout.
       if (cargoTag === 'wreck') {
-        inventory = [...inventory, randomWreckPart(rng)];
+        const wreckPart = randomWreckPart(rng);
+        inventory = [...inventory, wreckPart];
+        foundParts.push(wreckPart);
+      }
+
+      // Iteration 40 ("Captured schematic"): every elite kill also drops a
+      // weapon straight to inventory — no pick needed, unlike the upgrade
+      // options below. Currently always the one captured-plasma variant;
+      // more captured weapons can join CAPTURED_SCHEMATIC_PART_ID's pool
+      // later without touching this call site.
+      if (isElite) {
+        inventory = [...inventory, CAPTURED_SCHEMATIC_PART_ID];
+        foundParts.push(CAPTURED_SCHEMATIC_PART_ID);
       }
 
       // 'regen' heals damage after a win; 'salvage' pays extra credits per
@@ -1427,7 +1479,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const creditsEarned =
         baseReward + merchantBonus + eliteOrCommandBonus + salvageTotal + ambushBonusCredits + salvageRigsBonus;
       const credits = state.credits + creditsEarned;
-      const upgradeOptions = isElite ? randomUpgradeIds(3, rng) : undefined;
+      // Iteration 39: the elite pool trimmed to 2 entries (optics, salvage —
+      // the other seven moved to the hull-purchase rarity bonus). Offers
+      // exactly as many as the pool holds, so "pick one" never has to
+      // recycle into a forced duplicate.
+      const upgradeOptions = isElite ? randomUpgradeIds(ELITE_UPGRADE_POOL.length, rng, ELITE_UPGRADE_POOL) : undefined;
 
       // The Spymaster's free intelligence, drawn from the same rng stream so
       // the whole run stays reproducible from its seed.
@@ -1440,6 +1496,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         salvagedParts,
         lostShips,
         upgradeOptions,
+        foundParts: foundParts.length > 0 ? foundParts : undefined,
       };
 
       return withFlagshipRecoveryGate(state.fleet, {
@@ -1486,9 +1543,16 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           inventory = [...inventory, ...ship.equipped.filter(isSalvageablePart)];
           lostShips.push(playerShipLabel(state.fleet, i));
         } else {
+          // Iteration 39: regen now heals after ANY survived fight, not
+          // just a win — "regenerative plating" shouldn't care why the
+          // fight ended. The Engineer's flat bonus/merchant/salvage stay
+          // win-only (unchanged) — those are tied to the reward itself,
+          // not to the ship surviving.
+          const regenCount = ship.upgrades.filter((u) => u === 'regen').length;
+          const damage = Math.min(combatShip.damage, combatShip.stats.hp);
           survivingFleet.push({
             ...ship,
-            damage: Math.min(combatShip.damage, combatShip.stats.hp),
+            damage: regenCount > 0 ? Math.max(0, damage - regenCount) : damage,
             kills: (ship.kills ?? 0) + fightStats.kills[i],
             fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
           });
@@ -1561,7 +1625,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // elite-pool upgrade, no longer one option competing against a heal
       // or a flat credit bonus that used to make boss kills feel optional
       // to actually build around.
-      const upgradeId = randomUpgradeIds(1, rng)[0];
+      // Iteration 39: same trimmed elite pool as a normal elite kill above.
+      const upgradeId = randomUpgradeIds(1, rng, ELITE_UPGRADE_POOL)[0];
       const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, upgradeId, state.commanderId) : s));
       // Into act 2: a fresh sector — position/visited/fled/fog reset, the
       // boss dossier resets (a second reveal purchase awaits). Iteration
@@ -1726,10 +1791,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const cost = frameCost(frame.cost, action.frameId, state.commanderId, state.protocols, state.shopKind);
       if (state.credits < cost) return state;
       const commissioned = state.shipsCommissioned ?? state.fleet.length;
-      // 2026-08-07 (iteration 33): a store's hulls arrive second-hand —
-      // pre-damaged, per secondHandDamage above. A shipyard's arrive
-      // pristine (damage 0, as before).
-      const arrivalDamage = state.shopKind === 'store' ? secondHandDamage(action.frameId) : 0;
+      // Iteration 39: a store's hulls are always treated as common tier
+      // (no rarity bonus, no arrival damage either any more); a shipyard's
+      // arrive pristine AND fused/upgraded to match the frame's real
+      // rarity — see hullRarityBonus above.
+      const { rng, nextCounter } = runRng(state);
+      const bonus = hullRarityBonus(state.shopKind === 'shipyard' ? frame.rarity : 'common', rng);
       return {
         ...state,
         credits: state.credits - cost,
@@ -1738,14 +1805,16 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           {
             frameId: action.frameId,
             equipped: [...STARTING_FIT[action.frameId]],
-            damage: arrivalDamage,
-            upgrades: [],
+            damage: 0,
+            upgrades: bonus.upgrades,
+            fusions: bonus.hp > 0 ? { hp: bonus.hp } : undefined,
             name: shipName(state.map.seed, commissioned, action.frameId),
             kills: 0,
             fightsSurvived: 0,
           },
         ],
         shipsCommissioned: commissioned + 1,
+        rngCounter: nextCounter(),
         // 2026-08-06: one buy consumes that offer, same as BUY_PART splicing
         // shopOffers — each frame type is unique within a visit's draw
         // (drawFrameOffers), so filtering it out by id is equivalent to

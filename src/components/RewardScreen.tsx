@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { getPart } from '../game/parts';
 import { playerShipLabel } from '../game/ship';
 import type { PlayerShipState, RewardSummary } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
@@ -36,6 +37,12 @@ export function RewardScreen({ reward, fleet, onPickUpgrade, onLeave }: RewardSc
           <p className="warning">Lost: {reward.lostShips.join(', ')}</p>
           {reward.salvagedParts.length > 0 && <p className="hint">Salvaged: {reward.salvagedParts.join(', ')}</p>}
         </div>
+      )}
+
+      {reward.foundParts && reward.foundParts.length > 0 && (
+        <p className="hint reward-screen__found">
+          Found: {reward.foundParts.map((id) => getPart(id).name).join(', ')}
+        </p>
       )}
 
       {needsUpgradePick && reward.upgradeOptions && (

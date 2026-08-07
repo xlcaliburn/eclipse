@@ -1,5 +1,18 @@
 import type { Part, PartId } from './types';
 
+// Iteration 40 weapon repricing: the Ion cannon (1 cannon die, 1 damage,
+// 3cr) is the price anchor for every other weapon in the roster — 3cr per
+// point of total damage-per-activation for a cannon (so a plain 2-damage
+// cannon prices at 6cr, a plain 3-damage cannon at 9cr, a plain 4-damage
+// cannon at 12cr — landing rare/epic/legendary respectively, a clean fit
+// with the existing common(3-4)/rare(5-6)/epic(7-9)/legendary(12) price
+// bands from iteration 36's rarity system). Missiles anchor slightly
+// cheaper (they fire once, in the opening volley only, with no return
+// fire that phase — real less-flexibility, priced in). Utility (pierce,
+// AOE, always-hits-a-die-more, etc.) adds a premium above the raw-damage
+// price; a real drawback (the Rift cannon's self-damage) discounts below
+// it. See plans/iteration-40.md... actually no plan file for this one —
+// scoped and shipped directly per user direction, 2026-08-07.
 export const PARTS: Part[] = [
   {
     id: 'ion',
@@ -7,8 +20,20 @@ export const PARTS: Part[] = [
     type: 'weapon',
     rarity: 'common',
     description: '1 cannon die, 1 damage',
-    cost: 3,
+    cost: 3, // the price anchor — 3cr per point of cannon damage
     weapon: { kind: 'cannon', diceCount: 1, damage: 1 },
+  },
+  // Iteration 41: the common tier's first missile — the Missile rack (rare,
+  // 5cr) had no cheaper on-ramp below it. Priced under the missile discount
+  // same as every other missile, just at the 1-damage floor.
+  {
+    id: 'light-missile',
+    name: 'Light missile',
+    type: 'weapon',
+    rarity: 'common',
+    description: '1 missile die, 1 damage (fires once, before cannons)',
+    cost: 2,
+    weapon: { kind: 'missile', diceCount: 1, damage: 1 },
   },
   {
     id: 'plasma',
@@ -16,7 +41,7 @@ export const PARTS: Part[] = [
     type: 'weapon',
     rarity: 'rare',
     description: '1 cannon die, 2 damage',
-    cost: 5,
+    cost: 6, // 2 dmg x 3cr/dmg (was 5cr)
     weapon: { kind: 'cannon', diceCount: 1, damage: 2 },
   },
   {
@@ -25,7 +50,7 @@ export const PARTS: Part[] = [
     type: 'weapon',
     rarity: 'rare',
     description: '2 missile dice, 1 damage each (fires once, before cannons)',
-    cost: 5,
+    cost: 5, // missile discount off the 2-dmg cannon-equivalent price (6cr)
     weapon: { kind: 'missile', diceCount: 2, damage: 1 },
   },
   {
@@ -126,13 +151,19 @@ export const PARTS: Part[] = [
   },
 
   // --- Exotic weapons + taunt (iteration 5) ---
+  // Iteration 40: promoted to legendary — 4 dmg x 3cr/dmg = 12cr lands
+  // exactly on the legendary price floor already set by shieldharmonic, no
+  // fudging needed. Used to sit at epic next to the Siege cannon, where it
+  // was a strictly better pick (same price, more raw damage, no drawback
+  // and no restriction) — pulling it up a tier resolves that outright
+  // rather than nerfing its damage to compensate.
   {
     id: 'antimatter',
     name: 'Antimatter cannon',
     type: 'weapon',
-    rarity: 'epic',
+    rarity: 'legendary',
     description: '1 cannon die, 4 damage',
-    cost: 7,
+    cost: 12,
     weapon: { kind: 'cannon', diceCount: 1, damage: 4 },
   },
   {
@@ -141,7 +172,7 @@ export const PARTS: Part[] = [
     type: 'weapon',
     rarity: 'rare',
     description: '1 cannon die, 3 damage. Natural 1 backfires: 1 damage to this ship instead of missing.',
-    cost: 5,
+    cost: 6, // 3 dmg would price at 9cr plain; -3cr for the real self-damage risk
     weapon: { kind: 'cannon', diceCount: 1, damage: 3, selfDamageOnNatOne: 1 },
   },
   {
@@ -177,18 +208,18 @@ export const PARTS: Part[] = [
     id: 'lance',
     name: 'Gauss lance',
     type: 'weapon',
-    rarity: 'rare',
+    rarity: 'epic',
     description: '1 cannon die, 2 damage, ignores 2 points of enemy piloting',
-    cost: 6,
+    cost: 7, // 2 dmg (6cr) + a real pierce-2 premium — bumped to epic (was rare, 6cr)
     weapon: { kind: 'cannon', diceCount: 1, damage: 2, shieldPierce: 2 },
   },
   {
     id: 'torpedo',
     name: 'Heavy torpedo',
     type: 'weapon',
-    rarity: 'rare',
+    rarity: 'epic',
     description: '1 missile die, 3 damage (fires once, before cannons)',
-    cost: 5,
+    cost: 7, // 3 dmg cannon-equivalent (9cr) minus the missile discount — bumped to epic (was rare, 5cr)
     weapon: { kind: 'missile', diceCount: 1, damage: 3 },
   },
   {
@@ -197,17 +228,23 @@ export const PARTS: Part[] = [
     type: 'weapon',
     rarity: 'rare',
     description: '1 cannon die; on hit, deals 1 damage to every enemy ship',
-    cost: 6,
+    cost: 6, // 1 dmg base (3cr) + a flat AOE premium
     weapon: { kind: 'cannon', diceCount: 1, damage: 0, aoeDamage: 1 },
   },
+  // Iteration 40: "always targets the highest-HP enemy" read as a
+  // restriction, not a benefit, once it was sitting next to a strictly
+  // stronger, unrestricted Antimatter cannon at the same price — dropped
+  // entirely. Now a plain 3-damage cannon (9cr, matching the raw-damage
+  // formula exactly) and the new top of the epic tier, since Antimatter
+  // moved up to legendary.
   {
     id: 'siege',
     name: 'Siege cannon',
     type: 'weapon',
     rarity: 'epic',
-    description: '1 cannon die, 3 damage, always targets the highest-HP enemy',
-    cost: 7,
-    weapon: { kind: 'cannon', diceCount: 1, damage: 3, targetHighest: true },
+    description: '1 cannon die, 3 damage',
+    cost: 9,
+    weapon: { kind: 'cannon', diceCount: 1, damage: 3 },
   },
   {
     id: 'battery',
@@ -215,7 +252,7 @@ export const PARTS: Part[] = [
     type: 'weapon',
     rarity: 'rare',
     description: '2 cannon dice, 1 damage each',
-    cost: 5,
+    cost: 6, // 2 dmg total x 3cr/dmg (was 5cr)
     weapon: { kind: 'cannon', diceCount: 2, damage: 1 },
   },
   {
@@ -262,14 +299,21 @@ export const PARTS: Part[] = [
 
   // --- Active parts (iteration 7): a passive line, plus a once-per-combat
   // activated ability triggered between rounds (same window as cards). ---
+  // Iteration 41: redesigned — "all your ships fire first" was a flashy
+  // first taste of an active part (see STARTING_LOADOUT's note below for
+  // the original reasoning) but read as a confusing tutorial-moment ability
+  // on the starting ship. Repairing HP is immediately legible instead: you
+  // click it, the number goes down. Weaker than dcbay's repair-2 (hence
+  // rare, not epic, and priced under it) — dcbay stays the bigger,
+  // signature-tier version of the same idea.
   {
     id: 'injector',
     name: 'Overdrive injector',
     type: 'drive',
-    rarity: 'epic',
-    description: '+1 initiative. Active (1/combat): this round, all your ships fire first.',
-    cost: 7,
-    initiative: 1,
+    rarity: 'rare',
+    description: '+1 HP. Active (1/combat): repair 1 HP on this ship immediately.',
+    cost: 5,
+    hull: 1,
     active: true,
   },
   {
@@ -456,8 +500,29 @@ const ANCIENT_ARTIFACT_PART: Part = {
   shield: 4,
 };
 
+// Iteration 40 ("Captured schematic"): an elite-kill-exclusive weapon —
+// "essentially a slightly stronger rare tier weapon" than anything sold in
+// a shop, since it's loot, not a purchase. A modified Plasma cannon that
+// deals 3 damage instead of 2, with none of the Rift cannon's self-damage
+// risk — priced at the Rift's 6cr for sell-value purposes only (it's never
+// actually offered for sale; see CAPTURED_SCHEMATIC_PART_ID's use in
+// reducer.ts's CONTINUE case, granted straight to inventory on every elite
+// kill). Kept out of `PARTS` for the same reason as the commodity lot and
+// Ancient artifact above.
+export const CAPTURED_SCHEMATIC_PART_ID: PartId = 'captured-plasma';
+
+const CAPTURED_SCHEMATIC_PART: Part = {
+  id: CAPTURED_SCHEMATIC_PART_ID,
+  name: 'Captured plasma cannon',
+  type: 'weapon',
+  rarity: 'rare',
+  description: '1 cannon die, 3 damage. A modified plasma cannon salvaged from an elite kill — never sold.',
+  cost: 6,
+  weapon: { kind: 'cannon', diceCount: 1, damage: 3 },
+};
+
 const PARTS_BY_ID: Record<PartId, Part> = Object.fromEntries(
-  [...PARTS, COMMODITY_LOT_PART, ANCIENT_ARTIFACT_PART].map((p) => [p.id, p]),
+  [...PARTS, COMMODITY_LOT_PART, ANCIENT_ARTIFACT_PART, CAPTURED_SCHEMATIC_PART].map((p) => [p.id, p]),
 );
 
 export function getPart(id: PartId): Part {
@@ -471,13 +536,12 @@ export function getPart(id: PartId): Part {
 // Iteration 35: gained the Overdrive injector as a 5th part (the Flagship
 // has 6 slots, only 4 spoken for) — compensation for the reaction-card
 // system's removal. Injector, not one of the roster's other unclaimed
-// actives (override, thrusters, modulator): "all your ships fire first
-// this round" is the flashiest first taste of what an active part does,
-// and it reinforces the initiative/Outspeed lesson the tutorial already
-// teaches, instead of introducing an unrelated mechanic cold. The other
-// active parts are left alone deliberately — several are commander/
-// support-hull signature parts (uplink2, dcbay, chaff, tacrelay,
-// repairbay, ecm, disruptor), and handing one out for free to everyone
-// would blunt exactly the thing that makes drafting that commander or
-// hull feel distinct.
+// actives (override, thrusters, modulator): it's the one active whose
+// effect a first-time player can read on sight (iteration 41: now a self-
+// heal, previously "fire first this round" — both are immediately legible
+// without decoding a round-modifier). The other active parts are left
+// alone deliberately — several are commander/support-hull signature parts
+// (uplink2, dcbay, chaff, tacrelay, repairbay, ecm, disruptor), and handing
+// one out for free to everyone would blunt exactly the thing that makes
+// drafting that commander or hull feel distinct.
 export const STARTING_LOADOUT: PartId[] = ['ion', 'ion', 'comp1', 'hull1', 'injector'];

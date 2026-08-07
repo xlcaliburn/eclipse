@@ -32,8 +32,8 @@ import { PROTOCOLS } from '../game/protocols';
 import type { ProtocolDef } from '../game/protocols';
 import { fusionCost } from '../game/ship';
 import type { FusionStat } from '../game/ship';
-import { UPGRADES } from '../game/upgrades';
-import type { EnemyDef, Part, PlayerShipState, WeaponStats } from '../game/types';
+import { ELITE_UPGRADE_POOL, getUpgrade, HULL_BONUS_UPGRADE_POOL } from '../game/upgrades';
+import type { EnemyDef, Part, PlayerShipState, Rarity, WeaponStats } from '../game/types';
 // Reused straight from the game's own presentation layer — same code-
 // authored inline-SVG ship/enemy art and commander crests the game itself
 // renders, so the wiki never needs its own art asset pipeline or drifts
@@ -141,7 +141,17 @@ function TableWrap({ children }: { children: React.ReactNode }) {
   return <div className="wiki-table-wrap">{children}</div>;
 }
 
+// Iteration 39: every rarity-bearing table on the page sorts ascending by
+// this order (common -> legendary) — a player scanning for "what's the good
+// stuff" reads top-to-bottom the same way everywhere.
+const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
+
+function byRarity<T extends { rarity: Rarity }>(items: T[]): T[] {
+  return [...items].sort((a, b) => RARITY_ORDER.indexOf(a.rarity) - RARITY_ORDER.indexOf(b.rarity));
+}
+
 function PartsTable({ parts }: { parts: Part[] }) {
+  const sorted = byRarity(parts);
   return (
     <TableWrap>
       <table className="wiki-table">
@@ -154,7 +164,7 @@ function PartsTable({ parts }: { parts: Part[] }) {
           </tr>
         </thead>
         <tbody>
-          {parts.map((p) => (
+          {sorted.map((p) => (
             <tr key={p.id}>
               <td>
                 {p.name}
@@ -283,8 +293,7 @@ export function Wiki() {
             </li>
             <li>
               <strong>Enemy targeting:</strong> enemies always shoot your lowest-remaining-HP ship. Taunt (Lure
-              beacon) overrides everything; cloaked ships can't be targeted while a non-cloaked ally lives; siege
-              weapons target the highest-HP ship instead.
+              beacon) overrides everything; cloaked ships can't be targeted while a non-cloaked ally lives.
             </li>
             <li>
               <strong>Fleet cap:</strong> {MAX_FLEET_SIZE} ships. Your starting Flagship is the only hull that can
@@ -324,8 +333,8 @@ export function Wiki() {
                 </tr>
               </thead>
               <tbody>
-                {(['cruiser', ...PURCHASABLE_FRAME_IDS] as const).map((id) => {
-                  const f = FRAMES[id];
+                {[FRAMES.cruiser, ...byRarity(PURCHASABLE_FRAME_IDS.map((id) => FRAMES[id]))].map((f) => {
+                  const id = f.id;
                   return (
                     <tr key={f.id}>
                       <td className="wiki-hull-name">
@@ -355,20 +364,47 @@ export function Wiki() {
         </section>
   
         <section id="upgrades">
-          <h2>Upgrades — elite &amp; boss rewards</h2>
+          <h2>Upgrades</h2>
           <p className="wiki-note">
-            Slotless and permanent, attached to one ship. Lost only if that ship is destroyed. Drafted 1-of-3
-            without duplicates.
+            Slotless and permanent, attached to one ship. Lost only if that ship is destroyed. Iteration 39 split
+            the pool in two: elites/the act-1 boss draw from a small pool; a shipyard hull purchase grants the rest,
+            scaled to the hull's own rarity.
+          </p>
+          <h3>Elite &amp; boss rewards</h3>
+          <p className="wiki-note">Drafted 1-of-{ELITE_UPGRADE_POOL.length} without duplicates.</p>
+          <TableWrap>
+            <table className="wiki-table">
+              <tbody>
+                {ELITE_UPGRADE_POOL.map((id) => {
+                  const u = getUpgrade(id);
+                  return (
+                    <tr key={u.id}>
+                      <td>{u.name}</td>
+                      <td>{u.description}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableWrap>
+          <h3>Hull purchase bonuses</h3>
+          <p className="wiki-note">
+            A shipyard (pristine) hull purchase grants +1 max HP and 1 random upgrade below, without duplicates,
+            per rarity level above common (rare = 1, epic = 2, legendary = 3). A store (second-hand) purchase is
+            always treated as common — cheaper, but no bonus.
           </p>
           <TableWrap>
             <table className="wiki-table">
               <tbody>
-                {UPGRADES.map((u) => (
-                  <tr key={u.id}>
-                    <td>{u.name}</td>
-                    <td>{u.description}</td>
-                  </tr>
-                ))}
+                {HULL_BONUS_UPGRADE_POOL.map((id) => {
+                  const u = getUpgrade(id);
+                  return (
+                    <tr key={u.id}>
+                      <td>{u.name}</td>
+                      <td>{u.description}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </TableWrap>

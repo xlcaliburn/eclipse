@@ -65,16 +65,19 @@ export const FRAMES: Record<FrameId, Frame> = {
   // (see STARTING_FIT in reducer.ts), so the bundle is gone, but a 6-HP
   // wall is still the roster's best durability base and doesn't refund
   // the part's full value.
+  // Iteration 41: 9 -> 12cr — every purchasable hull now arrives with at
+  // least one weapon (an empty "durable protector" that can't fight back
+  // read wrong), bumped by the Ion cannon's own 3cr price.
   bastion: {
     id: 'bastion',
     name: 'Bastion',
     slots: 3,
     baseInitiative: 0,
     baseHp: 6,
-    cost: 9,
+    cost: 12,
     rarity: 'rare',
     maxWeapons: 1,
-    blurb: 'Durable protector. 3 slots, at most 1 weapon — pair it with a lure beacon to lean into the role.',
+    blurb: 'Durable protector. 3 slots, at most 1 weapon. Arrives fitted with an ion cannon.',
   },
   // 2026-08-06: repriced as the top of a deliberate 3-step progression —
   // "interceptors, then something more midrange, then finally Dreadnoughts
@@ -112,41 +115,45 @@ export const FRAMES: Record<FrameId, Frame> = {
   // underpricing this pass corrects — still cheaper than the Cruiser (its
   // ceiling is genuinely lower: a cargo hull leaning into utility slots,
   // not raw combat), but no longer a strictly-better slot count for less.
+  // Iteration 41: 15 -> 18cr, an Ion cannon bundled in (see Bastion's note).
   freighter: {
     id: 'freighter',
     name: 'Freighter',
     slots: 5,
     baseInitiative: 0,
     baseHp: 3,
-    cost: 15,
+    cost: 18,
     rarity: 'rare',
     maxWeapons: 2,
-    blurb: 'Built for freight, not fighting. 5 slots, at most 2 weapons.',
+    blurb: 'Built for freight, not fighting. 5 slots, at most 2 weapons. Arrives fitted with an ion cannon.',
   },
+  // Iteration 41: 3 -> 4cr, arrives with a Light missile — even the
+  // cheapest hull in the yard can throw one punch.
   derelict: {
     id: 'derelict',
     name: 'Derelict',
     slots: 2,
     baseInitiative: 0,
     baseHp: 2,
-    cost: 3,
+    cost: 4,
     rarity: 'common',
-    blurb: 'Barely flight-worthy. 2 slots, the weakest hull in the yard — you get what you pay for.',
+    blurb: 'Barely flight-worthy. 2 slots, the weakest hull in the yard. Arrives fitted with a light missile.',
   },
 
   // Iteration 36: replaces the five retired support hulls below as the
   // roster's one cheap utility carrier — the natural home for an aura or
   // active part now that those parts are player-assembled, not bundled.
+  // Iteration 41: 6 -> 8cr, a Light missile bundled in.
   corvette: {
     id: 'corvette',
     name: 'Corvette',
     slots: 3,
     baseInitiative: 1,
     baseHp: 2,
-    cost: 6,
+    cost: 8,
     rarity: 'common',
     maxWeapons: 1,
-    blurb: 'A cheap, thin utility hull. 3 slots, at most 1 weapon — fit it with whatever the fleet needs.',
+    blurb: 'A cheap, thin utility hull. 3 slots, at most 1 weapon. Arrives fitted with a light missile.',
   },
 
   // --- Legacy support hulls (iteration 23, retired iteration 36) ---------

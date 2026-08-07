@@ -43,6 +43,10 @@ export function deriveStats(
 
   const twinLinked = hasProtocol(protocols, 'twin-linked-mounts');
   let twinLinkedApplied = false;
+  // Iteration 40 (Overcharged rounds): every CANNON die fleet-wide gets the
+  // 7-face treatment — missiles are untouched, they already have their own
+  // "fires once, no return fire" identity and don't need a second knob.
+  const overchargedRounds = hasProtocol(protocols, 'overcharged-rounds');
 
   for (const id of equippedPartIds) {
     const part = getPart(id);
@@ -72,6 +76,7 @@ export function deriveStats(
         shieldPierce: part.weapon.shieldPierce,
         aoeDamage: part.weapon.aoeDamage,
         targetHighest: part.weapon.targetHighest,
+        overcharge: part.weapon.overcharge || (overchargedRounds && part.weapon.kind === 'cannon'),
       };
       if (part.weapon.kind === 'cannon') stats.cannons.push(entry);
       else stats.missiles.push(entry);

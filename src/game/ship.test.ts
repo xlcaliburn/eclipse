@@ -174,6 +174,16 @@ describe('protocols — stat and build hooks', () => {
     expect(stats.missiles).toHaveLength(0);
   });
 
+  // Iteration 40 (Overcharged rounds): cannons only — missiles keep their
+  // own "fires once" identity untouched.
+  it('Overcharged rounds marks every cannon overcharged and leaves missiles alone', () => {
+    const stats = deriveStats('cruiser', ['ion', 'plasma', 'missile'], [], ['overcharged-rounds']);
+    expect(stats.cannons.every((c) => c.overcharge)).toBe(true);
+    expect(stats.missiles.every((m) => !m.overcharge)).toBe(true);
+    const plain = deriveStats('cruiser', ['ion']);
+    expect(plain.cannons[0].overcharge).toBeFalsy();
+  });
+
   it('Bastion doctrine adds +1 shield to a taunting ship, and nothing to a non-taunting one', () => {
     const taunter = deriveStats('bastion', ['lure'], [], ['bastion-doctrine']);
     const taunterPlain = deriveStats('bastion', ['lure']);

@@ -340,7 +340,11 @@ function fireShip(
         0,
         baseShield - (ship.stats.shieldPierce ?? 0) - (weapon.shieldPierce ?? 0),
       );
-      const raw = rollD6(rng);
+      // Overcharged rounds (iteration 40): this weapon's die has a 7th
+      // face — a natural 7 always hits, same as 6 normally would, and (see
+      // below, once hit is resolved) deals +1 bonus damage on top.
+      const dieFaces = weapon.overcharge ? 7 : 6;
+      const raw = rollD6(rng, dieFaces);
 
       // Rift cannon: a natural 1 doesn't miss — it backfires on the firing
       // ship instead (direct damage, ignores shields, not a "hit" for
@@ -378,16 +382,21 @@ function fireShip(
       const chaffActive = target.side === 'player' && roundModifiers.chaffShipIndices.includes(target.index);
 
       let finalRaw = raw;
-      let hit = resolveHit(raw, attackerComputer, effectiveShield, chaffActive);
+      let hit = resolveHit(raw, attackerComputer, effectiveShield, chaffActive, dieFaces);
 
       // Fire-control override: this ship rerolls each missed die once.
       if (!hit && ship.side === 'player' && roundModifiers.overrideShipIndices.includes(ship.index)) {
-        const rerollRaw = rollD6(rng);
-        const rerollHit = resolveHit(rerollRaw, attackerComputer, effectiveShield, chaffActive);
+        const rerollRaw = rollD6(rng, dieFaces);
+        const rerollHit = resolveHit(rerollRaw, attackerComputer, effectiveShield, chaffActive, dieFaces);
         log.push({ kind: 'part-effect', text: `Fire-control override rerolls the miss — rolls ${rerollRaw}.` });
         finalRaw = rerollRaw;
         hit = rerollHit;
       }
+
+      // Overcharged rounds: the bonus damage a natural 7 deals, folded in
+      // wherever this weapon's damage is actually applied below (the normal
+      // single-target path and the AOE path both read this).
+      const overchargeBonus = weapon.overcharge && finalRaw === dieFaces && dieFaces === 7 ? 1 : 0;
 
       // Arc projector: a hit doesn't damage the picked target directly — it
       // blasts every alive enemy ship for a flat amount, one roll deciding
@@ -407,11 +416,12 @@ function fireShip(
           damage: 0,
         });
         if (hit) {
-          log.push({ kind: 'part-effect', text: `Arc projector deals ${weapon.aoeDamage} damage to every enemy ship.` });
+          const aoeDamage = weapon.aoeDamage + overchargeBonus;
+          log.push({ kind: 'part-effect', text: `Arc projector deals ${aoeDamage} damage to every enemy ship.` });
           let anyDestroyed = false;
           for (const opp of opponentsOf(ship)) {
             if (!isAlive(opp)) continue;
-            opp.damage += weapon.aoeDamage;
+            opp.damage += aoeDamage;
             if (!isAlive(opp)) {
               log.push({ kind: 'destroyed', side: opp.side, shipIndex: opp.index });
               anyDestroyed = true;
@@ -438,7 +448,7 @@ function fireShip(
         log.push({ kind: 'part-effect', text: 'Interceptor jinks aside — dodges the first hit of the fight.' });
       }
 
-      let damage = hit ? weapon.damage : 0;
+      let damage = hit ? weapon.damage + overchargeBonus : 0;
       let reactiveSaved = false;
       let ablativeAbsorbed = 0;
 
@@ -868,13 +878,14 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
   const armed = (text: string): CombatEvent[] => [...state.log, { kind: 'part-effect', text }];
 
   switch (abilityId) {
-    case 'injector':
-      return {
-        ...state,
-        usedActives,
-        log: armed('Overdrive injector armed — your ships fire first this round.'),
-        roundModifiers: { ...state.roundModifiers, initiativeBonus: state.roundModifiers.initiativeBonus + 99 },
-      };
+    // Iteration 41: redesigned from a round-modifier ("fire first this
+    // round") to an immediate self-heal — same shape as dcbay just below,
+    // at half the repair (rare vs. epic, priced accordingly).
+    case 'injector': {
+      const playerShips = cloneShips(state.playerShips);
+      playerShips[shipIndex].damage = Math.max(0, playerShips[shipIndex].damage - 1);
+      return { ...state, usedActives, playerShips, log: armed('Overdrive injector repairs 1 damage.') };
+    }
     case 'uplink2':
       return {
         ...state,

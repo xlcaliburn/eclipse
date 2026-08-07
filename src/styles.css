@@ -130,6 +130,7 @@ h1, h2, h3 {
    callback there and this never renders. Replaced the old "Motion: on"
    text button, which spent permanent HUD space on a preference set once. */
 .hud-bar__settings-button {
+  display: inline-block;
   margin-right: 4px;
   font-size: 13px;
   line-height: 1;
@@ -139,6 +140,7 @@ h1, h2, h3 {
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .hud-bar__settings-button:hover {
@@ -314,6 +316,17 @@ h1, h2, h3 {
   color: var(--text-dim);
 }
 
+/* The one settings row (TutorialSetting) that's a checkbox instead of a
+   right-side toggle button — label and box sit inline, same row shape
+   otherwise. */
+.settings-row__checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: inherit;
+}
+
 /* Seed sharing (iteration 26) — the copyable code itself, set apart from
    the hint text above it. */
 .settings-row__seed-code {
@@ -344,23 +357,17 @@ h1, h2, h3 {
   border-color: var(--border);
 }
 
-/* Tutorial overlay (iteration 25) — read-only rows, same left-aligned
-   label+hint shape as .settings-row but no toggle. */
-.tutorial-overlay {
-  max-width: 560px;
-}
-
-/* Onboarding popups (iteration 29) — the same overlay, one topic at a
-   time, so a shorter max-width reads as a focused prompt rather than a
-   mostly-empty reference panel. */
-.onboarding-popup {
-  max-width: 420px;
-}
+/* Tutorial overlay / onboarding popup (iterations 25, 29): both render
+   .tutorial-row/.tutorial-row__label rows below — the panel sizing itself
+   comes from .modal-backdrop--tutorial .modal-panel (iteration 38's small
+   floating-card redesign), so .tutorial-overlay/.onboarding-popup carry no
+   rules of their own any more; kept as classNames in the markup only as
+   hooks for anything future that needs to target one specifically. */
 
 .tutorial-body {
-  max-height: 60vh;
+  max-height: 50vh;
   overflow-y: auto;
-  margin: 4px 0 12px;
+  margin: 4px 0 8px;
 }
 
 .tutorial-row {
@@ -1230,25 +1237,44 @@ h1, h2, h3 {
   z-index: 50;
 }
 
-/* Iteration 35: both the tutorial and the first-run onboarding popups can
-   open mid-combat, and the default modal-backdrop centers/top-anchors its
-   panel — square over the fleet cards a mobile player is most likely
-   checking the explanation against. Bottom-anchored here instead, so the
-   fight stays visible above the panel rather than under it. Desktop is
-   wide enough that the panel already sits beside the fight, not over it,
-   so this is mobile-only. Deliberately placed AFTER the base .modal-backdrop
-   rule above, not before it (see the .combat-ship__incoming precedent) —
-   same specificity (both single-class selectors), so source order decides
-   the winner regardless of which media query matches; earlier would have
-   silently lost. */
+/* Iteration 38: both the tutorial and the first-run onboarding popups can
+   open mid-combat — they must never darken the screen or sit over the
+   fight the player is mid-decision on. Overridden to a small floating
+   card instead of a modal: the backdrop itself goes transparent and
+   click-through (pointer-events: none), so the fight underneath stays
+   fully visible AND interactive; only the card (pointer-events: auto) is
+   live. Corner-anchored and capped to a narrow max-width so even with the
+   card open, it can only ever cover a small corner, never the play area.
+   Deliberately placed AFTER the base .modal-backdrop rule above, not
+   before it (a mobile override placed before an equal-specificity base
+   rule loses the cascade regardless of which media query matches) — same
+   specificity (both single-class selectors), so source order decides the
+   winner. */
+.modal-backdrop--tutorial {
+  background: transparent;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 16px;
+  pointer-events: none;
+}
+
+.modal-backdrop--tutorial .modal-panel {
+  pointer-events: auto;
+  max-width: 280px;
+  max-height: 70vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+
 @media (max-width: 720px) {
   .modal-backdrop--tutorial {
-    align-items: flex-end;
-    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    justify-content: center;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
   }
 
-  .modal-backdrop--tutorial .tutorial-body {
-    max-height: 42vh;
+  .modal-backdrop--tutorial .modal-panel {
+    max-width: 100%;
+    max-height: 40vh;
   }
 }
 
@@ -1813,6 +1839,12 @@ h1, h2, h3 {
 .part-card__desc {
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/* Iteration 41: a weapon offer's dice, at a glance. */
+.part-card__dice {
+  display: flex;
+  gap: 3px;
 }
 
 .part-card--weapon {
@@ -2602,6 +2634,33 @@ h1, h2, h3 {
 
 .frame-card__name {
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Iteration 41: an explicit rarity word next to the name — the color-tint
+   border alone (below) reads as decoration, not information, until you
+   already know the code. Shipyard-only: a store hull is always common
+   (no bonus), so the label would just be noise there. */
+.frame-card__rarity-label {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 400;
+}
+.frame-card__rarity-label--common {
+  color: var(--rarity-common);
+}
+.frame-card__rarity-label--rare {
+  color: var(--rarity-rare);
+}
+.frame-card__rarity-label--epic {
+  color: var(--rarity-epic);
+}
+.frame-card__rarity-label--legendary {
+  color: var(--rarity-legendary);
 }
 
 /* Iteration 36 (rarity) — same accent-bar-plus-name-color treatment as
@@ -2643,6 +2702,31 @@ h1, h2, h3 {
 .frame-card__desc {
   font-size: 12px;
   color: var(--text-dim);
+}
+
+/* Iteration 41: what the hull actually arrives fitted with, previewed
+   before purchase — a die icon on any weapon part, plain name otherwise. */
+.frame-card__fit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.frame-card__fit-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.frame-card__bonus {
+  font-size: 11px;
+  color: var(--accent);
 }
 
 .frame-card__cost,
@@ -3253,35 +3337,6 @@ h1, h2, h3 {
 
 :root[data-motion='reduced'] .threat-line {
   animation: none;
-}
-
-/* The per-card incoming-fire chip, between rounds only. */
-.combat-ship__incoming {
-  display: inline-block;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--warning);
-  border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
-  border-radius: 3px;
-  padding: 0 6px;
-  margin-top: 2px;
-  white-space: nowrap;
-}
-
-/* Mobile: this was nowrap with no width limit — at the phone-width
-   side-by-side two-column card layout (see the shared ≤640px combat-card
-   rules above), that forced the chip past its card's edge instead of
-   wrapping, overlapping neighboring cards. Deliberately placed AFTER the
-   base rule above, not inside that earlier shared block: same class,
-   equal specificity, so source order decides the winner regardless of
-   which one's media query matches — earlier would have silently lost. */
-@media (max-width: 640px) {
-  .combat-ship__incoming {
-    font-size: 8px;
-    white-space: normal;
-    max-width: 100%;
-    padding: 0 4px;
-  }
 }
 
 .enemy-panel__volley strong {

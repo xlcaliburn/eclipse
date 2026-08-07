@@ -60,6 +60,21 @@ export function HudBar({ credits, heat, commanderId, daily, onViewMap, onOpenSet
           <span className="hud-bar__commander-name">{commander.name}</span>
         </span>
       )}
+      {/* The player wiki (a second Vite page, wiki.html) — a real navigation,
+          not a modal, so it opens in a new tab rather than losing the run's
+          screen. Always shown once the HUD bar itself is (no optional-prop
+          gating like the other buttons — there's no phase where looking up
+          a part/enemy's numbers wouldn't make sense). */}
+      <a
+        href="./wiki.html"
+        target="_blank"
+        rel="noopener"
+        className="hud-bar__settings-button"
+        title="Player wiki"
+        aria-label="Player wiki"
+      >
+        📖
+      </a>
       {onOpenTutorial && (
         <button
           type="button"

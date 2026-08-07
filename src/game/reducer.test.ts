@@ -5,13 +5,14 @@ import { getCounterProtocol } from './counterProtocols';
 import type { CounterProtocolId } from './counterProtocols';
 import { GAUNTLET, OPENER } from './enemies';
 import { getFrame, PURCHASABLE_FRAME_IDS } from './frames';
+import type { FrameId } from './frames';
 import { MAX_HEAT } from './heat';
 import { bossColumn, laneColumns } from './map';
 import { getProtocol } from './protocols';
 import type { CargoTag, GameMap, MapPosition, NodeType } from './map';
-import { getPart } from './parts';
+import { CAPTURED_SCHEMATIC_PART_ID, getPart } from './parts';
 import { deriveStats, fusionCost } from './ship';
-import { getUpgrade } from './upgrades';
+import { getUpgrade, HULL_BONUS_UPGRADE_POOL } from './upgrades';
 import {
   applyCargoReward,
   eliteReward,
@@ -23,7 +24,6 @@ import {
   partCost,
   rollRarity,
   runReducer,
-  secondHandDamage,
   SHIPYARD_UPGRADE_COST,
   SHOP_OFFER_COUNT,
   winReward,
@@ -409,16 +409,17 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
     expect(state.credits).toBe(20 - 6); // interceptor cost (6 as of iteration 5)
   });
 
-  // Iteration 36: hulls stopped bundling an identity part — Bastion now
-  // arrives blank (any hull can carry a lure beacon, it's just a part) and
-  // reprices 12 -> 9cr since it no longer includes one.
-  it('adds a Bastion to the fleet, no starting fit (iteration 36: identity moved to parts)', () => {
+  // Iteration 36: hulls stopped bundling an identity part — Bastion arrives
+  // blank of the lure beacon (any hull can carry one now, it's just a
+  // part). Iteration 41: every hull arrives with SOME weapon though — an
+  // Ion cannon here — and Bastion's price (12cr) reflects that.
+  it('adds a Bastion to the fleet, fitted with an ion cannon (iteration 41)', () => {
     let state = stateWithMap('shop', { phase: 'shop', credits: 20, shopFrameOffers: ['bastion'] });
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'bastion' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1].frameId).toBe('bastion');
-    expect(state.fleet[1].equipped).toEqual([]);
-    expect(state.credits).toBe(20 - 9); // bastion cost (repriced iteration 36)
+    expect(state.fleet[1].equipped).toEqual(['ion']);
+    expect(state.credits).toBe(20 - 12); // bastion cost (repriced iteration 41)
   });
 
   it('refuses when the fleet is already at the cap', () => {
@@ -476,15 +477,15 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
   // Iteration 36: the five support hulls (iteration 23) are retired from
   // the shop — their bundled signature part is now just an ordinary part
   // any hull can carry. The Corvette replaces them as the one cheap
-  // utility carrier, and arrives with no starting fit (a blank slate, like
-  // the Freighter/Derelict).
-  it('the Corvette (iteration 36) arrives with no starting fit, and the five retired support hulls are gone from the shop pool', () => {
+  // utility carrier. Iteration 41: it arrives with a Light missile (every
+  // purchasable hull now has some starting weapon) and repriced accordingly.
+  it('the Corvette (iteration 41) arrives fitted with a light missile, and the five retired support hulls are gone from the shop pool', () => {
     let state = stateWithMap('shop', { phase: 'shop', credits: 20, shopFrameOffers: ['corvette'] });
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'corvette' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1].frameId).toBe('corvette');
-    expect(state.fleet[1].equipped).toEqual([]);
-    expect(state.credits).toBe(20 - 6); // corvette cost
+    expect(state.fleet[1].equipped).toEqual(['light-missile']);
+    expect(state.credits).toBe(20 - 8); // corvette cost (repriced iteration 41)
 
     for (const frameId of ['frigate', 'aegis', 'tender', 'ew-cutter', 'disruptor-cutter'] as const) {
       expect(PURCHASABLE_FRAME_IDS).not.toContain(frameId);
@@ -505,7 +506,7 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
   it('the Admiral buys every frame 25% cheaper, rounded down in the player\'s favor', () => {
     const cases: ['interceptor' | 'bastion' | 'dreadnought' | 'light-cruiser', number][] = [
       ['interceptor', 4], // 6cr -> floor(4.5) = 4
-      ['bastion', 6], // 9cr (iteration 36 repricing) -> floor(6.75) = 6
+      ['bastion', 9], // 12cr (iteration 41 repricing) -> floor(9) = 9
       ['dreadnought', 22], // 30cr (2026-08-06 repricing) -> floor(22.5) = 22
       ['light-cruiser', 16], // 22cr (2026-08-06 repricing) -> floor(16.5) = 16
     ];
@@ -560,29 +561,52 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
   });
 });
 
-describe('BUY_SHIP — store vs. shipyard (iteration 33, 2026-08-07)', () => {
-  it('a store hull is 25% cheaper and arrives pre-damaged; a shipyard hull is full price and pristine', () => {
-    const store = stateWithMap('shop', { phase: 'shop', shopKind: 'store', credits: 20, shopFrameOffers: ['interceptor'] });
-    const storeResult = runReducer(store, { type: 'BUY_SHIP', frameId: 'interceptor' });
-    expect(storeResult.credits).toBe(20 - Math.floor(6 * 0.75)); // interceptor 6cr -> floor(4.5) = 4
-    expect(storeResult.fleet[1].damage).toBe(secondHandDamage('interceptor'));
-    expect(storeResult.fleet[1].damage).toBeGreaterThan(0);
+describe('BUY_SHIP — store vs. shipyard (iteration 33; rarity bonus reworked iteration 39)', () => {
+  it('a store hull is 25% cheaper and always common-tier (no bonus); a shipyard hull is full price and fused/upgraded to its real rarity', () => {
+    // Bastion is rare — a real contrast case, unlike a common-tier frame
+    // (interceptor/corvette/derelict) where store and shipyard would look
+    // identical on the bonus dimension.
+    const store = stateWithMap('shop', { phase: 'shop', shopKind: 'store', credits: 20, shopFrameOffers: ['bastion'] });
+    const storeResult = runReducer(store, { type: 'BUY_SHIP', frameId: 'bastion' });
+    expect(storeResult.credits).toBe(20 - Math.floor(12 * 0.75)); // bastion 12cr (iteration 41) -> floor(9) = 9
+    expect(storeResult.fleet[1].damage).toBe(0); // no more arrival damage, store or shipyard
+    expect(storeResult.fleet[1].fusions).toBeUndefined(); // treated as common — no bonus
+    expect(storeResult.fleet[1].upgrades).toEqual([]);
+    expect(storeResult.fleet[1].equipped).toEqual(['ion']); // iteration 41 starting fit
 
-    const shipyard = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 20, shopFrameOffers: ['interceptor'] });
-    const shipyardResult = runReducer(shipyard, { type: 'BUY_SHIP', frameId: 'interceptor' });
-    expect(shipyardResult.credits).toBe(20 - 6); // full price
-    expect(shipyardResult.fleet[1].damage).toBe(0); // pristine
+    const shipyard = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 20, shopFrameOffers: ['bastion'] });
+    const shipyardResult = runReducer(shipyard, { type: 'BUY_SHIP', frameId: 'bastion' });
+    expect(shipyardResult.credits).toBe(20 - 12); // full price (iteration 41)
+    expect(shipyardResult.fleet[1].damage).toBe(0);
+    expect(shipyardResult.fleet[1].fusions).toEqual({ hp: 1 }); // rare = level 1
+    expect(shipyardResult.fleet[1].upgrades).toHaveLength(1);
+    expect(shipyardResult.fleet[1].equipped).toEqual(['ion']);
+    for (const id of shipyardResult.fleet[1].upgrades) {
+      expect(HULL_BONUS_UPGRADE_POOL).toContain(id);
+    }
   });
 
-  it('a second-hand hull never arrives already destroyed, for every purchasable frame', () => {
+  it('every purchasable frame arrives at 0 damage, store or shipyard', () => {
     for (const frameId of PURCHASABLE_FRAME_IDS) {
       if (frameId === 'dreadnought') continue; // act-2/shipyard-only, not a store item
       const state = stateWithMap('shop', { phase: 'shop', shopKind: 'store', credits: 999, shopFrameOffers: [frameId] });
       const result = runReducer(state, { type: 'BUY_SHIP', frameId });
+      expect(result.fleet[1].damage).toBe(0);
+    }
+  });
+
+  it('a shipyard purchase grants a bonus that scales with the frame\'s rarity level: common=0, rare=1, epic=2, legendary=3', () => {
+    const cases: [Exclude<FrameId, 'cruiser'>, number][] = [
+      ['interceptor', 0], // common
+      ['bastion', 1], // rare
+      ['light-cruiser', 2], // epic
+    ];
+    for (const [frameId, level] of cases) {
+      const state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 999, shopFrameOffers: [frameId] });
+      const result = runReducer(state, { type: 'BUY_SHIP', frameId });
       const ship = result.fleet[1];
-      const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades).hp;
-      expect(ship.damage).toBeGreaterThanOrEqual(0);
-      expect(ship.damage).toBeLessThan(maxHp);
+      expect(ship.fusions?.hp ?? 0).toBe(level);
+      expect(ship.upgrades).toHaveLength(level);
     }
   });
 
@@ -868,7 +892,7 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('interlude');
     expect(result.pendingReward).toBeUndefined();
-    expect(result.credits).toBe(21); // eliteReward(globalColumn(1, 10)) = 11 + 10
+    expect(result.credits).toBe(10); // eliteReward(globalColumn(1, 10)) = floor((11 + 10) / 2), act-1 halved
   });
 
   it('winning the final (act-2) boss ends the run in victory and skips the reward screen', () => {
@@ -1128,10 +1152,10 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
     expect(left.pendingReward).toBeUndefined();
   });
 
-  it('an elite win offers exactly 3 upgrade options and blocks leaving until resolved', () => {
+  it('an elite win offers exactly 2 upgrade options (iteration 39: the trimmed elite pool) and blocks leaving until resolved', () => {
     const state = runReducer(wonNonBossState({}, true), { type: 'CONTINUE' });
     expect(state.phase).toBe('reward');
-    expect(state.pendingReward?.upgradeOptions).toHaveLength(3);
+    expect(state.pendingReward?.upgradeOptions).toHaveLength(2);
 
     const blocked = runReducer(state, { type: 'LEAVE_REWARD' });
     expect(blocked.phase).toBe('reward'); // still blocked
@@ -1149,7 +1173,7 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
     const state = runReducer(wonNonBossState({}, true), { type: 'CONTINUE' });
     const result = runReducer(state, { type: 'PICK_UPGRADE', upgradeId: 'zzz-not-real' as never, shipIndex: 0 });
     expect(result.fleet[0].upgrades).toHaveLength(0);
-    expect(result.pendingReward?.upgradeOptions).toHaveLength(3);
+    expect(result.pendingReward?.upgradeOptions).toHaveLength(2);
   });
 
   it('a second upgrade replaces (destroys) the first — at most 1 permanent upgrade per ship (addendum A.4)', () => {
@@ -1235,8 +1259,8 @@ describe('upgrades — regen and salvage', () => {
     });
     const before = state.credits;
     const result = runReducer(state, { type: 'CONTINUE' });
-    // base reward (winReward(0) = 7) + 2x salvage (3 each) = 13
-    expect(result.credits - before).toBe(7 + 6);
+    // base reward (winReward(0) = floor(7/2) = 3, act-1 halved) + 2x salvage (3 each) = 9
+    expect(result.credits - before).toBe(3 + 6);
   });
 });
 
@@ -1312,7 +1336,7 @@ describe('ambush events (ancient-cache)', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('reward');
-    expect(result.pendingReward?.credits).toBe(7 + 1); // winReward(1)
+    expect(result.pendingReward?.credits).toBe(4); // winReward(1) = floor(8/2), act-1 halved
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
   });
 });
@@ -1537,7 +1561,7 @@ describe('ambush win bonus (14.2/14.3)', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('reward');
-    expect(result.pendingReward?.credits).toBe(7 + 1 + 6); // winReward(1) + the ambush bonus
+    expect(result.pendingReward?.credits).toBe(4 + 6); // winReward(1) = floor(8/2), act-1 halved + the ambush bonus
     expect(result.inventory).toContain('plasma');
     expect(result.pendingAmbushBonus).toBeUndefined();
   });
@@ -2361,45 +2385,47 @@ describe('intel currency income (iteration 7)', () => {
 });
 
 describe('shop rework (iteration 7): stratified draw + selling', () => {
-  it('PICK_NODE into a shop draws exactly 6 offers: 2 weapon, 2 defense (shield/hull), 1 computer-or-drive, 1 active', () => {
+  // Iteration 41: 6 -> 8 offers (3 weapon / 3 defense / 1 computer-drive /
+  // 1 active), keeping pace with the growing weapon/defense pools.
+  it('PICK_NODE into a shop draws exactly 8 offers: 3 weapon, 3 defense (shield/hull), 1 computer-or-drive, 1 active', () => {
     const state = runReducer(stateWithMap('shop'), { type: 'PICK_NODE', row: 0 });
     const offers = state.shopOffers!.map((id) => getPart(id));
-    expect(offers).toHaveLength(6);
-    expect(offers.slice(0, 2).every((p) => p.type === 'weapon')).toBe(true);
-    expect(offers.slice(2, 4).every((p) => p.type === 'shield' || p.type === 'hull')).toBe(true);
-    expect(offers[4].type === 'computer' || offers[4].type === 'drive').toBe(true);
-    expect(offers[5].active).toBe(true);
+    expect(offers).toHaveLength(8);
+    expect(offers.slice(0, 3).every((p) => p.type === 'weapon')).toBe(true);
+    expect(offers.slice(3, 6).every((p) => p.type === 'shield' || p.type === 'hull')).toBe(true);
+    expect(offers[6].type === 'computer' || offers[6].type === 'drive').toBe(true);
+    expect(offers[7].active).toBe(true);
   });
 
-  it('all six offers are always unique, across many redraws (2026-08-02 fix)', () => {
+  it('all eight offers are always unique, across many redraws (2026-08-02 fix)', () => {
     // The old draw was with-replacement: the doubled weapon/defense strata
     // could duplicate within themselves, and the actives stratum overlaps
-    // the typed ones (every active part also has a type), so slot 6 could
-    // duplicate slots 1-5 too. Redraw many times via REROLL and assert
-    // uniqueness every time; the strata invariants must survive the fix.
-    // credits: 2000 — escalating reroll pricing (2026-08-06) means the sum
-    // of 60 rerolls (1+2+...+60 = 1830cr) must fit, not 60x a flat cost.
+    // the typed ones (every active part also has a type), so the last slot
+    // could duplicate the earlier ones too. Redraw many times via REROLL and
+    // assert uniqueness every time; the strata invariants must survive the
+    // fix. credits: 2000 — escalating reroll pricing (2026-08-06) means the
+    // sum of 60 rerolls (1+2+...+60 = 1830cr) must fit, not 60x a flat cost.
     let state = runReducer(stateWithMap('shop', { credits: 2000 }), { type: 'PICK_NODE', row: 0 });
     for (let i = 0; i < 60; i++) {
       const offers = state.shopOffers!;
       expect(new Set(offers).size).toBe(offers.length);
       const parts = offers.map((id) => getPart(id));
-      expect(parts.slice(0, 2).every((p) => p.type === 'weapon')).toBe(true);
-      expect(parts.slice(2, 4).every((p) => p.type === 'shield' || p.type === 'hull')).toBe(true);
-      expect(parts[4].type === 'computer' || parts[4].type === 'drive').toBe(true);
-      expect(parts[5].active).toBe(true);
+      expect(parts.slice(0, 3).every((p) => p.type === 'weapon')).toBe(true);
+      expect(parts.slice(3, 6).every((p) => p.type === 'shield' || p.type === 'hull')).toBe(true);
+      expect(parts[6].type === 'computer' || parts[6].type === 'drive').toBe(true);
+      expect(parts[7].active).toBe(true);
       state = runReducer(state, { type: 'REROLL' });
     }
   });
 
   it('SELL_PART pays floor(cost/2), removes the part from inventory, and refuses a part not owned', () => {
-    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 0, inventory: ['plasma'] }; // plasma costs 5cr
+    let state: RunState = { ...initialRunState(), phase: 'shop', credits: 0, inventory: ['plasma'] }; // plasma costs 6cr (iteration 40 repricing)
     state = runReducer(state, { type: 'SELL_PART', partId: 'plasma' });
-    expect(state.credits).toBe(2); // floor(5/2)
+    expect(state.credits).toBe(3); // floor(6/2)
     expect(state.inventory).not.toContain('plasma');
 
     const again = runReducer(state, { type: 'SELL_PART', partId: 'plasma' });
-    expect(again.credits).toBe(2); // refused — no longer owned
+    expect(again.credits).toBe(3); // refused — no longer owned
   });
 
   it('SELL_PART refuses an equipped part (it is never in inventory in the first place)', () => {
@@ -2699,7 +2725,7 @@ describe('iteration 8: the opener (act-1 column 0)', () => {
       combat: { ...combat, winner: 'player' as const },
     };
     const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.pendingReward?.credits).toBe(7);
+    expect(result.pendingReward?.credits).toBe(3); // winReward(0) = floor(7/2), act-1 halved
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
   });
 
@@ -2824,7 +2850,7 @@ describe('iteration 8: global column economy across the act boundary', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.pendingReward?.credits).toBe(18);
-    expect(winReward(globalColumn(2, 0))).toBe(18);
+    expect(winReward(globalColumn(2, 0), 2)).toBe(18); // act 2 — unaffected by the act-1 halving
   });
 });
 
@@ -2941,10 +2967,11 @@ describe('cargo reward payouts', () => {
     expect(result.pendingReward?.credits).toBe(winReward(1) + 4);
   });
 
-  it('wreck field pays winReward(col) - 2 and drops a part into inventory', () => {
+  it('wreck field pays winReward(col) - 2 and drops a part into inventory, surfaced on the reward screen (iteration 41)', () => {
     const result = runReducer(wonCargoState('wreck'), { type: 'CONTINUE' });
     expect(result.pendingReward?.credits).toBe(winReward(1) - 2);
     expect(result.inventory).toHaveLength(1);
+    expect(result.pendingReward?.foundParts).toEqual(result.inventory);
   });
 
   it('wreck field floors at 1 credit (unit-level — winReward(col) itself never gets this low)', () => {
@@ -2966,6 +2993,17 @@ describe('cargo reward payouts', () => {
     const state = wonCargoState('convoy', { currentEnemy: eliteEnemy });
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.pendingReward?.credits).toBe(eliteReward(1) + 4);
+  });
+
+  // Iteration 40/41: every elite kill also drops a Captured schematic
+  // straight to inventory — surfaced on the reward screen the same way a
+  // wreck-field drop is.
+  it('an elite kill drops a Captured schematic, surfaced on the reward screen (iteration 41)', () => {
+    const eliteEnemy = { ...GAUNTLET[0], id: `${GAUNTLET[0].id}-elite` };
+    const state = wonCargoState('patrol', { currentEnemy: eliteEnemy });
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.inventory).toContain(CAPTURED_SCHEMATIC_PART_ID);
+    expect(result.pendingReward?.foundParts).toContain(CAPTURED_SCHEMATIC_PART_ID);
   });
 });
 

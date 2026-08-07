@@ -31,9 +31,12 @@ export interface Part {
   // is PER-DIE (the Gauss lance), distinct from the ship-level field below
   // (optics) — the two stack. `aoeDamage` (arc projector): on a hit, deals
   // this much damage to every enemy ship once, instead of the normal
-  // single-target hit. `targetHighest` (siege cannon): this die's target is
-  // the highest-remaining-HP candidate instead of the lowest (taunt/cloak
-  // filtering still applies first).
+  // single-target hit. `targetHighest`: this die's target is the
+  // highest-remaining-HP candidate instead of the lowest (taunt/cloak
+  // filtering still applies first) — no part sets this any more (iteration
+  // 40 dropped it from the Siege cannon, its one user), kept as a live
+  // engine feature for a future part or the player's own targeting-stance
+  // toggle to reuse.
   weapon?: {
     kind: WeaponKind;
     diceCount: number;
@@ -42,6 +45,11 @@ export interface Part {
     shieldPierce?: number;
     aoeDamage?: number;
     targetHighest?: boolean;
+    // Iteration 40 ("digital dice" — no part sets this directly today; it's
+    // granted fleet-wide by the Overcharged rounds protocol, see ship.ts's
+    // deriveStats): this die rolls on a 7-face die instead of 6 — a natural
+    // 7 always hits (like 6) AND deals +1 bonus damage.
+    overcharge?: boolean;
   };
   computer?: number;
   shield?: number;
@@ -73,6 +81,7 @@ export interface WeaponStats {
   shieldPierce?: number;
   aoeDamage?: number;
   targetHighest?: boolean;
+  overcharge?: boolean; // see Part['weapon'].overcharge
 }
 
 export interface ShipStats {
@@ -296,6 +305,11 @@ export interface RewardSummary {
   salvagedParts: PartId[]; // parts recovered from destroyed ships
   lostShips: string[]; // labels of ships destroyed this fight
   upgradeOptions?: UpgradeId[]; // elites only: 3 choices, unresolved until picked
+  // Iteration 41: parts dropped straight to inventory, not tied to a lost
+  // ship or a pick — a wreck-field cargo tag's random salvage, or an elite
+  // kill's captured schematic. Previously landed in inventory silently
+  // with nothing on this screen calling it out.
+  foundParts?: PartId[];
 }
 
 export interface RunState {

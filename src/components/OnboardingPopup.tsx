@@ -12,28 +12,20 @@ interface OnboardingPopupProps {
 // Content deliberately mirrors TutorialOverlay's matching sections (same
 // facts, same numbers) — that overlay stays reachable on demand for anyone
 // who dismissed a popup without reading it or wants to re-check later.
+// Iteration 38: trimmed hard — one line per topic, the dice/formula doing
+// the rest of the explaining visually rather than in prose.
 const CONTENT: Record<OnboardingKey, { title: string; body: React.ReactNode }> = {
   diceRoll: {
     title: 'The dice roll',
     body: (
       <>
-        <p className="tutorial-row__hint">
-          Every shot rolls one 6-sided die. A natural <strong>6</strong> always hits, no matter what. A natural{' '}
-          <strong>1</strong> always misses, no matter what. Anything else hits if:
-        </p>
         <p className="tutorial-row__formula">roll + Computer − Piloting ≥ 6</p>
-        <p className="tutorial-row__hint">
-          The combat log shows this math on every roll as it happens — including a callout whenever a target's
-          Piloting fully cancels out your Computer (only a natural 6 gets through then).
-        </p>
+        <p className="tutorial-row__hint">Natural 6 always hits. Natural 1 always misses.</p>
         <div className="tutorial-dice-example">
-          <WeaponDie damage={2} kind="cannon" size={28} />
-          <span className="tutorial-dice-example__caption">
-            A die on a ship's readout shows its <strong>damage</strong> (this one deals 2), not a roll — every
-            attack still rolls a fresh d6 against the math above, and
-          </span>
-          <DieFace value={6} size={28} />
-          <span className="tutorial-dice-example__caption">a natural 6 always gets through.</span>
+          <WeaponDie damage={2} kind="cannon" size={24} />
+          <span className="tutorial-dice-example__caption">= damage per hit, not a roll.</span>
+          <DieFace value={6} size={24} />
+          <span className="tutorial-dice-example__caption">always hits.</span>
         </div>
       </>
     ),
@@ -42,18 +34,10 @@ const CONTENT: Record<OnboardingKey, { title: string; body: React.ReactNode }> =
     title: 'Missiles',
     body: (
       <>
-        <p className="tutorial-row__hint">
-          Before the first cannon round, one missile phase fires — only because at least one fleet here is actually
-          carrying missiles (it's skipped outright otherwise). Missiles roll the same hit math as cannons, but
-          there's no return fire that phase: it's a free opening volley, not a trade. Flak batteries can shoot
-          missile dice down before they land, cancelling them before they're even rolled.
-        </p>
+        <p className="tutorial-row__hint">One free opening volley before cannons — no return fire that phase.</p>
         <div className="tutorial-dice-example">
-          <WeaponDie damage={1} kind="missile" size={28} />
-          <span className="tutorial-dice-example__caption">
-            A missile die on a ship's readout — the dashed ring (vs. a cannon die's solid one) marks it as a
-            missile. This one deals 1 damage, fired once, in the opening volley only.
-          </span>
+          <WeaponDie damage={1} kind="missile" size={24} />
+          <span className="tutorial-dice-example__caption">dashed ring = missile die.</span>
         </div>
       </>
     ),
@@ -61,10 +45,7 @@ const CONTENT: Record<OnboardingKey, { title: string; body: React.ReactNode }> =
   piloting: {
     title: 'Piloting',
     body: (
-      <p className="tutorial-row__hint">
-        Subtracted from the attacker's roll before it's checked against your ship. Higher Piloting makes a ship
-        harder to hit — but a natural 6 ignores it completely, so piloting alone is never a perfect wall.
-      </p>
+      <p className="tutorial-row__hint">Subtracts from the enemy's roll against you. A natural 6 ignores it.</p>
     ),
   },
 };
@@ -72,11 +53,11 @@ const CONTENT: Record<OnboardingKey, { title: string; body: React.ReactNode }> =
 export function OnboardingPopup({ topic, onClose }: OnboardingPopupProps) {
   const { title, body } = CONTENT[topic];
   return (
-    // modal-backdrop--tutorial (iteration 35): these fire mid-combat, the
-    // first time their topic actually matters — bottom-anchored on mobile
-    // so the fleet cards up top (what the popup is explaining) stay
-    // visible underneath instead of getting covered by the panel.
-    <div className="modal-backdrop modal-backdrop--tutorial" onClick={onClose}>
+    // modal-backdrop--tutorial (iteration 35, redone iteration 38): these
+    // fire mid-combat — a small floating card, not a modal, so it never
+    // darkens or covers the fight underneath (see styles.css: transparent,
+    // click-through backdrop; the card itself is the only interactive part).
+    <div className="modal-backdrop modal-backdrop--tutorial">
       <div className="modal-panel tutorial-overlay onboarding-popup" onClick={(e) => e.stopPropagation()}>
         <div className="modal-panel__header">
           <h2>{title}</h2>

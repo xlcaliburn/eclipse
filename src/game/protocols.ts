@@ -22,6 +22,7 @@ export type ProtocolId =
   | 'twin-linked-mounts'
   | 'bastion-doctrine'
   | 'deep-space-relays'
+  | 'overcharged-rounds'
   // Prismatic
   | 'ghost-fleet-protocol'
   | 'lone-flagship'
@@ -94,6 +95,15 @@ export const PROTOCOLS: Record<ProtocolId, ProtocolDef> = {
     name: 'Deep-space relays',
     blurb: 'Act 2 opens with every node type already visible — the fog is gone from the moment you cross over.',
   },
+  // Iteration 40 — "digital dice": nothing says a die has to stop at 6.
+  // Every cannon in the fleet rolls on a 7-face die instead; a natural 7
+  // still always hits (like 6 does) and deals +1 bonus damage on top.
+  'overcharged-rounds': {
+    id: 'overcharged-rounds',
+    tier: 'gold',
+    name: 'Overcharged rounds',
+    blurb: 'Every cannon die rolls on a 7-face die. A natural 7 always hits and deals +1 bonus damage.',
+  },
   'ghost-fleet-protocol': {
     id: 'ghost-fleet-protocol',
     tier: 'prismatic',
@@ -139,6 +149,7 @@ const GOLD_IDS: ProtocolId[] = [
   'twin-linked-mounts',
   'bastion-doctrine',
   'deep-space-relays',
+  'overcharged-rounds',
 ];
 const PRISMATIC_IDS: ProtocolId[] = ['ghost-fleet-protocol', 'lone-flagship', 'armada-mandate', 'alpha-doctrine'];
 

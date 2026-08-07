@@ -13,15 +13,17 @@ import {
   frameCost,
   mercenaryCost,
   partCost,
+  RARITY_ORDER,
   rerollCost,
-  secondHandDamage,
   SHIPYARD_UPGRADE_COST,
+  STARTING_FIT,
 } from '../game/reducer';
 import { fusionCost, playerShipLabel } from '../game/ship';
 import type { FusionStat } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
+import { WeaponDie } from './Die';
 import { FleetPanel } from './FleetPanel';
 import { PartCard } from './PartCard';
 import { FrameSilhouette } from './ShipSilhouette';
@@ -214,8 +216,7 @@ export function ShopScreen({
               {canBuyMoreLots && (
                 <>
                   <span className="card-tile__desc">
-                    Buys to your inventory below — equip it onto a ship like any other part. Occupies an inventory
-                    slot until you sell it at a later station, and it's lost outright if the ship carrying it is.
+                    Equip it like a part. Sell for a profit at a later station — lost if the ship carrying it is.
                   </span>
                   <button type="button" className="shop-button" onClick={onBuyCommodityLot} disabled={credits < lotBuyCost}>
                     Buy ({lotBuyCost} cr)
@@ -230,8 +231,7 @@ export function ShopScreen({
             <div className="card-tile card-tile--deep-scan">
               <span className="card-tile__name">Mercenary escort</span>
               <span className="card-tile__desc">
-                An Interceptor for hire — fights your very next combat, then moves on. No salvage if it falls, no
-                wages if it doesn't. A one-fight rental, not a permanent hull — hire one even at fleet capacity.
+                An Interceptor for hire, one fight only — no salvage if it falls. Works even at fleet capacity.
               </span>
               <button type="button" className="shop-button" onClick={onBuyMercenary} disabled={credits < mercCost}>
                 Hire ({mercCost} cr)
@@ -259,11 +259,18 @@ export function ShopScreen({
             const frame = FRAMES[frameId];
             const cost = frameCost(frame.cost, frameId, commanderId, protocols, kind);
             const disabled = fleetFull || credits < cost;
-            // Iteration 33: a store's rack is second-hand — badge + arrival
-            // damage note, computed the exact same way BUY_SHIP applies it
-            // (reducer.ts's secondHandDamage), so this can never drift from
-            // what actually happens on purchase.
-            const arrivalDamage = !isShipyard ? secondHandDamage(frameId) : 0;
+            // Iteration 39: a store's rack is second-hand — cheaper, but
+            // always treated as common tier (no bonus). A shipyard's arrive
+            // pristine AND fused/upgraded to match the frame's real rarity —
+            // this level count is the same one BUY_SHIP's hullRarityBonus
+            // uses, so the preview can't drift from what purchase actually
+            // grants (WHICH upgrade(s) stays a surprise until bought, same
+            // as an elite reward).
+            const bonusLevel = isShipyard ? RARITY_ORDER.indexOf(frame.rarity) : 0;
+            // Iteration 41: preview what the hull arrives fitted with — every
+            // purchasable frame carries at least one weapon now, and this is
+            // the only place that was previously invisible until after buying.
+            const startingFit = STARTING_FIT[frameId] ?? [];
             return (
               <button
                 key={frame.id}
@@ -275,11 +282,35 @@ export function ShopScreen({
               >
                 {!isShipyard && <span className="frame-card__badge">Second-hand</span>}
                 <FrameSilhouette frameId={frame.id} size={40} />
-                <span className="frame-card__name">{frame.name}</span>
-                <span className="frame-card__desc">
-                  {frame.blurb}
-                  {!isShipyard && ` Arrives with ${arrivalDamage} damage.`}
+                <span className="frame-card__name">
+                  {frame.name}
+                  {/* store hulls are always treated as common (no bonus) — the rarity label only
+                      means something at a shipyard, where it's the tier the fuse/upgrade bonus draws from */}
+                  {isShipyard && (
+                    <span className={`frame-card__rarity-label frame-card__rarity-label--${frame.rarity}`}>
+                      {frame.rarity}
+                    </span>
+                  )}
                 </span>
+                <span className="frame-card__desc">{frame.blurb}</span>
+                {startingFit.length > 0 && (
+                  <div className="frame-card__fit">
+                    {startingFit.map((partId, i) => {
+                      const part = getPart(partId);
+                      return (
+                        <span key={`${partId}-${i}`} className="frame-card__fit-item" title={part.description}>
+                          {part.weapon && <WeaponDie damage={part.weapon.damage} kind={part.weapon.kind} size={16} />}
+                          {part.name}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                {bonusLevel > 0 && (
+                  <span className="frame-card__bonus">
+                    Arrives fused +{bonusLevel} HP with {bonusLevel} bonus upgrade{bonusLevel > 1 ? 's' : ''}.
+                  </span>
+                )}
                 <span className="frame-card__cost">{cost} cr</span>
               </button>
             );

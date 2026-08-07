@@ -36,3 +36,31 @@ export function markOnboardingSeen(key: OnboardingKey): void {
     // fail soft — the popup just replays next session instead of persisting
   }
 }
+
+// A settings-level opt-out, separate from per-topic `seen` tracking above —
+// unchecking "Tutorial popups" in Settings suppresses every future
+// contextual popup outright, rather than requiring each of the three
+// topics to be dismissed once first. Same plain-read/write module pattern
+// as `seen` (no live-subscriber plumbing needed: only nextOnboardingPopup's
+// mount-time check in CombatScreen reads it, and SettingsScreen's own
+// checkbox keeps its own local state for the toggle to re-render on).
+// Does NOT affect the on-demand "How to play" TutorialOverlay (the "?"
+// button) — that stays available regardless, since it's opened on purpose.
+const DISABLED_KEY = 'eclipse.tutorialsDisabled';
+
+export function isTutorialDisabled(): boolean {
+  try {
+    return localStorage.getItem(DISABLED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setTutorialDisabled(disabled: boolean): void {
+  try {
+    if (disabled) localStorage.setItem(DISABLED_KEY, '1');
+    else localStorage.removeItem(DISABLED_KEY);
+  } catch {
+    // fail soft — the checkbox just won't stick across reloads
+  }
+}
