@@ -221,6 +221,13 @@ export function LandingScreen({
           </div>
         )}
       </div>
+
+      {/* The player wiki (wiki.html, a second Vite page): every pool and
+          price, generated from the live game data — for playtesters giving
+          balance feedback. Relative href so it works at any deploy depth. */}
+      <p className="hint landing-screen__wiki-link">
+        <a href="./wiki.html">Player wiki — every enemy, part, and boss, with exact numbers</a>
+      </p>
     </div>
   );
 }

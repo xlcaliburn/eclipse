@@ -1,3 +1,4 @@
+import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -7,6 +8,16 @@ export default defineConfig({
   // Relative asset paths so the build works at any URL depth —
   // GitHub Pages project sites (/<repo>/), Netlify, itch.io, or file://.
   base: './',
+  // Second page: the player wiki (wiki.html), a reference rendered from the
+  // live game data — deployed alongside the game at <game-url>/wiki.html.
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        wiki: fileURLToPath(new URL('./wiki.html', import.meta.url)),
+      },
+    },
+  },
   plugins: [
     react(),
     // Iteration 16.3: full offline PWA — manifest + icons + a precaching
