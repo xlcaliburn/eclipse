@@ -187,6 +187,12 @@ export function commodityLotBuyCost(commanderId: CommanderId | undefined): numbe
 // ship sitting on 1 damage costs the same 2cr/HP as one sitting on 6 —
 // no flat "repair visit" fee to make topping off a scratch not worth it.
 export const REPAIR_COST_PER_HP = 2;
+// Iteration 46.2 (2026-08-08): a flat, free heal on every won fight,
+// universal (every commander, stacks with regen/the Engineer's bonus) —
+// see the CONTINUE win branch's comment for the attrition finding that
+// motivated this. Was actRun.ts's old POST_WIN_REPAIR experiment env var;
+// promoted from a measurement knob to a real rule.
+export const POST_WIN_REPAIR = 2;
 // Iteration 33 (2026-08-07): the shipyard's third acquisition path for a
 // slotless upgrade — rewards and repair-yard overhauls are both free
 // (paid for with risk or a forgone repair); this is the only path that
@@ -1000,16 +1006,19 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           rngCounter: nextCounter(),
         };
       }
-      // Escalations are seeded for both acts at once, but act-1's are
-      // permanent once landed — they stay in effect through act 2, stacking
-      // with act 2's own (8.4: "act-2 escalations apply on top of act-1's").
-      // Comparing on the global column (not each escalation's act-local
-      // landsAfterColumn) makes act-1's escalations unconditionally active
-      // from anywhere in act 2, with no special-casing needed.
-      const globalEscalations = state.escalations.map((e) => ({
-        ...e,
-        landsAfterColumn: globalColumn(e.act, e.landsAfterColumn),
-      }));
+      // Escalations are seeded for both acts at once. Iteration 8.4 made
+      // act-1's permanent once landed — carrying through and stacking with
+      // act-2's own for the rest of the run. Iteration 46.3 reverses that:
+      // only the CURRENT act's two escalations are ever live. Measured
+      // cause: the difficulty ledger found act-1's leftover pair alone
+      // cost ~30pp at act-2 entry (94-97% plain -> ~68-69%), before act
+      // 2's own escalations or its counter-protocol stack on top — the
+      // single biggest lever behind act 2's 0% conditional clear rate.
+      // Reads cleanly too: a new sector runs a different enemy doctrine,
+      // not last sector's plus its own.
+      const globalEscalations = state.escalations
+        .filter((e) => e.act === state.act)
+        .map((e) => ({ ...e, landsAfterColumn: globalColumn(e.act, e.landsAfterColumn) }));
       const globalCol = globalColumn(state.act, node.col);
       if (node.type === 'combat') {
         const rawEnemy = pickFromPool(combatEnemyPool(state.act, node.col), rng);
@@ -1440,10 +1449,22 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // 'regen' heals damage after a win — per-upgrade-instance, so
       // duplicates stack. The Engineer commander adds a flat +1 heal on
       // top, stacking with regen.
+      //
+      // 2026-08-08 (iteration 46.2): POST_WIN_REPAIR adds a further flat
+      // +1, universal — every commander, every ship, stacking with both
+      // of the above. This is actRun.ts's old POST_WIN_REPAIR experiment
+      // knob (used to gauge how much of act 1's difficulty was carried-
+      // damage death-spiral rather than any single fight), now shipped as
+      // a real rule. The difficulty ledger found a healthy budget fleet
+      // beats every act-1 boss 87-96%, yet real runs die there at scale —
+      // the gap is attrition compounding across 8-10 fights, not any one
+      // fight being individually too hard. A small heal after every win
+      // (not just a repair-yard visit) closes most of that gap without
+      // touching a single enemy's stats.
       const engineerHeal = state.commanderId === 'engineer' ? 1 : 0;
       const healedFleet = survivingFleet.map((ship) => {
         const regenCount = ship.upgrades.filter((u) => u === 'regen').length;
-        const totalHeal = regenCount + engineerHeal;
+        const totalHeal = regenCount + engineerHeal + POST_WIN_REPAIR;
         if (totalHeal === 0) return ship;
         // The Engineer banks a heal that outran actual damage instead of
         // wasting it — including a ship that's already at 0 damage, where

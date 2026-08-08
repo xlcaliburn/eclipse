@@ -868,7 +868,9 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
       expect(result.credits).toBeGreaterThan(before);
       expect(result.pendingReward?.creditsTotal).toBe(result.credits);
       expect(result.fleet).toHaveLength(1);
-      expect(result.fleet[0].damage).toBe(combat.playerShips[0].damage);
+      // Iteration 46.2: every won fight now also heals 1 flat (POST_WIN_REPAIR),
+      // on top of whatever damage the fight itself left behind.
+      expect(result.fleet[0].damage).toBe(Math.max(0, combat.playerShips[0].damage - 1));
     } else {
       expect(result.phase).toBe('defeat');
     }
@@ -1305,7 +1307,8 @@ describe('upgrades — regen', () => {
       combat: wonCombat,
     });
     const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.fleet[0].damage).toBe(3); // healed by exactly 1
+    // regen (1) + the universal POST_WIN_REPAIR (2, iteration 46.2) = 3.
+    expect(result.fleet[0].damage).toBe(1);
   });
 });
 
@@ -2222,8 +2225,10 @@ describe('commander effects (iteration 6)', () => {
       commanderId: 'engineer',
     };
     const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.fleet[0].damage).toBe(4); // engineer: -1
-    expect(result.fleet[1].damage).toBe(3); // engineer -1 + regen -1
+    // Iteration 46.2: + the universal POST_WIN_REPAIR (2, swept up from 1
+    // — see reducer.ts's constant) on top of both.
+    expect(result.fleet[0].damage).toBe(2); // engineer -1, post-win -2
+    expect(result.fleet[1].damage).toBe(1); // engineer -1, regen -1, post-win -2
   });
 
   // Iteration 21 (the Engineer, over-repair): a heal that outruns actual
@@ -2246,7 +2251,10 @@ describe('commander effects (iteration 6)', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.fleet[0].damage).toBe(0);
-    expect(result.fleet[0].overRepairBank).toBe(1);
+    // Iteration 46.2: the Engineer's own +1 plus the universal
+    // POST_WIN_REPAIR +1 are both entirely excess here (0 damage) — 2
+    // banked, capped at OVER_REPAIR_CAP (2).
+    expect(result.fleet[0].overRepairBank).toBe(2);
   });
 
   it("the Engineer's over-repair bank is capped at 2, even stacking with regen", () => {
@@ -2861,8 +2869,13 @@ describe('iteration 8: global column economy across the act boundary', () => {
   });
 });
 
-describe('iteration 8: escalations stack across the act boundary (8.4)', () => {
-  it('an act-1 escalation, once landed, stays active anywhere in act 2 (permanent, not act-scoped)', () => {
+describe('iteration 46.3: act-1 escalations retire at the act boundary (reverses 8.4)', () => {
+  // 8.4 originally made an act-1 escalation permanent for the rest of the
+  // run, stacking with act 2's own — measured (the iteration-46 difficulty
+  // ledger) to cost ~30pp at act-2 entry on its own, before act 2's own
+  // escalations or its counter-protocol stack on top. Reversed: only the
+  // CURRENT act's own two escalations are ever live.
+  it('an act-1 escalation does NOT carry into act 2, even long after it landed', () => {
     // landsAfterColumn 3 (act 1) — well past by any point in act 2.
     const escalations = [{ id: 'hardened' as const, act: 1 as const, landsAfterColumn: 3, revealed: false }];
     let state: RunState = {
@@ -2873,7 +2886,7 @@ describe('iteration 8: escalations stack across the act boundary (8.4)', () => {
       map: forceNodeType(initialRunState().map, 0, 1, 'combat', 2),
     };
     const result = runReducer(state, { type: 'PICK_NODE', row: 1 });
-    expect(result.currentEnemy!.appliedEscalations).toContain('hardened');
+    expect(result.currentEnemy!.appliedEscalations ?? []).not.toContain('hardened');
   });
 
   it('an act-2 escalation does not apply before its own local column, even though act 1 is long past', () => {
@@ -2889,7 +2902,7 @@ describe('iteration 8: escalations stack across the act boundary (8.4)', () => {
     expect(result.currentEnemy!.appliedEscalations ?? []).not.toContain('hardened');
   });
 
-  it('act 2 stacks both: a landed act-1 escalation plus its own, once past its own column', () => {
+  it('act 2 only ever applies its own escalation, never a landed act-1 one', () => {
     const escalations = [
       { id: 'hardened' as const, act: 1 as const, landsAfterColumn: 3, revealed: false },
       { id: 'deflectors' as const, act: 2 as const, landsAfterColumn: 3, revealed: false },
@@ -2904,7 +2917,23 @@ describe('iteration 8: escalations stack across the act boundary (8.4)', () => {
       visited: [{ col: 3, row: 1 }],
     };
     const result = runReducer(state, { type: 'PICK_NODE', row: 1 });
-    expect(result.currentEnemy!.appliedEscalations).toEqual(expect.arrayContaining(['hardened', 'deflectors']));
+    expect(result.currentEnemy!.appliedEscalations).toEqual(['deflectors']);
+    expect(result.currentEnemy!.appliedEscalations).not.toContain('hardened');
+  });
+
+  it('act 1 is completely untouched by the retirement — its own escalations still apply normally', () => {
+    const escalations = [{ id: 'hardened' as const, act: 1 as const, landsAfterColumn: 3, revealed: false }];
+    let state: RunState = {
+      ...initialRunState(),
+      phase: 'map',
+      act: 1,
+      escalations,
+      map: forceNodeType(initialRunState().map, 4, 1, 'combat', 1),
+      position: { col: 3, row: 1 },
+      visited: [{ col: 3, row: 1 }],
+    };
+    const result = runReducer(state, { type: 'PICK_NODE', row: 1 });
+    expect(result.currentEnemy!.appliedEscalations).toContain('hardened');
   });
 });
 

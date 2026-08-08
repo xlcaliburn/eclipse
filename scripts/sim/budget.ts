@@ -1,7 +1,8 @@
 import { getFrame } from '../../src/game/frames';
 import type { FrameId } from '../../src/game/frames';
 import { getPart, STARTING_LOADOUT } from '../../src/game/parts';
-import { effectiveSlots } from '../../src/game/ship';
+import { effectiveSlots, fusionCost } from '../../src/game/ship';
+import type { FusionStat } from '../../src/game/ship';
 import type { PartId, PlayerShipState } from '../../src/game/types';
 
 // Iteration 45.1: reference fleets that price themselves off the CURRENT
@@ -70,6 +71,7 @@ export function buildFleet(credits: number, archetype: Archetype): PlayerShipSta
         }
       }
     }
+    spendSurplusOnFusions(fleet, remaining);
     return fleet;
   }
 
@@ -101,7 +103,38 @@ export function buildFleet(credits: number, archetype: Archetype): PlayerShipSta
     remaining -= cost;
     wishIndex++;
   }
+  spendSurplusOnFusions(fleet, remaining);
   return fleet;
+}
+
+const FUSION_STATS: FusionStat[] = ['hp', 'computer', 'shield', 'initiative'];
+// Iteration 31's own framing: the Foundry is "the late-run credit sink,"
+// icing on a build, never the primary way a real player spends hundreds of
+// credits (fusionCost's escalation makes stacking many onto one ship
+// increasingly poor value anyway). Capped so a very high assumed surplus
+// (late act-2 columns) can't concentrate into one absurdly over-fused hull
+// no real fleet would ever look like — spread across the whole fleet
+// (cheapest stat+ship each round, which naturally round-robins since a
+// ship's own next fusion gets pricier every time it's picked) rather than
+// piled onto the Flagship alone.
+const MAX_TOTAL_FUSIONS = 5;
+
+function spendSurplusOnFusions(fleet: PlayerShipState[], remaining: number): number {
+  let bought = 0;
+  for (;;) {
+    if (bought >= MAX_TOTAL_FUSIONS) return remaining;
+    let best: { ship: PlayerShipState; stat: FusionStat; cost: number } | null = null;
+    for (const ship of fleet) {
+      for (const stat of FUSION_STATS) {
+        const cost = fusionCost(stat, ship, 1);
+        if (!best || cost < best.cost) best = { ship, stat, cost };
+      }
+    }
+    if (!best || best.cost > remaining) return remaining;
+    best.ship.fusions = { ...best.ship.fusions, [best.stat]: (best.ship.fusions?.[best.stat] ?? 0) + 1 };
+    remaining -= best.cost;
+    bought++;
+  }
 }
 
 // Credits banked by the time a player *arrives* at `col`, assuming a win on

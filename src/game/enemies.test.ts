@@ -51,8 +51,10 @@ describe('final bosses bring support', () => {
     const citadel = getFinalBoss('citadel');
     const [core, ...escorts] = citadel.groups;
     // Iteration 31-M3 (2026-08-07): re-tuned 5 -> 2 against the act-2
-    // endgame fleet (see enemies.ts's Citadel comment) — this test's real
-    // assertion is the ordering below, not the literal number.
+    // endgame fleet — iteration 46.3 (2026-08-08) corrected the same
+    // drift via HP instead of a further shield raise (see enemies.ts's
+    // Citadel comment) — this test's real assertion is the ordering
+    // below, not the literal number.
     expect(core.stats.shield).toBe(2);
     for (const escort of escorts) {
       expect(escort.stats.shield).toBeLessThan(core.stats.shield);

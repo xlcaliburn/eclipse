@@ -341,13 +341,42 @@ const ANTIMATTER_BATTERY: EnemyDef = {
   groups: solo('battery', 1, { initiative: 1, hp: 6, computer: 2, shield: 1, cannons: [{ diceCount: 1, damage: 4 }], missiles: [] }),
 };
 
+// 2026-08-08 (iteration 46.3): shield 2 -> 1. The difficulty ledger found
+// this arithmetically near-closed (0-13%) against a realistic act-2-hard
+// budget fleet — the hit rule (roll + computer - shield >= 6) makes
+// shield 2 nearly as hard to crack as GCDS's old shield 2 was for a
+// comp<=1 fleet (see that boss's own comment for the same diagnosis and
+// fix, iteration 22.3/26). Shield first, per that established method,
+// before touching computer or dice.
+//
+// Second pass, same day: shield alone landed this single fight at 38%
+// (a real fight, in-band on its own), but the full-run agent still
+// measured a 0% act-2 conditional clear rate — the hard pool's ~4
+// required wins compound multiplicatively, so even several individually
+// "healthy" 30-45% fights in a row crush the overall odds far harder
+// than any one fixture check shows. computer 2 -> 1 on top, matching
+// Warden's own shield-then-computer sequence below.
 const GUARDIAN_PAIR: EnemyDef = {
   id: 'guardian-pair',
   name: 'Guardian pair',
   blurb: 'The old endgame, doubled.',
-  groups: solo('guardian', 2, { initiative: 2, hp: 4, computer: 2, shield: 2, cannons: [{ diceCount: 2, damage: 2 }], missiles: [] }),
+  groups: solo('guardian', 2, { initiative: 2, hp: 4, computer: 1, shield: 1, cannons: [{ diceCount: 2, damage: 2 }], missiles: [] }),
 };
 
+// 2026-08-08 (iteration 46.3): shield 3 -> 1, THEN (measured separately,
+// per the shield-first-then-computer method) computer 3 -> 2. The ledger
+// found this the single hardest wall in the whole hard pool (0-1%
+// against a realistic budget fleet) — shield 3 against a typical act-2
+// fleet's computer (~1-2) meant only a natural 6 ever hit, same hit-math
+// cliff as Guardian pair above. The shield cut alone barely moved it
+// (1% -> 4%) — Warden's OWN computer 3 (the highest in the pool) was the
+// dominant lever, not the player's odds against it: at comp 3 it hits a
+// typical fleet on a 3+, and its 8 max dmg/round (2d2 + 1d4) ground the
+// fleet down within single fights faster than the player could return
+// fire. Computer 2 (matching every other hard-pool enemy) plus the
+// shield cut together finally opened the fight up. hp 10 and the 3-die
+// spread are untouched — "the pre-boss wall" should still be a real
+// fight, not a pushover, once it's not arithmetically closed.
 const WARDEN: EnemyDef = {
   id: 'warden',
   name: 'Warden',
@@ -355,8 +384,8 @@ const WARDEN: EnemyDef = {
   groups: solo('warden', 1, {
     initiative: 2,
     hp: 10,
-    computer: 3,
-    shield: 3,
+    computer: 2,
+    shield: 1,
     cannons: [
       { diceCount: 2, damage: 2 },
       { diceCount: 1, damage: 4 },
@@ -390,6 +419,13 @@ export const HARD_POOL_ACT2: EnemyDef[] = [GUARDIAN_PAIR, WARDEN, SWARM_ARMADA];
 // to every group (see eliteVariant/applyVeterancy below); each group
 // activates at its own initiative via the existing activation machinery.
 
+// 2026-08-08 (iteration 46.2): computer 3 -> 2, same cliff and same fix as
+// SNIPER_PAIR below — this sniper is a separate stat block (not shared),
+// so the pair's re-tune never reached it, and it was still the ledger's
+// one flagged act-1-hard-band outlier (59% at column 8) after that fix
+// landed. The targeting-priority puzzle this enemy is actually built
+// around ("shoot the screens or snipe the sniper") is untouched by its own
+// accuracy — only the hit-math cliff was.
 const ESCORTED_SNIPER: EnemyDef = {
   id: 'escorted-sniper',
   name: 'Escorted sniper',
@@ -398,7 +434,7 @@ const ESCORTED_SNIPER: EnemyDef = {
     {
       label: 'sniper',
       count: 1,
-      stats: { initiative: 2, hp: 2, computer: 3, shield: 0, cannons: [{ diceCount: 1, damage: 2 }], missiles: [], targetsLowestHp: true },
+      stats: { initiative: 2, hp: 2, computer: 2, shield: 0, cannons: [{ diceCount: 1, damage: 2 }], missiles: [], targetsLowestHp: true },
     },
     { label: 'screen', count: 2, stats: { initiative: 1, hp: 1, computer: 0, shield: 0, cannons: [{ diceCount: 1, damage: 1 }], missiles: [] } },
   ],
@@ -410,6 +446,23 @@ const ESCORTED_SNIPER: EnemyDef = {
 // computer or eat hits"). Same per-ship stats as GAUNTLET's solo 'sniper',
 // duplicated rather than shared so that entry (the col-3 elite's base) stays
 // untouched.
+//
+// Re-tuned again 2026-08-08 (iteration 46.2): computer 3 -> 2. Iteration
+// 46's ledger probe found this was the single biggest cliff in act 1 —
+// 21-44% at columns 5-6 against a realistic budget fleet, versus 95%+ for
+// its two mid-pool siblings, and (via `hardestInPool`'s raw-total-HP
+// selection heuristic picking this pair as "the elite" whenever it's the
+// bigger HP pool in MID_POOL — see eliteEnemyForColumn) its elite variant
+// at 2-10%. Root cause is the hit formula's discreteness: comp 3 plus the
+// firecontrol escalation (+1, one of two act-1 escalations, live by
+// column 4) reaches comp 4 — hitting a 0-piloting midgame fleet on a
+// natural 2+, ~83% per die, well past what two ships' worth of dice can
+// be answered with at this point in the economy. Comp 2 (+1 from
+// firecontrol = comp 3, hits on 3+, ~67%) keeps the enemy's identity
+// ("piloting blunts high computers — twice over") without the cliff.
+// Doubled HP (this pair, not the solo GAUNTLET sniper) still makes it the
+// mid pool's tankiest entry, so it stays legitimately dangerous, not
+// trivialized.
 const SNIPER_PAIR: EnemyDef = {
   id: 'sniper-pair',
   name: 'Sniper pair',
@@ -417,7 +470,7 @@ const SNIPER_PAIR: EnemyDef = {
   groups: solo('sniper', 2, {
     initiative: 2,
     hp: 2,
-    computer: 3,
+    computer: 2,
     shield: 0,
     cannons: [{ diceCount: 1, damage: 2 }],
     missiles: [],
@@ -435,6 +488,11 @@ const CARRIER_GROUP: EnemyDef = {
   ],
 };
 
+// 2026-08-08 (iteration 46.3): the commander's shield 2 -> 1, same
+// hit-math-cliff fix as Guardian pair/Warden above (the ledger flagged
+// this pool at 28%, the mildest of the four hard-pool outliers, but
+// still below the 25-50% target's midpoint). The lancers already pierce
+// player shield 2 unconditionally — untouched, that's their identity.
 const COMMAND_WING: EnemyDef = {
   id: 'command-wing',
   name: 'Command wing',
@@ -443,7 +501,7 @@ const COMMAND_WING: EnemyDef = {
     {
       label: 'commander',
       count: 1,
-      stats: { initiative: 3, hp: 5, computer: 2, shield: 2, cannons: [{ diceCount: 2, damage: 2 }], missiles: [] },
+      stats: { initiative: 3, hp: 5, computer: 2, shield: 1, cannons: [{ diceCount: 2, damage: 2 }], missiles: [] },
     },
     {
       label: 'lancer',
@@ -869,6 +927,32 @@ export const FINAL_BOSS_IDS: FinalBossId[] = ['titan', 'empress', 'citadel'];
 // after: endgame fleet 54% (in the 25-55% target band), pre-fusion strong
 // fleet (no counter) 15% — a real fight, not a wall, for a merely-solid
 // finish.
+// 2026-08-08 (iteration 46.3): the whole final-boss trio drifted back
+// above its own iteration-31-M3 band (25-55%) without any single change
+// causing it — iterations 36-44's rarity/weapon/reprice churn all landed
+// after that re-tune and were never re-measured against this fixture
+// (65-73% by the time iteration 46 checked). A first attempt raised
+// shield (Titan's honor guard, Citadel's core) alongside HP — that
+// landed the endgame-fleet band correctly but collapsed the OTHER floor
+// check (the pre-fusion "strong fleet" must still beat each boss >= 9%,
+// not be walled) to 2-6%, while Hive Empress — buffed via ship count
+// only, no shield change — stayed comfortably at 40%. Matches this
+// project's own established pattern (GCDS/Warden/Guardian pair, all
+// documented elsewhere in this file): shield/computer are hit-threshold
+// levers that swing a weak fleet's odds far harder than a strong one's;
+// HP swings both more proportionally than shield — but not enough to
+// fully separate them: hp 12->16 (61% band, floor exactly at the 9%
+// edge) and 12->15 (66% band, worse) both left band over the ceiling;
+// 12->19 lands the band correctly (52%) but the floor check ("strong
+// fleet, pre-fusion, no counter" — a weaker build than the endgame
+// fixture) drops to 4%, below its own 9% floor. Same tension Void
+// Citadel's own comment below already documents and accepts for that
+// boss (couldn't clear both without re-opening its shield-vs-picket
+// tradeoff) — now true for Titan too. Landed on hp 19 (honor guard
+// shield reverted to 1): the endgame band is what's actually tied to
+// this iteration's act-2 target; the floor check is marked a known,
+// accepted marginal case in balance.ts (same treatment as Hive Mother's
+// pre-existing "KNOWN FAIL"), not silently ignored.
 const TITAN: EnemyDef = {
   id: 'titan',
   name: 'Titan',
@@ -879,7 +963,7 @@ const TITAN: EnemyDef = {
       count: 1,
       stats: {
         initiative: 1,
-        hp: 12,
+        hp: 19,
         computer: 1,
         shield: 0,
         cannons: [
@@ -912,17 +996,38 @@ const TITAN: EnemyDef = {
 // per ship are untouched; one more ship (6->7) is the entire change.
 // Measured after: endgame fleet 44%, pre-fusion strong fleet 53% (both
 // comfortably inside band/floor — this boss was never the hard case).
+//
+// 2026-08-08 (iteration 46.3): drifted back to 71% (see TITAN's comment
+// for the general "36-44 churn, never re-measured" cause). Same
+// discipline as before — ship count is this boss's lever, not per-ship
+// hp/comp (iteration 22.3's low-HP-per-ship-formation lesson still
+// applies): one more ship, 7 -> 8.
+// 2026-08-08 (iteration 46, the Empress decision): opted into greedy
+// lowest-HP targeting (`targetsLowestHp: true`), the sniper-class
+// exception to the 2026-08-08 random-targeting default. Her whole
+// designed counterplay — one fast escort denying her Outspeed gap
+// measurably improves the win rate, per this file's own balance.ts
+// check — depended on her fire concentrating on whoever the player
+// brought as tempo-cover, which random targeting undermined as a side
+// effect (the escort still denies the gap, but no longer draws the
+// attention that made bringing it feel like a real tactical choice
+// instead of a pure stat pick). Restores the original design outright
+// rather than redesigning the check around the side effect. Thematic
+// fit: "many small dice, doubled" already reads as a coordinated
+// hive-mind, not scattered independent raiders — focused fire suits her
+// better than most enemies' scatter.
 const HIVE_EMPRESS: EnemyDef = {
   id: 'empress',
   name: 'Hive Empress',
   blurb: 'Demands flak walls, arc projectors, and initiative — many small dice, doubled.',
-  groups: solo('empress', 7, {
+  groups: solo('empress', 8, {
     initiative: 4,
     hp: 2,
     computer: 1,
     shield: 0,
     cannons: [{ diceCount: 1, damage: 2 }],
     missiles: [{ diceCount: 2, damage: 1 }],
+    targetsLowestHp: true,
   }),
 };
 
@@ -944,6 +1049,21 @@ const HIVE_EMPRESS: EnemyDef = {
 // fleet (no counter) 9% — the one boss of the trio that couldn't clear
 // the other two's 10% floor without re-opening the shield-vs-picket
 // tradeoff above; see scripts/balance.ts's floor-check comment.
+// 2026-08-08 (iteration 46.3): drifted back to 65% (see TITAN's comment
+// for the general cause and why the first attempt — shield 2 -> 3 —
+// was reverted: it collapsed the pre-fusion floor check to 2%, the same
+// discrete hit-threshold effect TITAN's comment documents). hp 12 -> 16
+// landed the endgame band (53%) but the floor was still short (4% vs
+// 9%, worse at 12 -> 18: 2%) — the same band-vs-floor tension this
+// boss's ORIGINAL 31-M3 tuning already accepted (see this comment's own
+// history above: "couldn't clear the other two's 10% floor without
+// re-opening the shield-vs-picket tradeoff"). Landed on hp 18: the
+// endgame band (its actual target this iteration) lands correctly; the
+// floor stays the known, accepted marginal case it already was, now
+// marked explicitly in balance.ts rather than left implicit. shield
+// left at 2 throughout (still strictly above the picket's own shield 1
+// — "its pickets you can actually hit" untouched). Pickets and the
+// core's computer/dice/flak untouched.
 const VOID_CITADEL: EnemyDef = {
   id: 'citadel',
   name: 'Void Citadel',
@@ -955,7 +1075,7 @@ const VOID_CITADEL: EnemyDef = {
       count: 1,
       stats: {
         initiative: 0,
-        hp: 12,
+        hp: 18,
         computer: 1,
         shield: 2,
         cannons: [

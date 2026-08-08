@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import type { CommanderId } from '../src/game/commanders';
 import { runChecks } from './sim/gates';
 import type { CheckResult } from './sim/gates';
-import { regressionGate, wilsonInterval } from './sim/stats';
+import { bandGate, regressionGate, wilsonInterval } from './sim/stats';
 import type { WilsonInterval } from './sim/stats';
 import { pad, padNum } from './sim/table';
 import type { AgentRunOutcome } from './sim/agent';
@@ -133,6 +133,36 @@ if (storedBaseline) {
       'Copy the commander sweep numbers above into that file once they are reviewed as the accepted baseline.',
   );
 }
+// Iteration 46.4: band checks re-anchored to the 30/30 targets (was
+// 50/50 — see plans/iteration-46.md). As of 46.2/46.3's landed levers
+// (Sniper-pair fix, post-win repair, act-1-escalations-retire-at-
+// boundary, hard-pool + final-trio re-tune) act-1 clear reads 11-19%
+// and act-2 conditional/full-run both read a measured 0% — a real,
+// substantial improvement over the pre-46 state (act-1 was 6-13%,
+// act-2 conditional had never once been won) but still short of the
+// 20-40%/20-40%/4-16% target bands. Labeled explicitly as a known,
+// documented gap (not a silent regression) — the compounding math
+// across act 2's ~13 required fights means hitting 30% conditional
+// needs ~90%+ AVERAGE per-fight odds, well above what any individual
+// enemy-stat pass targeted; closing it needs either a broader
+// corridor-shortening pass or a revisited target, not further
+// blind nerfs — see this file's own status notes for the full
+// diagnosis.
+for (const r of commanderReports) {
+  checks.push({
+    label: `${r.label}: act-1 clear in the 20-40% target band — KNOWN GAP, see plans/iteration-46.md`,
+    verdict: bandGate(r.act1Clear, 20, 40),
+  });
+  checks.push({
+    label: `${r.label}: act-2 conditional clear in the 20-40% target band — KNOWN GAP, see plans/iteration-46.md`,
+    verdict: bandGate(r.act2Conditional, 20, 40),
+  });
+  checks.push({
+    label: `${r.label}: full-run clear in the 4-16% target band — KNOWN GAP, see plans/iteration-46.md`,
+    verdict: bandGate(r.fullRunClear, 4, 16),
+  });
+}
+
 // No-trap / no-dominant-build check for every archetype, always run
 // (doesn't depend on a stored baseline).
 for (const r of archetypeReports) {

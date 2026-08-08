@@ -228,14 +228,21 @@ for (const enemy of MATCHUPS) {
 // "wall of HP" approach), and the tempo-cover variant swaps that Bastion
 // for an Interceptor (base initiative 2, enough to deny her gap-4) instead
 // — the exact tank-vs-tempo-cover tradeoff the design doc describes.
+// 2026-08-08 (iteration 46): re-strengthened again — both fixtures had
+// drifted to a 1%/1% dead heat (unable to discriminate anything) as the
+// Empress's own ship count grew 6 -> 7 (31-M3) -> 8 (46.3, this
+// iteration's final-trio re-tune) without this fixture ever being
+// revisited; her alpha strike is now 16 missile dice, not the 12 this
+// fleet was originally sized for. +hull2 on both ships (survivability
+// only — the tank-vs-tempo-cover comparison itself is untouched).
 const EMPRESS = getFinalBoss('empress');
 const ALL_SLOW_FLEET: PlayerShipState[] = [
-  { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'shield1'], damage: 0, upgrades: [] },
-  { frameId: 'bastion', equipped: ['plasma'], damage: 0, upgrades: [] },
+  { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'shield1', 'hull2'], damage: 0, upgrades: [] },
+  { frameId: 'bastion', equipped: ['plasma', 'hull2'], damage: 0, upgrades: [] },
 ];
 const SLOW_FLEET_PLUS_INTERCEPTOR: PlayerShipState[] = [
-  { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'shield1'], damage: 0, upgrades: [] },
-  { frameId: 'interceptor', equipped: ['plasma'], damage: 0, upgrades: [] }, // base initiative 2 — enough to deny the Empress's gap-4 (4-2=2 < 4)
+  { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'shield1', 'hull2'], damage: 0, upgrades: [] },
+  { frameId: 'interceptor', equipped: ['plasma', 'hull2'], damage: 0, upgrades: [] }, // base initiative 2 — enough to deny the Empress's gap-4 (4-2=2 < 4)
 ];
 const empressAllSlow = simulateFleet(ALL_SLOW_FLEET, EMPRESS, SIMS);
 const empressPlusInterceptor = simulateFleet(SLOW_FLEET_PLUS_INTERCEPTOR, EMPRESS, SIMS);
@@ -340,10 +347,12 @@ for (const id of FINAL_BOSS_IDS) {
 // act later).
 const finalBossFloor: Record<FinalBossId, number> = { titan: 0, empress: 0, citadel: 0 };
 const finalBossFloorInterval: Partial<Record<FinalBossId, WilsonInterval>> = {};
+console.log('\nFloor check — strong fleet (pre-fusion, no counter) vs the trio:');
 for (const id of FINAL_BOSS_IDS) {
   const result = simulateFleet(STRONG_FLEET, getFinalBoss(id), SIMS);
   finalBossFloor[id] = result.winRate;
   finalBossFloorInterval[id] = result.interval;
+  console.log(`  ${pad(getFinalBoss(id).name, 18)}${result.winRate}%`);
 }
 
 // --- Iteration 34 (the relic chain) — the Ancient artifact, spot-checked --
@@ -486,18 +495,25 @@ const checks: CheckResult[] = [
     label: `act-2 endgame fleet (+ silver counter) vs ${getFinalBoss(id).name} in 25-55%`,
     verdict: bandGate(finalBossInterval[id]!, 25, 55),
   })),
-  ...FINAL_BOSS_IDS.map((id) => ({
-    // 9, not the initially-tried 15: tuning found Titan lands at 15% and
-    // Hive Empress far above it, but Void Citadel's core shield had to stay
-    // strictly above its picket's shield 1 (else the picket screen stops
-    // being "the one you can actually hit" — see enemies.ts's Citadel
-    // comment), which caps how far its floor can rise without pushing the
-    // endgame fleet's own win rate out of the 25-55 band above. 9 is the
-    // real floor all three bosses can hit at once without re-opening that
-    // tradeoff.
-    label: `strong fleet (pre-fusion, no counter) still beats ${getFinalBoss(id).name} >= 9% (not a wall)`,
-    verdict: floorGate(finalBossFloorInterval[id]!, 9),
-  })),
+  ...FINAL_BOSS_IDS.map((id) => {
+    // 9 was the real floor all three bosses could hit at once — until
+    // iteration 46.3 re-tuned the trio back into its endgame-fleet band
+    // (drifted to 65-73% from unrelated economy/rarity churn) and hit
+    // the same band-vs-floor tension Void Citadel's own comment already
+    // documented for itself: raising difficulty enough to satisfy the
+    // endgame-fleet band (this file's own check above, and the number
+    // actually tied to this iteration's act-2 target) pushes the
+    // pre-fusion floor fleet below 9% for Titan and Citadel too now —
+    // see enemies.ts's TITAN/VOID_CITADEL comments for the full
+    // isolation sweep. Left as documented, known-marginal FAILs (same
+    // treatment as Hive Mother's pre-existing one below) rather than
+    // silently loosened or dropped.
+    const knownMarginal = id === 'titan' || id === 'citadel';
+    return {
+      label: `strong fleet (pre-fusion, no counter) still beats ${getFinalBoss(id).name} >= 9% (not a wall)${knownMarginal ? ' — KNOWN MARGINAL (band-vs-floor tension), see enemies.ts' : ''}`,
+      verdict: floorGate(finalBossFloorInterval[id]!, 9),
+    };
+  }),
 ];
 
 const anyFailed = runChecks('Sanity checks', checks);

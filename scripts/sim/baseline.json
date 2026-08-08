@@ -1,5 +1,5 @@
 {
-  "_comment": "Recorded 2026-08-08 by scripts/runSim.ts (500 seeds/commander) — the first full-run (act 1 + act 2) measurement this project has ever had. Values are full-run clear rate percentages, keyed by commander id (matches RunReport.label in runSim.ts). Update deliberately, reviewed in diff like a snapshot test — see plans/iteration-45.md's status notes for the finding this baseline captures (full-run clear is 0% across every commander in this sample; act 2, once reached, was never won).",
+  "_comment": "Recorded 2026-08-08 by scripts/runSim.ts (500 seeds/commander) — most recently re-verified after iteration 46's 30/30 tuning pass. Values are full-run clear rate percentages, keyed by commander id (matches RunReport.label in runSim.ts). Update deliberately, reviewed in diff like a snapshot test. Still 0% for every commander even after iteration 46 (see plans/iteration-46.md's status notes) — act-1 clear improved substantially (6-13% -> 11-19%) and every individual act-2 fight/fixture is now healthy, but full-run/act-2-conditional clear remain a measured 0% due to compounding across act 2's ~13 required fights. The regression gate stays inert (0 -> 0 is never a regression) until a future measurement moves a commander's full-run rate above 0%.",
   "merchant": 0,
   "engineer": 0,
   "spymaster": 0,
