@@ -1,3 +1,4 @@
+import { pickOne } from './rng';
 import type { RngFn } from './rng';
 
 // Iteration 30: act 2's answer to iteration 28's protocol draft. Whatever
@@ -99,10 +100,6 @@ export function getCounterProtocol(id: CounterProtocolId): CounterProtocolDef {
 const SILVER_IDS: CounterProtocolId[] = ['hardened-veterans', 'targeting-arrays', 'evasive-doctrine'];
 const GOLD_IDS: CounterProtocolId[] = ['flak-screens', 'piercing-munitions', 'overdrive-signals'];
 const PRISMATIC_IDS: CounterProtocolId[] = ['ablative-plating', 'attack-wings', 'overcharged-munitions'];
-
-function pickOne(pool: CounterProtocolId[], rng: RngFn): CounterProtocolId {
-  return pool[Math.floor(rng() * pool.length)];
-}
 
 // Three offers, always [silver, gold, prismatic] — index-paired with
 // drawProtocolOffers's own [silver, gold, prismatic] output (protocols.ts),

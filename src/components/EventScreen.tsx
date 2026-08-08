@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getEvent, meetsRequirement } from '../game/events';
+import { getEvent, meetsRequirement, reqTextFor } from '../game/events';
 import { getPart } from '../game/parts';
 import type { PartId, RunState } from '../game/types';
 import { PartCard } from './PartCard';
@@ -44,7 +44,7 @@ export function EventScreen({ state, onChoose, onContinue, onViewMap, onViewFlee
                   <button type="button" className="shop-button" disabled>
                     {option.label}
                   </button>
-                  {option.reqText && <span className="event-screen__reqtext">{option.reqText}</span>}
+                  {reqTextFor(option) && <span className="event-screen__reqtext">{reqTextFor(option)}</span>}
                 </div>
               );
             }

@@ -1,5 +1,6 @@
 import type { CommanderId } from './commanders';
 import type { PlayerShipState } from './types';
+import { pickOne } from './rng';
 import type { RngFn } from './rng';
 
 // Iteration 28: the act-1 boss reward gains a second layer on top of
@@ -152,10 +153,6 @@ const GOLD_IDS: ProtocolId[] = [
   'overcharged-rounds',
 ];
 const PRISMATIC_IDS: ProtocolId[] = ['ghost-fleet-protocol', 'lone-flagship', 'armada-mandate', 'alpha-doctrine'];
-
-function pickOne(pool: ProtocolId[], rng: RngFn): ProtocolId {
-  return pool[Math.floor(rng() * pool.length)];
-}
 
 // Three offers, always exactly one silver / one gold / one prismatic — the
 // draft's whole point is that every offer is a real tier choice, not a

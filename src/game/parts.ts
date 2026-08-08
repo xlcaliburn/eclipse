@@ -1,4 +1,71 @@
-import type { Part, PartId } from './types';
+import type { Part } from './types';
+
+// 47.5k: the highest-leverage type change available — was `export type
+// PartId = string` (in types.ts), so every part id used in STARTING_FIT,
+// MERCENARY_FIT, SIGNATURE_PART, FUSABLE_PARTS, event requirement
+// literals, and every hand-built test fixture was an unchecked bare
+// string; a typo was a runtime crash mid-run (getPart throws on a miss),
+// not a build error. Hand-written (not `typeof PARTS[number]['id']`,
+// since PARTS is explicitly typed `Part[]` — a `[number]['id']` derive
+// would just resolve back to `Part['id']`'s own type, which is what this
+// union now defines, not the other way around) — same precedent as
+// FrameId in frames.ts. types.ts re-exports this (and types Part.id with
+// it) rather than the reverse, to keep every existing `import type {
+// PartId } from '../game/types'` call site unchanged.
+export type PartId =
+  | 'ion'
+  | 'light-missile'
+  | 'plasma'
+  | 'missile'
+  | 'comp1'
+  | 'comp2'
+  | 'comp3'
+  | 'shield1'
+  | 'shield2'
+  | 'shield3'
+  | 'hull1'
+  | 'hull2'
+  | 'hull3'
+  | 'init1'
+  | 'init2'
+  | 'init3'
+  | 'antimatter'
+  | 'flak'
+  | 'flak2'
+  | 'lure'
+  | 'reactive'
+  | 'lance'
+  | 'torpedo'
+  | 'arc'
+  | 'siege'
+  | 'battery'
+  | 'twinauto'
+  | 'clustermissile'
+  | 'protoovercharge'
+  | 'railgun'
+  | 'gravitonbeam'
+  | 'executioner'
+  | 'flechette'
+  | 'homing'
+  | 'prow'
+  | 'ablative'
+  | 'capacitor'
+  | 'cloak'
+  | 'injector'
+  | 'uplink2'
+  | 'dcbay'
+  | 'override'
+  | 'thrusters'
+  | 'modulator'
+  | 'chaff'
+  | 'tacrelay'
+  | 'shieldharmonic'
+  | 'repairbay'
+  | 'ecm'
+  | 'disruptor'
+  | 'commodity-lot'
+  | 'ancient-artifact'
+  | 'captured-plasma';
 
 // Iteration 40 weapon repricing: the Ion cannon (1 cannon die, 1 damage,
 // 3cr) is the price anchor for every other weapon in the roster — 3cr per
@@ -651,9 +718,16 @@ const CAPTURED_SCHEMATIC_PART: Part = {
   weapon: { kind: 'cannon', diceCount: 1, damage: 3 },
 };
 
-const PARTS_BY_ID: Record<PartId, Part> = Object.fromEntries(
+// Built dynamically (not FRAMES's hand-written-object-literal style, which
+// TS can exhaustiveness-check against Record<FrameId, Frame> for free) —
+// Object.fromEntries's inferred `{[k: string]: Part}` can't be verified
+// exhaustive against the PartId union at compile time, so this one cast is
+// the pragmatic exception. Real exhaustiveness is enforced the other
+// direction: `PARTS`/the 3 specials are typed `Part` (id: PartId), so a
+// typo'd literal id anywhere in this file already fails to compile.
+const PARTS_BY_ID = Object.fromEntries(
   [...PARTS, COMMODITY_LOT_PART, ANCIENT_ARTIFACT_PART, CAPTURED_SCHEMATIC_PART].map((p) => [p.id, p]),
-);
+) as Record<PartId, Part>;
 
 export function getPart(id: PartId): Part {
   const part = PARTS_BY_ID[id];

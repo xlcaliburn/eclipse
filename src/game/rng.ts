@@ -42,3 +42,27 @@ export function resumeRng(seed: number, alreadyConsumed: number): { rng: RngFn; 
   };
   return { rng, consumedThisCall: () => consumed };
 }
+
+// 47.5i: a uniformly random element of `pool`, weighted by nothing (see
+// reducer.ts's drawRarityWeighted for the weighted version). 6 private
+// copies of this exact formula existed under locally-meaningful names
+// (reducer.ts's pickFromPool/randomWreckPart, events.ts's randomPart/
+// pickFromPool, protocols.ts's and counterProtocols.ts's own pickOne) —
+// those distinct names stay as thin wrappers where a pool-specific name
+// carries real meaning at the call site; protocols.ts/counterProtocols.ts's
+// own `pickOne` were already this exact generic shape and now just import
+// it directly.
+export function pickOne<T>(pool: T[], rng: RngFn): T {
+  return pool[Math.floor(rng() * pool.length)];
+}
+
+// 47.5i: Fisher-Yates, seeded. Byte-identical copies lived in commanders.ts
+// and map.ts.
+export function shuffle<T>(items: T[], rng: RngFn): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}

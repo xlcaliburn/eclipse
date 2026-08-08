@@ -532,12 +532,23 @@ export function fastestInitiative(groups: EnemyGroup[]): number {
 
 // An elite variant of an enemy: extra HP per ship in every group (default
 // +2), same everything else.
+// 47.5j: the clone-and-bump-every-group's-HP shape, shared by eliteVariant,
+// convoyEscort, and applyVeterancy below — a shallow clone (spreads `g` and
+// `g.stats`, nothing deeper). Deliberately shallower than
+// applyCounterProtocol's own clone further down, which also deep-clones
+// `cannons` because it's the one caller that actually mutates a weapon
+// array; applyEscalations never touches cannons either, so it stays
+// shallow too — noted so the asymmetry reads as intentional, not a gap.
+function bumpGroupHp(enemy: EnemyDef, n: number): EnemyGroup[] {
+  return enemy.groups.map((g) => ({ ...g, stats: { ...g.stats, hp: g.stats.hp + n } }));
+}
+
 export function eliteVariant(enemy: EnemyDef, hpBonus = 2): EnemyDef {
   return {
     ...enemy,
     id: `${enemy.id}-elite`,
     name: `${enemy.name} (elite)`,
-    groups: enemy.groups.map((g) => ({ ...g, stats: { ...g.stats, hp: g.stats.hp + hpBonus } })),
+    groups: bumpGroupHp(enemy, hpBonus),
   };
 }
 
@@ -548,7 +559,7 @@ export function eliteVariant(enemy: EnemyDef, hpBonus = 2): EnemyDef {
 export function convoyEscort(enemy: EnemyDef): EnemyDef {
   return {
     ...enemy,
-    groups: enemy.groups.map((g) => ({ ...g, stats: { ...g.stats, hp: g.stats.hp + 1 } })),
+    groups: bumpGroupHp(enemy, 1),
   };
 }
 
@@ -666,7 +677,7 @@ export function applyVeterancy(enemy: EnemyDef, col: number): EnemyDef {
   if (bonus === 0) return enemy;
   return {
     ...enemy,
-    groups: enemy.groups.map((g) => ({ ...g, stats: { ...g.stats, hp: g.stats.hp + bonus } })),
+    groups: bumpGroupHp(enemy, bonus),
     veterancyBonus: bonus,
   };
 }

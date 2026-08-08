@@ -1,4 +1,5 @@
 import type { CommanderId } from './commanders';
+import type { PlayerFleetInput } from './combatEngine';
 import { getFrame } from './frames';
 import type { FrameId } from './frames';
 import { getPart } from './parts';
@@ -189,22 +190,25 @@ export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: Command
 // Also where the Engineer's banked over-repair (ship.overRepairBank) becomes
 // real ablative HP for this one fight — reducer.ts's ENGAGE clears the bank
 // afterward so it can't carry into a second fight.
+//
+// 47.5n: folded onto deriveFleetStats above (the two were the same
+// function twice — same fleetShieldAuraBonus + withAceBonus(deriveStats)
+// derivation, this one just layers the ablative-bank addition and the
+// {stats, initialDamage} wrapper on top). Also switched the aura-shield
+// bonus to the same immutable spread deriveFleetStats already used,
+// instead of its own in-place `stats.shield +=` mutation — deriveStats
+// always returns a fresh object here, so the mutation was never actually
+// unsafe, just inconsistent with its sibling. Returns the exported
+// PlayerFleetInput shape (combatEngine.ts) instead of restating it.
 export function deriveFleetForCombat(
   fleet: PlayerShipState[],
   commanderId?: CommanderId,
   protocols?: ProtocolId[],
-): { stats: ShipStats; initialDamage: number }[] {
-  const auraShield = fleetShieldAuraBonus(fleet);
-  return fleet.map((ship) => {
-    const stats = withAceBonus(
-      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions),
-      ship,
-      commanderId,
-      protocols,
-    );
-    if (auraShield > 0) stats.shield += auraShield;
-    if (ship.overRepairBank) stats.ablative = (stats.ablative ?? 0) + ship.overRepairBank;
-    return { stats, initialDamage: ship.damage };
+): PlayerFleetInput[] {
+  return deriveFleetStats(fleet, commanderId, protocols).map((stats, i) => {
+    const ship = fleet[i];
+    const withBank = ship.overRepairBank ? { ...stats, ablative: (stats.ablative ?? 0) + ship.overRepairBank } : stats;
+    return { stats: withBank, initialDamage: ship.damage };
   });
 }
 

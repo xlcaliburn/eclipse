@@ -1,14 +1,20 @@
 # Iteration 47 — The cleanup pass: dead code, shared components, deduplication (specced 2026-08-08)
 
-> **Status: 47.1–47.3 implemented and verified (2026-08-08); 47.4–47.7 not
-> started.** `tsc -b --force`, `vitest run` (683/683 — down from 704:
-> 5 forecast.test.ts tests removed with the module, 16 resolver.test.ts
-> tests removed with the dead engine, 7 kept as hitRule.test.ts), `vite
-> build`, and `npm run balance` all clean/unchanged after each milestone —
-> `npm run balance`'s FAIL/WARN lines are byte-identical to the pre-47
-> baseline throughout (no new failures at any point). See "Status notes"
-> near the end for what actually landed, what was deliberately deferred,
-> and why.
+> **Status: 47.1–47.5 implemented and verified (2026-08-08); 47.5p
+> deliberately deferred; 47.6–47.7 not started.** `tsc -b --force`,
+> `vitest run` (724/724 — up from the pre-47 704: net +20 across 5
+> deletions and several new pure-logic test files, see status notes),
+> `vite build`, `npm run balance`, and (once, as an extra check on the
+> CONTINUE/WITHDRAW settlement dedup — the highest-risk change in the
+> whole pass) `npm run balance:full` all clean/unchanged after every
+> milestone — every FAIL/WARN/KNOWN-GAP line is byte-identical to the
+> pre-47 baseline throughout, including the agent sweep's per-commander
+> act-1-clear percentages to one decimal place. One pre-existing flaky
+> test (`reducer.test.ts`'s Dreadnought-offer probabilistic check,
+> unrelated to anything touched here) surfaced twice mid-session and was
+> flagged as its own out-of-scope task, not fixed inline. See "Status
+> notes" near the end for what actually landed, what was deliberately
+> deferred, and why.
 
 User direction: "do some code review and clean up. there's been alot of
 updates over iterations, and it'll be good to break things up into
@@ -408,8 +414,78 @@ un-replicated, and `ledger.ts:33` explicitly defers to the latter.
   respectively), the App.tsx shop-toast cleanup (`shopToastText.ts` +
   `dispatchWithToast`, dropping App.tsx's getPart/getFrame/getUpgrade
   imports entirely), and the `mapProps` merge (App.tsx's 2 `<MapScreen>`
-  call sites down from ~18 props to a shared object + 2 each).
-  **Item l (`RunModifiers` type) deliberately deferred** — see below.
+  call sites down from ~18 props to a shared object + 2 each). Item l
+  (`RunModifiers` type) deliberately deferred — see below.
+- **47.4** — Both screen splits. `CombatScreen.tsx` 697 → ~230 lines: 6
+  extractions (`useTheaterFx`, `combatLogText.ts` + `<CombatLog>`,
+  `useReplayReveal`, `rollbackToRevealed` in replaySteps.ts,
+  `useOnboardingPopup`, `CombatCommandBar`), each verified independently
+  where it had pure logic to test — `combatLogText.test.ts` (14 tests)
+  and `rollbackToRevealed`'s 6 new `replaySteps.test.ts` cases both
+  passed on the FIRST run against hand-extracted logic, a real
+  behavior-preservation signal since no component-level test exists for
+  CombatScreen itself. `ShopScreen.tsx` 465 → 278: `<StoreSections>` /
+  `<ShipyardSections>` split cleanly, header/frame-offers/FleetPanel/
+  footer stayed in ShopScreen per the plan.
+- **47.5** — Items a–o and q–r implemented; item p deliberately deferred
+  (see below).
+  - **a–c (the correctness-critical dedup)**: `settleFleetAfterFight`,
+    `mergeRunStats`, `applyPostFightHeal` extracted from CONTINUE/
+    WITHDRAW. One real adaptation the plan's literal text didn't
+    anticipate: it suggested "have WITHDRAW call `combatOutcome`
+    instead of re-deriving destruction" — but `combatOutcome` THROWS
+    if `state.winner` isn't set, and WITHDRAW only ever runs when it
+    ISN'T (checked at the top of the case). Fixed by extracting the
+    formula itself (`shipEndState`, combatEngine.ts) and having both
+    `combatOutcome` and WITHDRAW call it — same dedup, correct this
+    time. Verified with `npm run balance:full` (not just the unit
+    suite) as an extra check, since this is the highest-risk change in
+    the whole pass — every number matched the pre-47 baseline to one
+    decimal place.
+  - **d–j (mechanical dedup)**: `enterCombat` (PICK_NODE's 5 returns),
+    the shared `resolved` object in PROTOCOL_CHOOSE, `partSellPrice`/
+    `hullScrapValue` (reducer.ts, closing the exact FleetPanel-preview-
+    vs-reducer drift class MERCENARY_FIT was exported to prevent),
+    `totalFlak` (combatEngine.ts), `src/game/util.ts` (`removeOnce`,
+    `mapShip` — 9 sites in reducer.ts + 2 in events.ts converted),
+    `rng.ts` (`pickOne` — 6 copies, including collapsing
+    protocols.ts's and counterProtocols.ts's own already-identically-
+    named `pickOne` into imports of the shared one; `shuffle` — 2
+    byte-identical Fisher-Yates), `bumpGroupHp` (enemies.ts, 3 sites).
+  - **k–o (type hardening)**: the `PartId` string-literal union — the
+    single highest-leverage change in the plan. Hand-written in
+    parts.ts (53 ids: 50 from `PARTS` + 3 specials kept out of it),
+    re-exported from types.ts so every existing `import type { PartId }
+    from '../game/types'` kept working unchanged; `Part.id` narrowed
+    from `string` to `PartId`. **Compiled clean across the whole
+    project on the first try** — no latent id typos surfaced, a real
+    (if quiet) confirmation the codebase was already internally
+    consistent. `drawRarityWeighted` made generic over the id type,
+    dropping 8 `as PartId` casts and the one genuinely unsound
+    `as Exclude<FrameId,'cruiser'>` (fixed by typing `drawFrameOffers`'s
+    pool as `{id, rarity}` pairs instead of full `Frame` objects, which
+    had been silently widening `.id` back to the full `FrameId` union).
+    `shipNames.ts`'s cast dropped by removing `FLAGSHIP_FRAME`'s
+    explicit `: FrameId` annotation — letting it infer the literal type
+    `'cruiser'` is what makes the early-return's narrowing real; the
+    logic itself was already correct. `deriveFleetForCombat` folded
+    into `deriveFleetStats`, returning the exported `PlayerFleetInput`
+    type; also switched its aura-shield step from an in-place mutation
+    to the same immutable spread its sibling used (never actually
+    unsafe — `deriveStats` always returns a fresh object — just
+    inconsistent). `pickTarget`'s 3 positional booleans replaced with
+    an options object.
+  - **q–r (events.ts)**: `describeRequirement` + `reqTextFor` replace
+    ~15 hand-synced `requirement`/`reqText` pairs (the exact class of
+    bug the file's own `:108` comment already documents one instance
+    of) — 1 bespoke override kept (militia-requisition's "a spare part
+    to donate" reads better than the generic derivation). New
+    `events.test.ts` coverage: 8 tests locking in the derived strings,
+    plus a table-driven alignment check — every EVENTS option, every
+    event, resolves through the real switch to genuine outcome text.
+    That check passed on the first run, meaning the 400-line
+    `choiceIndex` positional coupling the plan flagged as a real risk
+    currently has zero live drift.
 
 ### What was deferred, and why
 
@@ -422,29 +498,51 @@ un-replicated, and `ledger.ts:33` explicitly defers to the latter.
   correctness or duplication payoff — real risk of a wide, mechanical
   diff for a small benefit. Left for a future pass; not blocking
   anything else in this iteration.
-- **47.4 (CombatScreen/ShopScreen splits), 47.5 (game-layer dedup +
-  `PartId` union), 47.6 (reducer/shop.ts split), 47.7 (scripts
-  consolidation)**: not started. Each is substantial structural work in
-  its own right — 47.5 in particular touches the CONTINUE/WITHDRAW
-  post-fight settlement, the single highest-consequence duplication
-  flagged in the whole review — and deserves its own dedicated
-  implementation pass with full verification between milestones, the
-  same discipline 47.1–47.3 followed, rather than being compressed to
-  fit alongside them. The spec above is unchanged and ready to resume
-  from 47.4.
+- **47.5p (`pay`/`grant` event-outcome builders)**: the plan's own text
+  flags a real behavior-preservation risk here — negative credit
+  payouts across `resolveEventChoice`'s ~19 blocks are inconsistently
+  clamped today, and collapsing them requires verifying each site's
+  guard individually before trusting a uniform `pay()` helper to clamp
+  always. Medium value (pure boilerplate compression, no correctness
+  payoff — unlike 47.5q/r, which closed a real "silent drift" risk
+  class), genuinely careful per-site verification required. Left for a
+  dedicated pass; 47.5q/r (the higher-value, lower-risk two thirds of
+  the same "events.ts boilerplate" theme) are done.
+- **47.6 (reducer/shop.ts split), 47.7 (scripts consolidation)**: not
+  started. Both are substantial, self-contained structural passes in
+  their own right, better done with their own dedicated verification
+  cycle than compressed onto the end of this one. The spec above is
+  unchanged and ready to resume from 47.6 (47.5k, the `PartId` union,
+  already landed as its prerequisite).
 
 ### Verification history
 
-Every milestone (47.1, 47.2, 47.3) ran the full bar individually:
-`tsc -b --force` clean throughout; `vitest run` count moved
-704 → 699 (47.1, forecast.test.ts) → 683 (47.2, resolver.test.ts's dead
-`resolveCombat` tests) → 683 (47.3, no test-count change — pure
-component/prop refactoring); `vite build` clean throughout (CSS bundle
-dropped 47.21 kB → 45.42 kB, JS main bundle dropped slightly despite
-several new component files, net duplication removed); `npm run
-balance`'s FAIL/WARN lines are byte-identical to the pre-47 baseline
-after every single milestone — the one deliberate output change
-(47.1.2's endgame-fleet column) was verified not to flip any gate.
+Every milestone (47.1–47.5) ran the full bar individually: `tsc -b
+--force` clean throughout every single edit, not just at milestone
+boundaries; `vitest run` count moved 704 → 699 (47.1, forecast.test.ts
+removed) → 683 (47.2, resolver.test.ts's dead `resolveCombat` tests) →
+683 (47.3, pure component/prop refactoring, no count change) → 704
+(47.4, combatLogText.test.ts +14 and rollbackToRevealed's 6 new
+replaySteps.test.ts cases) → 716 (47.5 d–j, util.test.ts +6 and
+rng.test.ts +6) → 724 (47.5 q–r, events.test.ts +8). `vite build` clean
+throughout (CSS bundle 47.21 kB → 45.42 kB; JS main bundle net flat to
+slightly down despite ~10 new component/module files — duplication
+removed roughly offset the new-file overhead). `npm run balance`'s
+FAIL/WARN lines byte-identical to the pre-47 baseline after every
+single milestone (the one deliberate output change, 47.1.2's
+endgame-fleet column, was verified not to flip any gate). `npm run
+balance:full` run once more, after 47.5a-c specifically (the
+CONTINUE/WITHDRAW dedup) as an extra check beyond the unit suite —
+every per-commander act-1-clear percentage and every gate verdict
+matched the pre-47 baseline exactly.
+
+One pre-existing flaky test surfaced twice during this session's runs
+— `reducer.test.ts`'s "can offer the Dreadnought in an act-2 shipyard"
+(a fixed-iteration-count probabilistic draw, unrelated to anything
+touched in 47.1–47.5) — confirmed pre-existing (passes reliably in
+isolation, fails intermittently in the full suite) both times, and
+flagged as its own out-of-scope background task rather than fixed
+inline.
 
 ## Suggested commit sequence
 

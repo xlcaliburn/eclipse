@@ -1,3 +1,4 @@
+import { shuffle } from './rng';
 import type { RngFn } from './rng';
 
 // Iteration 21: the Warlord split into two — a wide fleet-of-cheap-hulls
@@ -80,15 +81,6 @@ const COMMANDER_IDS: CommanderId[] = ['merchant', 'engineer', 'warlord', 'spymas
 
 export function getCommander(id: CommanderId): Commander {
   return COMMANDERS[id];
-}
-
-function shuffle<T>(items: T[], rng: RngFn): T[] {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
 }
 
 // 3 of the 5 commanders, seeded — the player picks one of these three to

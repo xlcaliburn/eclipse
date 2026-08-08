@@ -5,8 +5,18 @@ import type { EventId } from './events';
 import type { FrameId } from './frames';
 import type { CommanderId } from './commanders';
 import type { GameMap, MapPosition } from './map';
+import type { PartId } from './parts';
 import type { ProtocolId } from './protocols';
 import type { UpgradeId } from './upgrades';
+
+// 47.5k: parts.ts is the source of truth (hand-written union, same
+// precedent as FrameId in frames.ts) — re-exported here so every existing
+// `import type { PartId } from '../game/types'` call site (there are many)
+// keeps working unchanged. This makes types.ts -> parts.ts a type-only
+// import; parts.ts separately imports `Part` (value-erased at runtime,
+// type-only both directions) from types.ts, so there's a type-level cycle
+// but never a runtime one.
+export type { PartId };
 
 export type PartType = 'weapon' | 'computer' | 'shield' | 'hull' | 'drive' | 'cargo';
 
@@ -19,7 +29,7 @@ export type WeaponKind = 'cannon' | 'missile';
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
 
 export interface Part {
-  id: string;
+  id: PartId;
   name: string;
   type: PartType;
   rarity: Rarity;
@@ -89,8 +99,6 @@ export interface Part {
   // carrier dies mid-combat).
   fleetShieldAura?: number;
 }
-
-export type PartId = string;
 
 // Derived combat stats for a single ship (one of the player's fleet, or one
 // enemy ship in a group — all ships in an enemy group share these stats).

@@ -1,7 +1,7 @@
 import type { CombatShip } from '../game/combatEngine';
 import type { FrameId } from '../game/frames';
 import type { Side } from '../game/types';
-import type { CardBadge } from './CombatScreen';
+import type { CardBadge } from './useTheaterFx';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
 import { EnemySilhouette, FrameSilhouette, BrokenHullGlyph } from './ShipSilhouette';

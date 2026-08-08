@@ -36,8 +36,13 @@ const HULL_CODE: Record<Exclude<FrameId, 'cruiser'>, string> = {
 };
 
 // The Flagship's frame. Named 'cruiser' for historical reasons — the frame
-// whose display name is "Flagship" (see frames.ts).
-const FLAGSHIP_FRAME: FrameId = 'cruiser';
+// whose display name is "Flagship" (see frames.ts). 47.5m: deliberately
+// NOT typed `: FrameId` — that would widen it past the literal 'cruiser',
+// which is what let `frameId === FLAGSHIP_FRAME` below narrow `frameId`
+// for real (the cast it used to need only existed because the compiler
+// couldn't see through the wide-typed comparison; the early return itself
+// was always correct).
+const FLAGSHIP_FRAME = 'cruiser';
 
 // The fleet prefix, worn only by the Flagship.
 const FLEET_PREFIX = 'ISV';
@@ -66,5 +71,5 @@ export function shipName(seed: number, counter: number, frameId: FrameId): strin
   // code.
   if (frameId === FLAGSHIP_FRAME) return `${FLEET_PREFIX} ${base}`;
   const hull = String(counter + 1).padStart(2, '0');
-  return `${HULL_CODE[frameId as Exclude<FrameId, typeof FLAGSHIP_FRAME>]}-${hull} ${base}`;
+  return `${HULL_CODE[frameId]}-${hull} ${base}`;
 }

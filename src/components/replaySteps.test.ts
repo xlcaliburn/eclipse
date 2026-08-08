@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CombatEvent } from '../game/types';
-import { countRevealSteps, revealStepEnd, shotKeyOf } from './replaySteps';
+import { countRevealSteps, revealStepEnd, rollbackToRevealed, shotKeyOf } from './replaySteps';
 
 function roll(side: 'player' | 'enemy', shooterIndex: number, extra: Partial<CombatEvent> = {}): CombatEvent {
   return {
@@ -107,5 +107,60 @@ describe('countRevealSteps', () => {
     }
     expect(i).toBe(log.length); // never overshoots
     expect(visited).toEqual([0, 2, 3]);
+  });
+});
+
+describe('rollbackToRevealed', () => {
+  it('at full reveal, nothing is pending and there is no active attacker/target', () => {
+    const log = [roll('player', 0), destroyed];
+    const result = rollbackToRevealed(log, log.length);
+    expect(result.visibleLog).toEqual(log);
+    expect(result.pendingDamage.size).toBe(0);
+    expect(result.pendingDestroyed.size).toBe(0);
+    expect(result.activeAttacker).toBeNull();
+    expect(result.activeTarget).toBeNull();
+  });
+
+  it('sums pending damage from not-yet-revealed rolls, keyed by the defender', () => {
+    // Two player rolls both hitting enemy ship 0, still pending — the
+    // defender's key is built from the OPPOSITE side of the shooter.
+    const log = [roll('player', 0, { targetIndex: 0, damage: 2 }), roll('player', 0, { targetIndex: 0, damage: 3 })];
+    const result = rollbackToRevealed(log, 0);
+    expect(result.pendingDamage.get('enemy:0')).toBe(5);
+  });
+
+  it('does not count a pending roll that missed (damage 0)', () => {
+    const log = [roll('player', 0, { targetIndex: 0, hit: false, damage: 0 })];
+    const result = rollbackToRevealed(log, 0);
+    expect(result.pendingDamage.size).toBe(0);
+  });
+
+  it('marks a not-yet-revealed destroyed ship as pending, not yet destroyed', () => {
+    const log = [destroyed]; // enemy:0
+    const result = rollbackToRevealed(log, 0);
+    expect(result.pendingDestroyed.has('enemy:0')).toBe(true);
+  });
+
+  it('reports the active attacker/target while mid-replay on a roll', () => {
+    // log.length > revealedCount — still mid-replay (isReplaying) when the
+    // just-revealed entry is checked.
+    const log = [roll('player', 0, { targetIndex: 1, hit: true }), destroyed];
+    const result = rollbackToRevealed(log, 1); // the roll just got revealed, destroyed still pending
+    expect(result.activeAttacker).toEqual({ side: 'player', index: 0 });
+    expect(result.activeTarget).toEqual({ side: 'enemy', index: 1, hit: true });
+  });
+
+  it('reports only an active target (no attacker) on a destroyed event', () => {
+    const log = [roll('player', 0), destroyed, phaseStart];
+    const result = rollbackToRevealed(log, 2); // destroyed just revealed, phaseStart still pending
+    expect(result.activeAttacker).toBeNull();
+    expect(result.activeTarget).toEqual({ side: 'enemy', index: 0, hit: true });
+  });
+
+  it('has no active attacker/target once fully revealed, even ending on a roll', () => {
+    const log = [roll('player', 0)];
+    const result = rollbackToRevealed(log, log.length);
+    expect(result.activeAttacker).toBeNull();
+    expect(result.activeTarget).toBeNull();
   });
 });

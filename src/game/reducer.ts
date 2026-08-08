@@ -5,6 +5,7 @@ import {
   initCombat,
   setPriorityTarget,
   runToEnd,
+  shipEndState,
   useActive,
 } from './combatEngine';
 import type { TargetingStance } from './combatEngine';
@@ -34,7 +35,7 @@ import type { CargoTag, GameMap, MapPosition } from './map';
 import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
 import { drawProtocolOffers, hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
-import { randomSeed, resumeRng } from './rng';
+import { pickOne, randomSeed, resumeRng } from './rng';
 import type { RngFn } from './rng';
 import {
   applyRepairBanking,
@@ -51,6 +52,7 @@ import {
 import { getUpgrade, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
 import { emptyRunStats } from './daily';
+import { mapShip, removeOnce } from './util';
 import { shipName } from './shipNames';
 import type { CombatEvent, EnemyDef, PartId, PlayerShipState, Rarity, RewardSummary, RunState, RunStats } from './types';
 
@@ -401,6 +403,27 @@ function drawCombatSeed(rng: RngFn): number {
   return Math.floor(rng() * 0xffffffff);
 }
 
+// 47.5d: PICK_NODE's 5 branches that land on a fight (opener, combat,
+// elite, boss, a Hunted-heat interception) all built this identical
+// object by hand, differing only in `currentEnemy` and whether
+// `interceptionActive` is set.
+function enterCombat(
+  base: RunState,
+  enemy: EnemyDef,
+  rng: RngFn,
+  nextCounter: () => number,
+  opts: { interceptionActive?: boolean } = {},
+): RunState {
+  return {
+    ...base,
+    phase: 'prep',
+    currentEnemy: enemy,
+    currentCombatSeed: drawCombatSeed(rng),
+    rngCounter: nextCounter(),
+    ...(opts.interceptionActive ? { interceptionActive: true as const } : {}),
+  };
+}
+
 export function initialRunState(options?: { seed?: number; mode?: 'daily'; dailyDate?: string }): RunState {
   const seed = options?.seed ?? randomSeed();
   // One rng stream seeds the whole run: the map first, then the escalation
@@ -475,6 +498,118 @@ function attributeFightStats(
     }
   }
   return { kills, damageDealt, damageTaken };
+}
+
+type FightStats = { kills: number[]; damageDealt: number; damageTaken: number };
+
+// 47.5a: extracted from CONTINUE and WITHDRAW, which each hand-rolled the
+// same post-fight fleet walk (skip mercenaries, salvage a destroyed ship's
+// equipped parts to inventory, carry a survivor's kills/fightsSurvived
+// forward) — the single highest-consequence duplication found in this
+// file's review, since either copy drifting from the other silently
+// changes salvage/kill-crediting rules. `outcome` is index-aligned to
+// `fleet`; CONTINUE derives it from `combatOutcome` (the fight has a
+// winner), WITHDRAW from `shipEndState` directly (the fight does NOT —
+// `combatOutcome` would throw). Heal (regen/Engineer/POST_WIN_REPAIR) is
+// deliberately NOT applied here — see `applyPostFightHeal` below, called
+// as a separate pass so each caller's own heal rules stay independent of
+// settlement.
+function settleFleetAfterFight(
+  fleet: PlayerShipState[],
+  outcome: { endDamage: number; destroyed: boolean }[],
+  fightStats: FightStats,
+  startingInventory: PartId[],
+  opts: { protocols?: ProtocolId[]; ghostFleet?: boolean } = {},
+): { survivingFleet: PlayerShipState[]; inventory: PartId[]; salvagedParts: PartId[]; lostShips: string[] } {
+  let inventory = startingInventory;
+  const salvagedParts: PartId[] = [];
+  const lostShips: string[] = [];
+  const survivingFleet: PlayerShipState[] = [];
+  fleet.forEach((ship, i) => {
+    // A hired mercenary is good for exactly this one fight — it leaves the
+    // fleet the moment combat resolves regardless of outcome, with no
+    // salvage and no ships-lost entry. It fought; it's not owed anything
+    // beyond that.
+    if (ship.mercenary) return;
+    const shipOutcome = outcome[i];
+    // Iteration 28 (Ghost fleet protocol): a ship that would be destroyed
+    // withdraws instead — no resolver change needed, since this is purely
+    // a reinterpretation of the fight's already-computed outcome: it
+    // simply doesn't take the "destroyed" branch below, and lands at 1 HP
+    // (critically damaged, not gone) instead. Its parts/upgrades are
+    // untouched (it never actually died), unlike a real destruction's
+    // salvage-and-lose. WITHDRAW never passes `ghostFleet` — a ship lost
+    // mid-withdrawal has always been lost outright, protocol or not; this
+    // extraction preserves that rather than newly applying the protocol
+    // somewhere it never used to reach.
+    if (shipOutcome.destroyed && opts.ghostFleet) {
+      const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, opts.protocols, ship.fusions).hp;
+      survivingFleet.push({
+        ...ship,
+        damage: Math.max(0, maxHp - 1),
+        kills: (ship.kills ?? 0) + fightStats.kills[i],
+        fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
+      });
+    } else if (shipOutcome.destroyed) {
+      // Parts salvage back to inventory; upgrades are lost with the ship —
+      // that's what makes a capital ship's upgrades feel earned. A
+      // commodity lot is not a real part — lost with the ship, not
+      // salvaged.
+      const salvage = ship.equipped.filter(isSalvageablePart);
+      inventory = [...inventory, ...salvage];
+      salvagedParts.push(...salvage);
+      lostShips.push(playerShipLabel(fleet, i));
+    } else {
+      survivingFleet.push({
+        ...ship,
+        damage: shipOutcome.endDamage,
+        kills: (ship.kills ?? 0) + fightStats.kills[i],
+        fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
+      });
+    }
+  });
+  return { survivingFleet, inventory, salvagedParts, lostShips };
+}
+
+// 47.5b: the 3 hand-spread RunStats merges (defeat, win, withdraw) folded
+// into one. `opts` covers exactly what varied between the three: only the
+// win/withdraw branches bump their own counter or append lostShips; defeat
+// touches neither (both flags omitted, `lostShips` omitted) — only
+// damageDealt/damageTaken change there, matching the original.
+function mergeRunStats(
+  base: RunStats,
+  fightStats: FightStats,
+  opts: { won?: boolean; withdrew?: boolean; lostShips?: string[] } = {},
+): RunStats {
+  return {
+    ...base,
+    fightsWon: base.fightsWon + (opts.won ? 1 : 0),
+    fightsWithdrawn: base.fightsWithdrawn + (opts.withdrew ? 1 : 0),
+    shipsLost: opts.lostShips && opts.lostShips.length > 0 ? [...base.shipsLost, ...opts.lostShips] : base.shipsLost,
+    damageDealt: base.damageDealt + fightStats.damageDealt,
+    damageTaken: base.damageTaken + fightStats.damageTaken,
+  };
+}
+
+// 47.5c: the divergent post-fight heal blocks in CONTINUE (regen +
+// Engineer's flat bonus + POST_WIN_REPAIR, with the Engineer's heal
+// BANKED past full via applyRepairBanking) vs WITHDRAW (bare regen, no
+// banking — regen now heals after any survived fight per iteration 39,
+// but the Engineer's bonus/banking stay win-only, tied to the reward
+// itself, not to merely surviving) — encoded as options rather than two
+// copies of the same shape. Applied as a separate pass AFTER
+// settleFleetAfterFight, over ships whose `damage` is already the
+// settled end-of-fight value.
+function applyPostFightHeal(
+  ship: PlayerShipState,
+  opts: { regen?: boolean; flat?: number; bank?: boolean } = {},
+): PlayerShipState {
+  const regenCount = opts.regen ? ship.upgrades.filter((u) => u === 'regen').length : 0;
+  const totalHeal = regenCount + (opts.flat ?? 0);
+  if (totalHeal === 0) return ship;
+  if (opts.bank) return applyRepairBanking(ship, totalHeal);
+  if (ship.damage === 0) return ship;
+  return { ...ship, damage: Math.max(0, ship.damage - totalHeal) };
 }
 
 // Vision extends further per pick for the Spymaster.
@@ -565,14 +700,6 @@ function grantCommanderIntel(state: RunState, rng: RngFn): { state: RunState; te
   return grantIntel(state, rng);
 }
 
-function removeOnce<T>(list: T[], item: T): T[] {
-  const index = list.indexOf(item);
-  if (index === -1) return list;
-  const copy = [...list];
-  copy.splice(index, 1);
-  return copy;
-}
-
 // A commodity lot isn't real equipment — unrealized profit, not a part —
 // and is lost outright with a destroyed/scuttled ship rather than salvaged
 // to inventory; shared here so every salvage site excludes it the same way.
@@ -627,11 +754,18 @@ export function rollRarity(rng: RngFn): Rarity {
 // time toward common, then walk back up past the rolled tier toward
 // legendary. The slot always fills as long as the pool itself isn't fully
 // taken (every real call site has far more candidates than offer slots).
-function drawRarityWeighted<T extends { id: string; rarity: Rarity }>(
+// 47.5l: generic over the id type itself (was `T extends {id: string}`,
+// returning bare `string` — every call site cast the result back to
+// PartId/FrameId by hand, including one genuinely unsound
+// `as Exclude<FrameId, 'cruiser'>` that the compiler had no way to verify).
+// `Id` is inferred from the pool's own element type, so a pool whose `.id`
+// is already narrowed (Part['id']: PartId since 47.5k) returns that exact
+// type with no cast at all.
+function drawRarityWeighted<Id extends string, T extends { id: Id; rarity: Rarity }>(
   pool: T[],
-  taken: Set<string>,
+  taken: Set<Id>,
   rng: RngFn,
-): string {
+): Id {
   const rolledIndex = RARITY_ORDER.indexOf(rollRarity(rng));
   const tryOrder = [0, -1, -2, -3, 1, 2, 3].map((offset) => rolledIndex + offset);
   for (const idx of tryOrder) {
@@ -688,6 +822,20 @@ export function partCost(partId: PartId, commanderId: CommanderId | undefined, p
   return Math.max(1, cost);
 }
 
+// 47.5f: half a part's LIST price (not partCost's discounted price — a
+// sell isn't a purchase), floored. Exported so FleetPanel's sell-price
+// preview reads from the exact same number SELL_PART actually pays,
+// same "one source of truth" reasoning MERCENARY_FIT was exported for.
+export function partSellPrice(partId: PartId): number {
+  return Math.floor(getPart(partId).cost / 2);
+}
+
+// 47.5f: same halving rule as partSellPrice, for a whole hull — currently
+// only PROTOCOL_CHOOSE's Lone flagship pick (scrapping every escort).
+export function hullScrapValue(frameId: FrameId): number {
+  return Math.floor(getFrame(frameId).cost / 2);
+}
+
 // Iteration 28 (Armada mandate): shops stock one fewer part — the offer's
 // last slot (the active-part slot) is dropped. That slot is also where the
 // Engineer's signature part (dcbay) gets force-inserted (see SIGNATURE_SLOT
@@ -702,14 +850,14 @@ export function partCost(partId: PartId, commanderId: CommanderId | undefined, p
 export function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: ProtocolId[]): PartId[] {
   const taken = new Set<PartId>();
   const offers = [
-    drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
-    drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
-    drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
-    drawRarityWeighted(DEFENSE_POOL, taken, rng) as PartId,
-    drawRarityWeighted(DEFENSE_POOL, taken, rng) as PartId,
-    drawRarityWeighted(DEFENSE_POOL, taken, rng) as PartId,
-    drawRarityWeighted(COMPUTER_DRIVE_POOL, taken, rng) as PartId,
-    drawRarityWeighted(ACTIVE_POOL, taken, rng) as PartId,
+    drawRarityWeighted(WEAPON_POOL, taken, rng),
+    drawRarityWeighted(WEAPON_POOL, taken, rng),
+    drawRarityWeighted(WEAPON_POOL, taken, rng),
+    drawRarityWeighted(DEFENSE_POOL, taken, rng),
+    drawRarityWeighted(DEFENSE_POOL, taken, rng),
+    drawRarityWeighted(DEFENSE_POOL, taken, rng),
+    drawRarityWeighted(COMPUTER_DRIVE_POOL, taken, rng),
+    drawRarityWeighted(ACTIVE_POOL, taken, rng),
   ];
   const trimmed = hasProtocol(protocols, 'armada-mandate') ? offers.slice(0, SHOP_OFFER_COUNT - 1) : offers;
   const signaturePart = commanderId ? SIGNATURE_PART[commanderId] : undefined;
@@ -751,19 +899,29 @@ export function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?
 // never be the place you find the roster's top tier.
 function drawFrameOffers(rng: RngFn, act: 1 | 2, kind: 'store' | 'shipyard'): Exclude<FrameId, 'cruiser'>[] {
   const dreadnoughtEligible = act === 2 && kind === 'shipyard';
-  let pool = PURCHASABLE_FRAME_IDS.filter((id) => dreadnoughtEligible || id !== 'dreadnought').map(getFrame);
+  // 47.5l: pool built as {id, rarity} pairs, not full Frame objects — a
+  // pool of `Frame[]` widens `.id` back to the whole FrameId union (Frame's
+  // own field type, `getFrame`'s return), losing PURCHASABLE_FRAME_IDS's
+  // `Exclude<'cruiser'>` narrowing at the type level even though no
+  // 'cruiser' ever appears at the value level. This is the only other
+  // field drawRarityWeighted's result depended on below, so nothing is
+  // lost by not carrying the rest of Frame through.
+  let pool = PURCHASABLE_FRAME_IDS.filter((id) => dreadnoughtEligible || id !== 'dreadnought').map((id) => ({
+    id,
+    rarity: getFrame(id).rarity,
+  }));
   if (kind === 'store') pool = pool.filter((f) => f.rarity !== 'epic' && f.rarity !== 'legendary');
   const count = kind === 'shipyard' ? 5 : 2;
-  const taken = new Set<FrameId>();
+  const taken = new Set<Exclude<FrameId, 'cruiser'>>();
   const offers: Exclude<FrameId, 'cruiser'>[] = [];
   for (let i = 0; i < count && taken.size < pool.length; i++) {
-    offers.push(drawRarityWeighted(pool, taken, rng) as Exclude<FrameId, 'cruiser'>);
+    offers.push(drawRarityWeighted(pool, taken, rng));
   }
   return offers;
 }
 
-function pickFromPool(pool: EnemyDef[], rng: () => number): EnemyDef {
-  return pool[Math.floor(rng() * pool.length)];
+function pickFromPool(pool: EnemyDef[], rng: RngFn): EnemyDef {
+  return pickOne(pool, rng);
 }
 
 // --- Cargo (iteration 15.1) --------------------------------------------
@@ -773,7 +931,7 @@ function pickFromPool(pool: EnemyDef[], rng: () => number): EnemyDef {
 const WRECK_FIELD_PART_POOL: PartId[] = PARTS.filter((p) => p.cost === 5).map((p) => p.id);
 
 function randomWreckPart(rng: RngFn): PartId {
-  return WRECK_FIELD_PART_POOL[Math.floor(rng() * WRECK_FIELD_PART_POOL.length)];
+  return pickOne(WRECK_FIELD_PART_POOL, rng);
 }
 
 // Applies the cargo table's credit adjustment to an already-computed base
@@ -902,7 +1060,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
               ...state.fleet,
               {
                 frameId: 'interceptor' as const,
-                equipped: ['ion'],
+                equipped: ['ion'] as PartId[],
                 damage: 0,
                 upgrades: [],
                 name: shipName(state.map.seed, commissioned, 'interceptor'),
@@ -923,7 +1081,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // corrupt the state this reducer was handed.
       const finalFleet =
         action.commanderId === 'warlord' && fleet[0]
-          ? fleet.map((s, i) => (i === 0 ? withUpgrade(s, randomUpgradeIds(1, rng)[0], action.commanderId) : s))
+          ? mapShip(fleet, 0, (s) => withUpgrade(s, randomUpgradeIds(1, rng)[0], action.commanderId))
           : fleet;
 
       // 2026-08-07: the setup phase (a customize-your-fit screen between
@@ -997,13 +1155,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // The act-1 opener: fixed enemy, no escalations (none are scheduled
         // before column 3 anyway), no veterancy, a guaranteed-survivable
         // first step.
-        return {
-          ...base,
-          phase: 'prep',
-          currentEnemy: OPENER,
-          currentCombatSeed: drawCombatSeed(rng),
-          rngCounter: nextCounter(),
-        };
+        return enterCombat(base, OPENER, rng, nextCounter);
       }
       // Escalations are seeded for both acts at once. Iteration 8.4 made
       // act-1's permanent once landed — carrying through and stacking with
@@ -1025,37 +1177,19 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // A convoy's +4cr premium (map.ts's CARGO_DESCRIPTION) is danger
         // money, not free — see convoyEscort's own comment.
         const enemy = withCounterProtocol(node.cargo === 'convoy' ? convoyEscort(scaledEnemy) : scaledEnemy, state);
-        return {
-          ...base,
-          phase: 'prep',
-          currentEnemy: enemy,
-          currentCombatSeed: drawCombatSeed(rng),
-          rngCounter: nextCounter(),
-        };
+        return enterCombat(base, enemy, rng, nextCounter);
       }
       if (node.type === 'elite') {
         const rawEnemy = eliteEnemyForColumn(state.act, node.col, rng);
         const enemy = withCounterProtocol(applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations), state);
-        return {
-          ...base,
-          phase: 'prep',
-          currentEnemy: enemy,
-          currentCombatSeed: drawCombatSeed(rng),
-          rngCounter: nextCounter(),
-        };
+        return enterCombat(base, enemy, rng, nextCounter);
       }
       if (node.type === 'boss') {
         // Iteration 30: the act-2 final boss is included, same uniformity
         // rule as escalations — the balance pass (not a fiat exemption)
         // catches it if a prismatic counter ever pushes a boss out of band.
         const enemy = withCounterProtocol(applyEscalations(bossEnemyForAct(state.map, state.act), globalCol, globalEscalations), state);
-        return {
-          ...base,
-          phase: 'prep',
-          currentEnemy: enemy,
-          currentCombatSeed: drawCombatSeed(rng),
-          rngCounter: nextCounter(),
-        };
+        return enterCombat(base, enemy, rng, nextCounter);
       }
       // shop / shipyard / repair / event — the "dock" node types (15.2,
       // shipyard added 33): each costs +1 heat to enter, unless heat is
@@ -1070,14 +1204,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // with this, not bypass it.
       if (base.heat >= MAX_HEAT) {
         const enemy = withCounterProtocol(hunterKillerForAmbush(state.act, node.col), state);
-        return {
-          ...base,
-          phase: 'prep',
-          currentEnemy: enemy,
-          currentCombatSeed: drawCombatSeed(rng),
-          interceptionActive: true,
-          rngCounter: nextCounter(),
-        };
+        return enterCombat(base, enemy, rng, nextCounter, { interceptionActive: true });
       }
       const heat = addHeat(base.heat, 1);
 
@@ -1172,20 +1299,14 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // since that's when it actually starts occupying a slot.
       if (action.partId === COMMODITY_LOT_PART_ID) {
         if (ship.mercenary) return state;
-        const fleet = state.fleet.map((s, i) =>
-          i === action.shipIndex
-            ? {
-                ...s,
-                equipped: [...s.equipped, action.partId],
-                commodityLotBoughtAtGlobalColumn: globalColumn(state.act, state.position?.col ?? 0),
-              }
-            : s,
-        );
+        const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({
+          ...s,
+          equipped: [...s.equipped, action.partId],
+          commodityLotBoughtAtGlobalColumn: globalColumn(state.act, state.position?.col ?? 0),
+        }));
         return { ...state, inventory: removeOnce(state.inventory, action.partId), fleet };
       }
-      const fleet = state.fleet.map((s, i) =>
-        i === action.shipIndex ? { ...s, equipped: [...s.equipped, action.partId] } : s,
-      );
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({ ...s, equipped: [...s.equipped, action.partId] }));
       return { ...state, inventory: removeOnce(state.inventory, action.partId), fleet };
     }
 
@@ -1208,7 +1329,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const newHp = deriveStats(ship.frameId, equipped, ship.upgrades, undefined, ship.fusions).hp;
       const hullReduction = Math.max(0, oldHp - newHp);
       const damage = Math.min(Math.max(0, ship.damage - hullReduction), Math.max(0, newHp - 1));
-      const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? { ...s, equipped, damage } : s));
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({ ...s, equipped, damage }));
       return { ...state, fleet, inventory: [...state.inventory, action.partId] };
     }
 
@@ -1266,11 +1387,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const baseStats = state.runStats ?? emptyRunStats();
 
       if (outcome.winner === 'enemy') {
-        const runStats: RunStats = {
-          ...baseStats,
-          damageDealt: baseStats.damageDealt + fightStats.damageDealt,
-          damageTaken: baseStats.damageTaken + fightStats.damageTaken,
-        };
+        const runStats = mergeRunStats(baseStats, fightStats);
         return { ...state, phase: 'defeat', pendingAmbushBonus: undefined, runStats, rngCounter: nextCounter() };
       }
 
@@ -1281,62 +1398,21 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // out, so it can never leak into an unrelated later fight.
       const ambushBonus = state.pendingAmbushBonus;
 
-      let inventory = ambushBonus?.partId ? [...state.inventory, ambushBonus.partId] : [...state.inventory];
-      const salvagedParts: PartId[] = [];
-      const lostShips: string[] = [];
-      const survivingFleet: PlayerShipState[] = [];
+      const startingInventory = ambushBonus?.partId ? [...state.inventory, ambushBonus.partId] : [...state.inventory];
       // Iteration 28 (Ghost fleet protocol): a ship that would be destroyed
-      // withdraws instead — no resolver change needed, since this is purely
-      // a reinterpretation of the fight's already-computed outcome: it
-      // simply doesn't take the "destroyed" branch below, and lands at 1
-      // HP (critically damaged, not gone) instead. Its parts/upgrades are
-      // untouched (it never actually died), unlike a real destruction's
-      // salvage-and-lose. The cost (repairs cost double, see the repair
-      // yard case) is what keeps this from being a strictly better outcome
-      // than surviving cleanly.
+      // withdraws instead — see settleFleetAfterFight's own comment for why.
       const ghostFleet = hasProtocol(state.protocols, 'ghost-fleet-protocol');
-      state.fleet.forEach((ship, i) => {
-        // A hired mercenary is good for exactly this one fight — it leaves
-        // the fleet the moment combat resolves regardless of outcome, with
-        // no salvage and no ships-lost entry. It fought; it's not owed
-        // anything beyond that.
-        if (ship.mercenary) return;
-        const shipOutcome = outcome.playerShips[i];
-        if (shipOutcome.destroyed && ghostFleet) {
-          const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, state.protocols, ship.fusions).hp;
-          survivingFleet.push({
-            ...ship,
-            damage: Math.max(0, maxHp - 1),
-            kills: (ship.kills ?? 0) + fightStats.kills[i],
-            fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
-          });
-        } else if (shipOutcome.destroyed) {
-          // Parts salvage back to inventory; upgrades are lost with the
-          // ship — that's what makes a capital ship's upgrades feel earned.
-          // A commodity lot is not a real part — lost with the ship, not
-          // salvaged.
-          const salvage = ship.equipped.filter(isSalvageablePart);
-          inventory = [...inventory, ...salvage];
-          salvagedParts.push(...salvage);
-          lostShips.push(playerShipLabel(state.fleet, i));
-        } else {
-          survivingFleet.push({
-            ...ship,
-            damage: shipOutcome.endDamage,
-            kills: (ship.kills ?? 0) + fightStats.kills[i],
-            fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
-          });
-        }
+      const settled = settleFleetAfterFight(state.fleet, outcome.playerShips, fightStats, startingInventory, {
+        protocols: state.protocols,
+        ghostFleet,
       });
+      const survivingFleet = settled.survivingFleet;
+      const salvagedParts = settled.salvagedParts;
+      const lostShips = settled.lostShips;
+      let inventory = settled.inventory;
 
       // Iteration 18: the run's cumulative record, after this win.
-      const runStatsAfterWin: RunStats = {
-        ...baseStats,
-        fightsWon: baseStats.fightsWon + 1,
-        shipsLost: [...baseStats.shipsLost, ...lostShips],
-        damageDealt: baseStats.damageDealt + fightStats.damageDealt,
-        damageTaken: baseStats.damageTaken + fightStats.damageTaken,
-      };
+      const runStatsAfterWin = mergeRunStats(baseStats, fightStats, { won: true, lostShips });
       const col = state.position?.col ?? 0;
       const globalCol = globalColumn(state.act, col);
       const isBoss = state.position?.col === bossColumn(state.act);
@@ -1461,18 +1537,17 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // (not just a repair-yard visit) closes most of that gap without
       // touching a single enemy's stats.
       const engineerHeal = state.commanderId === 'engineer' ? 1 : 0;
-      const healedFleet = survivingFleet.map((ship) => {
-        const regenCount = ship.upgrades.filter((u) => u === 'regen').length;
-        const totalHeal = regenCount + engineerHeal + POST_WIN_REPAIR;
-        if (totalHeal === 0) return ship;
-        // The Engineer banks a heal that outran actual damage instead of
-        // wasting it — including a ship that's already at 0 damage, where
-        // the WHOLE heal is excess. Everyone else keeps the plain no-op
-        // skip (nothing to gain from computing a repair that does nothing).
-        if (state.commanderId === 'engineer') return applyRepairBanking(ship, totalHeal);
-        if (ship.damage === 0) return ship;
-        return { ...ship, damage: Math.max(0, ship.damage - totalHeal) };
-      });
+      // The Engineer banks a heal that outran actual damage instead of
+      // wasting it — including a ship that's already at 0 damage, where the
+      // WHOLE heal is excess. Everyone else keeps the plain clamp (see
+      // applyPostFightHeal's own no-op skip when there's nothing to heal).
+      const healedFleet = survivingFleet.map((ship) =>
+        applyPostFightHeal(ship, {
+          regen: true,
+          flat: engineerHeal + POST_WIN_REPAIR,
+          bank: state.commanderId === 'engineer',
+        }),
+      );
 
       // 2026-08-06: was +2 — trimmed alongside the commodity-lot cap above.
       // This flat per-win bonus stacks with every fight in the run (8-10+
@@ -1537,43 +1612,22 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // surviving a withdrawal is still surviving a fight.
       const fightStats = attributeFightStats(state.combat.log, state.fleet.length);
       const baseStats = state.runStats ?? emptyRunStats();
-      let inventory = [...state.inventory];
-      const survivingFleet: PlayerShipState[] = [];
-      const lostShips: string[] = [];
-      state.fleet.forEach((ship, i) => {
-        // Same rule as a resolved combat (CONTINUE): a mercenary leaves the
-        // fleet the moment this fight is over, win, loss, or — here —
-        // withdrawal. Without this, a mercenary that happened to survive to
-        // the withdraw would wrongly persist into the next fight for free.
-        if (ship.mercenary) return;
-        const combatShip = state.combat!.playerShips[i];
-        const destroyed = combatShip.damage >= combatShip.stats.hp;
-        if (destroyed) {
-          inventory = [...inventory, ...ship.equipped.filter(isSalvageablePart)];
-          lostShips.push(playerShipLabel(state.fleet, i));
-        } else {
-          // Iteration 39: regen now heals after ANY survived fight, not
-          // just a win — "regenerative plating" shouldn't care why the
-          // fight ended. The Engineer's flat bonus/merchant/salvage stay
-          // win-only (unchanged) — those are tied to the reward itself,
-          // not to the ship surviving.
-          const regenCount = ship.upgrades.filter((u) => u === 'regen').length;
-          const damage = Math.min(combatShip.damage, combatShip.stats.hp);
-          survivingFleet.push({
-            ...ship,
-            damage: regenCount > 0 ? Math.max(0, damage - regenCount) : damage,
-            kills: (ship.kills ?? 0) + fightStats.kills[i],
-            fightsSurvived: (ship.fightsSurvived ?? 0) + 1,
-          });
-        }
-      });
-      const runStats: RunStats = {
-        ...baseStats,
-        fightsWithdrawn: baseStats.fightsWithdrawn + 1,
-        shipsLost: [...baseStats.shipsLost, ...lostShips],
-        damageDealt: baseStats.damageDealt + fightStats.damageDealt,
-        damageTaken: baseStats.damageTaken + fightStats.damageTaken,
-      };
+      // `state.combat.winner` is guaranteed unset here (guarded above), so
+      // this uses `shipEndState` directly rather than `combatOutcome` (which
+      // throws before a winner exists) — see settleFleetAfterFight's own
+      // comment. No `ghostFleet` option passed: a ship lost mid-withdrawal
+      // has always been lost outright, protocol or not.
+      const outcome = state.combat.playerShips.map(shipEndState);
+      const settled = settleFleetAfterFight(state.fleet, outcome, fightStats, [...state.inventory]);
+      const lostShips = settled.lostShips;
+      const inventory = settled.inventory;
+      // Iteration 39: regen now heals after ANY survived fight, not just a
+      // win — "regenerative plating" shouldn't care why the fight ended.
+      // The Engineer's flat bonus/banking stay win-only (applyPostFightHeal
+      // not passed `flat`/`bank`) — those are tied to the reward itself,
+      // not to the ship surviving.
+      const survivingFleet = settled.survivingFleet.map((ship) => applyPostFightHeal(ship, { regen: true }));
+      const runStats = mergeRunStats(baseStats, fightStats, { withdrew: true, lostShips });
 
       const fled = [...state.fled, state.position!];
       const position = revertedPosition(state);
@@ -1607,9 +1661,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (!state.pendingReward.upgradeOptions.includes(action.upgradeId)) return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
-      const fleet = state.fleet.map((s, i) =>
-        i === action.shipIndex ? withUpgrade(s, action.upgradeId, state.commanderId) : s,
-      );
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) => withUpgrade(s, action.upgradeId, state.commanderId));
       return {
         ...state,
         fleet,
@@ -1637,7 +1689,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // Draws from the full remaining upgrade list, same as a normal elite
       // kill above (see randomUpgradeIds's comment in upgrades.ts).
       const upgradeId = randomUpgradeIds(1, rng)[0];
-      const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? withUpgrade(s, upgradeId, state.commanderId) : s));
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) => withUpgrade(s, upgradeId, state.commanderId));
       // Into act 2: a fresh sector — position/visited/fled/fog reset, the
       // boss dossier resets (a second reveal purchase awaits). Iteration
       // 28: the protocol draft (offers already drawn, back at CONTINUE)
@@ -1670,6 +1722,18 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // counter, exactly as it would have before this iteration existed.
       const counterProtocol = state.protocolCounterOffers?.[action.index];
 
+      // 47.5e: shared once — every branch below records the pick the same
+      // way, differing only in what else (if anything) the specific
+      // protocol does immediately.
+      const resolved: RunState = {
+        ...state,
+        phase: 'map',
+        protocols,
+        protocolOffers: undefined,
+        counterProtocol,
+        protocolCounterOffers: undefined,
+      };
+
       // Lone flagship's immediate effect: scrap every escort right now, for
       // half its frame value — the permanent +2 slots/+2 HP on the Flagship
       // itself is a passive derive-time bonus (see ship.ts), not applied
@@ -1680,46 +1744,29 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // rule stated in plans/iteration-28.md.
       if (chosen === 'lone-flagship') {
         const escorts = state.fleet.filter((s) => s.frameId !== 'cruiser' && !s.mercenary);
-        const scrapValue = escorts.reduce((sum, s) => sum + Math.floor(getFrame(s.frameId).cost / 2), 0);
+        const scrapValue = escorts.reduce((sum, s) => sum + hullScrapValue(s.frameId), 0);
         const fleet = state.fleet.filter((s) => s.frameId === 'cruiser' || s.mercenary);
-        return {
-          ...state,
-          phase: 'map',
-          protocols,
-          protocolOffers: undefined,
-          counterProtocol,
-          protocolCounterOffers: undefined,
-          fleet,
-          credits: state.credits + scrapValue,
-        };
+        return { ...resolved, fleet, credits: state.credits + scrapValue };
       }
 
       // Deep-space relays' immediate effect: the fog high-water mark jumps
       // straight to the far end of act 2 — every node type from here to the
       // boss is visible from this moment on.
       if (chosen === 'deep-space-relays') {
-        return {
-          ...state,
-          phase: 'map',
-          protocols,
-          protocolOffers: undefined,
-          counterProtocol,
-          protocolCounterOffers: undefined,
-          // PROTOCOL_CHOOSE only ever resolves in act 2 (protocols are an
-          // act-2-only draft — see the type's own comment); state.act is
-          // already 2 by the time this fires (INTERLUDE_CHOOSE sets it
-          // before entering the 'protocol-draft' phase this action lives
-          // in), so laneColumns(state.act) here always means act 2's 12,
-          // not act 1's 10.
-          visionCol: laneColumns(state.act),
-        };
+        // PROTOCOL_CHOOSE only ever resolves in act 2 (protocols are an
+        // act-2-only draft — see the type's own comment); state.act is
+        // already 2 by the time this fires (INTERLUDE_CHOOSE sets it
+        // before entering the 'protocol-draft' phase this action lives
+        // in), so laneColumns(state.act) here always means act 2's 12,
+        // not act 1's 10.
+        return { ...resolved, visionCol: laneColumns(state.act) };
       }
 
       // Every other protocol (silver stat value, or a gold/prismatic whose
       // whole effect is a passive stat/pricing/combat hook read off
       // RunState.protocols elsewhere) needs nothing more than recording the
       // pick.
-      return { ...state, phase: 'map', protocols, protocolOffers: undefined, counterProtocol, protocolCounterOffers: undefined };
+      return resolved;
     }
 
     case 'RESOLVE_FLAGSHIP_RECOVERY': {
@@ -1774,7 +1821,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // same guard UNEQUIP already carries for the equipped case.
       if (action.partId === COMMODITY_LOT_PART_ID) return state;
       if (!state.inventory.includes(action.partId)) return state;
-      const payout = Math.floor(getPart(action.partId).cost / 2);
+      const payout = partSellPrice(action.partId);
       return {
         ...state,
         credits: state.credits + payout,
@@ -1958,7 +2005,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (!ship || ship.damage <= 0) return state;
       const cost = ship.damage * REPAIR_COST_PER_HP;
       if (state.credits < cost) return state;
-      const fleet = state.fleet.map((s, i) => (i === action.shipIndex ? { ...s, damage: 0 } : s));
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({ ...s, damage: 0 }));
       return { ...state, fleet, credits: state.credits - cost };
     }
 
@@ -1973,8 +2020,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const ship = state.fleet[action.shipIndex];
       if (!ship || ship.mercenary) return state;
       if (state.credits < SHIPYARD_UPGRADE_COST) return state;
-      const fleet = state.fleet.map((s, i) =>
-        i === action.shipIndex ? withUpgrade(s, state.shopUpgradeOffer!, state.commanderId) : s,
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) =>
+        withUpgrade(s, state.shopUpgradeOffer!, state.commanderId),
       );
       return { ...state, fleet, credits: state.credits - SHIPYARD_UPGRADE_COST, shopUpgradeOffer: undefined };
     }
@@ -1996,11 +2043,10 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (!fusable) return state; // not a fusable stat-ladder part
       const cost = fusionCost(fusable.stat, ship, fusable.amount);
       if (state.credits < cost) return state;
-      const fleet = state.fleet.map((s, i) =>
-        i === action.shipIndex
-          ? { ...s, fusions: { ...s.fusions, [fusable.stat]: (s.fusions?.[fusable.stat] ?? 0) + fusable.amount } }
-          : s,
-      );
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({
+        ...s,
+        fusions: { ...s.fusions, [fusable.stat]: (s.fusions?.[fusable.stat] ?? 0) + fusable.amount },
+      }));
       return { ...state, fleet, credits: state.credits - cost, inventory: removeOnce(state.inventory, action.partId) };
     }
 
@@ -2050,9 +2096,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (everyShipAtUpgradeCap(state.fleet, state.commanderId)) return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
-      const fleet = state.fleet.map((s, i) =>
-        i === action.shipIndex ? withUpgrade(s, action.upgradeId, state.commanderId) : s,
-      );
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) => withUpgrade(s, action.upgradeId, state.commanderId));
       const label = playerShipLabel(state.fleet, action.shipIndex);
       return {
         ...state,

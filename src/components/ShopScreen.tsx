@@ -3,30 +3,26 @@ import type { CommanderId } from '../game/commanders';
 import { FRAMES } from '../game/frames';
 import type { FrameId } from '../game/frames';
 import type { CounterProtocolId } from '../game/counterProtocols';
-import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
+import { COMMODITY_LOT_PART_ID } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import {
   commodityLotBuyCost,
   commodityLotCap,
-  COMMODITY_LOT_SELL_PRICE,
   fleetCap,
   frameCost,
   mercenaryCost,
-  MERCENARY_FIT,
-  partCost,
   RARITY_ORDER,
-  SHIPYARD_UPGRADE_COST,
   STARTING_FIT,
 } from '../game/reducer';
-import { FUSABLE_PARTS, FUSION_STAT_ABBR, FUSION_STAT_BASE, FUSION_STAT_ORDER, fusionCost } from '../game/ship';
+import { FUSABLE_PARTS } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
 import { FitChips } from './FitChips';
 import { FleetPanel } from './FleetPanel';
-import { PartCard } from './PartCard';
-import { ShipPickRow } from './ShipPickRow';
+import { ShipyardSections } from './ShipyardSections';
 import { FrameSilhouette } from './ShipSilhouette';
+import { StoreSections } from './StoreSections';
 
 // Iteration 31 (the Foundry): fuse it into the hull — permanent, no slot.
 // 2026-08-07: fusing now consumes an owned stat-ladder part (see
@@ -145,93 +141,27 @@ export function ShopScreen({
           : 'Spend credits on parts and ships — or bank them for the next station.'}
       </p>
 
-      {/* Iteration 33: a shipyard sells no parts — its whole identity is
-          hulls + the upgrade bay below. */}
+      {/* Iteration 33: a shipyard sells no parts or war assets — its whole
+          identity is hulls + the upgrade bay/Foundry below; a store stocks
+          neither of those, only parts + war assets + hulls. The two never
+          render together. */}
       {!isShipyard && (
-        <>
-          <h3>Parts for sale</h3>
-          {offers.length === 0 ? (
-            <p className="hint">Sold out.</p>
-          ) : (
-            <div className="shop-screen__offers">
-              {offers.map((partId, i) => {
-                // A commander's signature part (always in stock — see
-                // reducer.ts's drawShopOffers) shows its discounted price
-                // here; everyone else's offers are unaffected. Overriding
-                // just the displayed cost on a copy of the Part reuses
-                // PartCard's existing rendering/disabled logic untouched.
-                const cost = partCost(partId, commanderId, protocols);
-                const part = { ...getPart(partId), cost };
-                return (
-                  <PartCard
-                    key={`${partId}-${i}`}
-                    part={part}
-                    showCost
-                    onClick={credits >= cost ? () => onBuyPart(i) : undefined}
-                    disabled={credits < cost}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Iteration 20 (the economy floor): two ways to spend credits that
-          aren't parts or hulls — a trade lot and a one-fight hire. Both are
-          about giving late-run wealth somewhere to go. Iteration 33: the
-          shipyard doesn't stock these either — it sells permanence, not
-          consumables. */}
-      {!isShipyard && (
-        <>
-          <h3>War assets</h3>
-          <div className="shop-screen__offers">
-            <div className="card-tile card-tile--deep-scan">
-              <span className="card-tile__name">Commodity lot</span>
-              {lotsCarried > 0 && (
-                <span className="card-tile__desc">
-                  {lotsCarried} of {lotCap} lot{lotCap === 1 ? '' : 's'} carried.{' '}
-                  {commodityLotSellable
-                    ? `This station will pay ${COMMODITY_LOT_SELL_PRICE} credits each for whichever are old enough to sell.`
-                    : 'Not sellable until a later station.'}
-                </span>
-              )}
-              {commodityLotSellable && (
-                <button type="button" className="shop-button" onClick={onSellCommodityLot}>
-                  Sell eligible lot{lotsCarried > 1 ? 's' : ''} (+{COMMODITY_LOT_SELL_PRICE} cr each)
-                </button>
-              )}
-              {canBuyMoreLots && (
-                <>
-                  <span className="card-tile__desc">
-                    Equip it like a part. Sell for a profit at a later station — lost if the ship carrying it is.
-                  </span>
-                  <button type="button" className="shop-button" onClick={onBuyCommodityLot} disabled={credits < lotBuyCost}>
-                    Buy ({lotBuyCost} cr)
-                  </button>
-                </>
-              )}
-              <span className="frame-card__cost">
-                {canBuyMoreLots ? `${lotBuyCost} cr` : `${lotsCarried}/${lotCap} owned`}
-              </span>
-            </div>
-
-            <div className="card-tile card-tile--deep-scan">
-              <span className="card-tile__name">Mercenary escort</span>
-              <span className="card-tile__desc">
-                An Interceptor for hire, one fight only — no salvage if it falls. Works even at fleet capacity.
-              </span>
-              {/* 2026-08-08: show the weapon it actually arrives fitted with —
-                  same "always show the weapon with its dice" rule the frame
-                  cards' starting-fit preview already follows. */}
-              <FitChips partIds={MERCENARY_FIT} />
-              <button type="button" className="shop-button" onClick={onBuyMercenary} disabled={credits < mercCost}>
-                Hire ({mercCost} cr)
-              </button>
-              <span className="frame-card__cost">{mercCost} cr</span>
-            </div>
-          </div>
-        </>
+        <StoreSections
+          offers={offers}
+          credits={credits}
+          commanderId={commanderId}
+          protocols={protocols}
+          onBuyPart={onBuyPart}
+          lotsCarried={lotsCarried}
+          lotCap={lotCap}
+          commodityLotSellable={commodityLotSellable}
+          onSellCommodityLot={onSellCommodityLot}
+          canBuyMoreLots={canBuyMoreLots}
+          lotBuyCost={lotBuyCost}
+          onBuyCommodityLot={onBuyCommodityLot}
+          mercCost={mercCost}
+          onBuyMercenary={onBuyMercenary}
+        />
       )}
 
       <h3>{isShipyard ? 'Ships' : 'Expand your fleet'}</h3>
@@ -308,98 +238,16 @@ export function ShopScreen({
       )}
 
       {isShipyard && (
-        <>
-          <h3>Upgrade bay</h3>
-          {upgradeOffer ? (
-            <div className="shop-screen__offers">
-              <div className="card-tile card-tile--deep-scan">
-                <span className="card-tile__name">{getUpgrade(upgradeOffer).name}</span>
-                <span className="card-tile__desc">{getUpgrade(upgradeOffer).description}</span>
-                <span className="card-tile__desc">Slotless and permanent — pick which ship carries it.</span>
-                <ShipPickRow
-                  fleet={fleet}
-                  onPick={onBuyUpgrade}
-                  disabledFor={(ship) => credits < SHIPYARD_UPGRADE_COST || !!ship.mercenary}
-                  titleFor={(ship) =>
-                    ship.mercenary ? "A mercenary won't carry a permanent upgrade past its one fight." : undefined
-                  }
-                />
-                <span className="frame-card__cost">{SHIPYARD_UPGRADE_COST} cr</span>
-              </div>
-            </div>
-          ) : (
-            <p className="hint">Already fitted this visit.</p>
-          )}
-
-          {/* Iteration 31: the Foundry — fuse a part's worth of power
-              directly into a hull. Permanent, slotless; the late-run
-              credit sink for a fleet with full slots and nowhere else to
-              spend. 2026-08-07: fuses an OWNED stat-ladder part from
-              inventory (consumed on fuse), not a straight credit-only
-              upgrade — the escalating credit cost is shown as soon as a
-              part and a ship are picked, same as it always was, just one
-              step earlier in the flow now that there's a part to pick first. */}
-          <h3>Foundry</h3>
-          <p className="hint">
-            Fuse an owned stat part into a hull — permanent, no slot, and the part is consumed. Credit cost still
-            escalates per fusion, any stat, per ship.
-          </p>
-          {fusableInInventory.length === 0 ? (
-            <p className="hint">
-              No fusable parts in inventory — buy a stat item first (Hull plating, Gauss coils, Electron computer,
-              Ion thruster, or one of their +2/+3 upgrades). Base fuse price, before any prior fusions on that ship:{' '}
-              {FUSION_STAT_ORDER.map((stat, i) => (
-                <span key={stat}>
-                  {i > 0 && ' · '}
-                  {FUSION_STAT_BASE[stat]}cr {FUSION_STAT_ABBR[stat]}
-                </span>
-              ))}
-              .
-            </p>
-          ) : (
-            <div className="shop-screen__offers">
-              {fusableInInventory.map((partId) => {
-                const part = getPart(partId);
-                return (
-                  <button
-                    key={partId}
-                    type="button"
-                    className={`card-tile card-tile--deep-scan${selectedFusionPart === partId ? ' card-tile--selected' : ''}`}
-                    onClick={() => setSelectedFusionPart(partId)}
-                  >
-                    <span className="card-tile__name">{part.name}</span>
-                    <span className="card-tile__desc">{part.description}, permanent, consumed on fuse.</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {/* fusableInInventory.includes(...), not just FUSABLE_PARTS[...] —
-              once the last copy is consumed, this step disappears instead
-              of showing a stale, silently-refused ship-pick (the exact
-              "UI shows it as usable, reducer quietly refuses" bug class
-              fixed elsewhere this session for Lone flagship's slots). */}
-          {selectedFusionPart && fusableInInventory.includes(selectedFusionPart) && (
-            <>
-              <p className="hint">Fuse into which ship?</p>
-              <ShipPickRow
-                fleet={fleet}
-                onPick={(i) => onFuseStat(i, selectedFusionPart)}
-                noteFor={(ship) => {
-                  const fusable = FUSABLE_PARTS[selectedFusionPart]!;
-                  return `${fusionCost(fusable.stat, ship, fusable.amount)} cr`;
-                }}
-                disabledFor={(ship) => {
-                  const fusable = FUSABLE_PARTS[selectedFusionPart]!;
-                  return credits < fusionCost(fusable.stat, ship, fusable.amount) || !!ship.mercenary;
-                }}
-                titleFor={(ship) =>
-                  ship.mercenary ? "A mercenary won't carry a permanent fusion past its one fight." : undefined
-                }
-              />
-            </>
-          )}
-        </>
+        <ShipyardSections
+          upgradeOffer={upgradeOffer}
+          fleet={fleet}
+          credits={credits}
+          onBuyUpgrade={onBuyUpgrade}
+          fusableInInventory={fusableInInventory}
+          selectedFusionPart={selectedFusionPart}
+          onSelectFusionPart={setSelectedFusionPart}
+          onFuseStat={onFuseStat}
+        />
       )}
 
       <h3>Your fleet</h3>

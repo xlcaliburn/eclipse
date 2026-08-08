@@ -1,5 +1,6 @@
 import { BOSS_IDS, FINAL_BOSS_IDS } from './enemies';
 import type { BossId, FinalBossId } from './enemies';
+import { shuffle } from './rng';
 
 // 2026-08-07 (iteration 33): 'shipyard' is a second trade-station flavor,
 // not a variant of 'shop' — see reducer.ts's PICK_NODE (both resolve to
@@ -192,15 +193,6 @@ const ACT2_QUOTAS: NodeType[][] = [
   ['repair', 'elite', 'combat', 'event'],
   ['shop', 'elite', 'elite', 'combat'],
 ];
-
-function shuffle<T>(items: T[], rng: () => number): T[] {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
 
 // Iteration 22.2: places `pinned` at row 1 instead of leaving its row to the
 // shuffle. `nodesConnect` allows |row diff| <= 1, so row 1 is the one row

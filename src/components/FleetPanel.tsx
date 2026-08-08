@@ -4,7 +4,7 @@ import type { CounterProtocolId } from '../game/counterProtocols';
 import { getFrame } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
-import { REPAIR_COST_PER_HP, upgradeCapFor } from '../game/reducer';
+import { partSellPrice, REPAIR_COST_PER_HP, upgradeCapFor } from '../game/reducer';
 import { deriveFleetStats, effectiveSlots, fusionSummary, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { PartCard } from './PartCard';
@@ -242,11 +242,11 @@ export function FleetPanel({
                   type="button"
                   className="shop-button"
                   onClick={() => {
-                    const price = Math.floor(getPart(partId).cost / 2);
+                    const price = partSellPrice(partId);
                     if (window.confirm(`Sell ${getPart(partId).name} for ${price} credits?`)) onSellPart(partId);
                   }}
                 >
-                  Sell ({Math.floor(getPart(partId).cost / 2)} cr)
+                  Sell ({partSellPrice(partId)} cr)
                 </button>
               )}
             </div>

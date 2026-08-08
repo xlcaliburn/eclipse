@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { actColumns, generateMap } from './map';
 import { mulberry32 } from './rng';
 import type { RngFn } from './rng';
-import { drawEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
+import { describeRequirement, drawEvent, EVENTS, meetsRequirement, nextUnrevealedIndex, reqTextFor, resolveEventChoice } from './events';
 import { ANCIENT_ARTIFACT_PART_ID, getPart } from './parts';
 import type { RunState } from './types';
 
@@ -681,5 +681,94 @@ describe('nextUnrevealedIndex', () => {
       ],
     });
     expect(nextUnrevealedIndex(s0)).toBe(-1);
+  });
+});
+
+// 47.5q: describeRequirement replaced ~15 hand-synced requirement/reqText
+// pairs with a derivation — these lock in the exact prose every one of
+// those sites used to hardcode.
+describe('describeRequirement', () => {
+  it('names the required part', () => {
+    expect(describeRequirement({ kind: 'partEquipped', partId: 'dcbay' })).toBe('requires Damage control bay');
+    expect(describeRequirement({ kind: 'partEquipped', partId: 'cloak' })).toBe('requires Cloaking field');
+    expect(describeRequirement({ kind: 'partEquipped', partId: 'lure' })).toBe('requires Lure beacon');
+  });
+
+  it('names the required frame with the correct indefinite article', () => {
+    expect(describeRequirement({ kind: 'framePresent', frameId: 'interceptor' })).toBe(
+      'requires an Interceptor in the fleet',
+    );
+    expect(describeRequirement({ kind: 'framePresent', frameId: 'bastion' })).toBe('requires a Bastion in the fleet');
+  });
+
+  it('states the numeric thresholds', () => {
+    expect(describeRequirement({ kind: 'everyShipInitiativeAtLeast', value: 2 })).toBe(
+      'requires every ship at initiative 2+',
+    );
+    expect(describeRequirement({ kind: 'anyShipComputerAtLeast', value: 3 })).toBe(
+      'requires a ship with computer 3+',
+    );
+    expect(describeRequirement({ kind: 'creditsAtLeast', value: 6 })).toBe('requires 6+ credits');
+  });
+});
+
+describe('reqTextFor', () => {
+  it('prefers a bespoke reqText override over the generic derivation', () => {
+    const option = { label: 'x', requirement: { kind: 'inventoryAtLeast' as const, value: 1 }, reqText: 'requires a spare part to donate' };
+    expect(reqTextFor(option)).toBe('requires a spare part to donate');
+  });
+
+  it('derives from the requirement when no override is set', () => {
+    const option = { label: 'x', requirement: { kind: 'creditsAtLeast' as const, value: 6 } };
+    expect(reqTextFor(option)).toBe('requires 6+ credits');
+  });
+
+  it('is undefined for an option with no requirement', () => {
+    expect(reqTextFor({ label: 'x' })).toBeUndefined();
+  });
+
+  it('every gated option across the whole EVENTS table resolves to real text (the pairing this replaces can no longer drift silently)', () => {
+    for (const event of EVENTS) {
+      for (const option of event.options) {
+        if (option.requirement) {
+          expect(reqTextFor(option)).toBeTruthy();
+        }
+      }
+    }
+  });
+});
+
+// 47.5r (cheap version): `choiceIndex` positionally couples EVENTS'
+// options list to resolveEventChoice's switch, 400 lines apart, with
+// nothing checking the two stay aligned — reordering an option's label
+// would silently swap its outcome. This doesn't fix that (the proper fix,
+// keyed outcomes instead of indices, is parked — see parking-lot.md); it
+// catches the resulting class of bug: every declared option, for every
+// event in the table, must resolve through the real switch to actual
+// outcome text. `resolveEventChoice` itself doesn't bounds-check
+// `choiceIndex` (its own docstring: it trusts the caller, which is
+// reducer.ts's EVENT_CHOOSE, already validated by then) — this test's
+// scope is the in-range correspondence, which is the actual risk the
+// comment above describes.
+describe('resolveEventChoice — every EVENTS entry resolves (47.5r)', () => {
+  it('every event, every declared choiceIndex, produces real outcome text', () => {
+    const state = baseState({
+      credits: 20,
+      inventory: ['ion', 'comp1'],
+      fleet: [
+        { frameId: 'cruiser', equipped: ['ion', 'comp1', 'hull1'], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] },
+      ],
+    });
+    for (const event of EVENTS) {
+      event.options.forEach((option, choiceIndex) => {
+        const selection = {
+          shipIndex: option.chooseShip ? 0 : undefined,
+          partId: option.choosePart ? state.inventory[0] : undefined,
+        };
+        const result = resolveEventChoice(event.id, choiceIndex, state, mulberry32(choiceIndex + 1), selection);
+        expect(result.outcomeText, `${event.id}[${choiceIndex}]`).toBeTruthy();
+      });
+    }
   });
 });

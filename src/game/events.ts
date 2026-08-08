@@ -12,10 +12,13 @@ import { actColumns, globalColumn } from './map';
 import type { MapPosition } from './map';
 import { applyRepairBanking, deriveFleetStats, deriveStats } from './ship';
 import { ANCIENT_ARTIFACT_PART_ID, getPart } from './parts';
+import { getFrame } from './frames';
 import type { FrameId } from './frames';
 import type { ProtocolId } from './protocols';
+import { pickOne } from './rng';
 import type { RngFn } from './rng';
 import type { AmbushBonus, EnemyDef, PartId, PlayerShipState, RunState } from './types';
+import { mapShip, removeOnce } from './util';
 
 export type EventId =
   | 'derelict-cruiser'
@@ -69,6 +72,47 @@ export function meetsRequirement(req: EventRequirement, state: RunState): boolea
   }
 }
 
+function indefiniteArticle(word: string): string {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a';
+}
+
+// 47.5q: mirrors meetsRequirement's own switch. Most of the ~15 hand-synced
+// `requirement`/`reqText` pairs across EVENTS below were pure restatements
+// of the requirement — this generates that prose instead, so the pair can
+// never drift the way the 2026-08-07 bug (a missing `creditsAtLeast`
+// guard, see EventOption's own note above) showed a hand-maintained table
+// can. `inventoryAtLeast`'s generic phrasing here is a fallback only — the
+// one current use (militia-requisition, "a spare part to donate") keeps
+// its own bespoke `reqText` since the context-specific wording reads
+// better than anything this generic switch could produce.
+export function describeRequirement(req: EventRequirement): string {
+  switch (req.kind) {
+    case 'partEquipped':
+      return `requires ${getPart(req.partId).name}`;
+    case 'framePresent': {
+      const name = getFrame(req.frameId).name;
+      return `requires ${indefiniteArticle(name)} ${name} in the fleet`;
+    }
+    case 'everyShipInitiativeAtLeast':
+      return `requires every ship at initiative ${req.value}+`;
+    case 'anyShipComputerAtLeast':
+      return `requires a ship with computer ${req.value}+`;
+    case 'creditsAtLeast':
+      return `requires ${req.value}+ credits`;
+    case 'inventoryAtLeast':
+      return `requires ${req.value}+ spare part${req.value === 1 ? '' : 's'}`;
+    default:
+      return '';
+  }
+}
+
+// The text an EventOption's lock actually shows: a bespoke `reqText`
+// override if the option set one, else the generic derivation above.
+export function reqTextFor(option: EventOption): string | undefined {
+  if (option.reqText) return option.reqText;
+  return option.requirement ? describeRequirement(option.requirement) : undefined;
+}
+
 // --- Option list (14.1) ------------------------------------------------
 export interface EventOption {
   label: string; // includes any deterministic cost in text
@@ -96,7 +140,6 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Damage control bay: restore its systems — a part, +2 credits, no risk',
         requirement: { kind: 'partEquipped', partId: 'dcbay' },
-        reqText: 'requires Damage control bay',
       },
     ],
   },
@@ -109,12 +152,11 @@ export const EVENTS: EventDef[] = [
       // negative-credit option in this file gates on 'creditsAtLeast'
       // (see "Pay them off" / "Buy the final fragment" below); this one
       // was missed, so it stayed pickable at 0cr, taking credits negative.
-      { label: 'Detour around it (-2 credits)', requirement: { kind: 'creditsAtLeast', value: 2 }, reqText: 'requires 2+ credits' },
+      { label: 'Detour around it (-2 credits)', requirement: { kind: 'creditsAtLeast', value: 2 } },
       { label: 'Thread the field — pick a ship to lead the run through the rocks', chooseShip: true },
       {
         label: 'Full burn — every ship threads the gap in formation (+5 credits, clean)',
         requirement: { kind: 'everyShipInitiativeAtLeast', value: 2 },
-        reqText: 'requires every ship at initiative 2+',
       },
     ],
   },
@@ -131,7 +173,6 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Cloaking field: slip in and pull the core quietly',
         requirement: { kind: 'partEquipped', partId: 'cloak' },
-        reqText: 'requires Cloaking field',
       },
     ],
   },
@@ -154,7 +195,6 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Deep-decrypt — reveal the next two escalations',
         requirement: { kind: 'anyShipComputerAtLeast', value: 3 },
-        reqText: 'requires a ship with computer 3+',
       },
     ],
   },
@@ -168,7 +208,6 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Pace it in — chart the next two columns instead of one',
         requirement: { kind: 'framePresent', frameId: 'interceptor' },
-        reqText: 'requires an Interceptor in the fleet',
       },
     ],
   },
@@ -185,7 +224,6 @@ export const EVENTS: EventDef[] = [
       {
         label: 'The Bastion breaches — its armor shrugs off the point-defense, no damage taken',
         requirement: { kind: 'framePresent', frameId: 'bastion' },
-        reqText: 'requires a Bastion in the fleet',
       },
     ],
   },
@@ -209,12 +247,10 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Cloaking field: slip away clean',
         requirement: { kind: 'partEquipped', partId: 'cloak' },
-        reqText: 'requires Cloaking field',
       },
       {
         label: 'Pay them off (-6 credits)',
         requirement: { kind: 'creditsAtLeast', value: 6 },
-        reqText: 'requires 6+ credits',
       },
     ],
   },
@@ -228,7 +264,6 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Lure beacon: draw the raiders off with a false signal — no fight, +4 credits gratitude',
         requirement: { kind: 'partEquipped', partId: 'lure' },
-        reqText: 'requires Lure beacon',
       },
     ],
   },
@@ -241,19 +276,16 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Pay for repairs — pick a ship to patch up (4 credits, repairs 3 damage)',
         requirement: { kind: 'creditsAtLeast', value: 4 },
-        reqText: 'requires 4+ credits',
         chooseShip: true,
       },
       {
         label: 'Damage control bay: trade technique notes — pick a ship to patch up, free',
         requirement: { kind: 'partEquipped', partId: 'dcbay' },
-        reqText: 'requires Damage control bay',
         chooseShip: true,
       },
       {
         label: 'Full-fleet overhaul — every ship repairs 2 damage (8 credits)',
         requirement: { kind: 'creditsAtLeast', value: 8 },
-        reqText: 'requires 8+ credits',
       },
     ],
   },
@@ -317,7 +349,6 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Cloaking field: slip through the dead defenses — no damage',
         requirement: { kind: 'partEquipped', partId: 'cloak' },
-        reqText: 'requires Cloaking field',
       },
     ],
   },
@@ -332,7 +363,6 @@ export const EVENTS: EventDef[] = [
       {
         label: 'Buy the final fragment (-8 credits)',
         requirement: { kind: 'creditsAtLeast', value: 8 },
-        reqText: 'requires 8+ credits',
       },
       { label: 'Take it by force — the reliquary screams an alarm (+2 heat)' },
     ],
@@ -407,8 +437,7 @@ function applyCappedDamage(
   amount: number,
   protocols?: ProtocolId[],
 ): PlayerShipState[] {
-  return fleet.map((ship, i) => {
-    if (i !== shipIndex) return ship;
+  return mapShip(fleet, shipIndex, (ship) => {
     const hp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions).hp;
     const maxDamage = hp - 1;
     return { ...ship, damage: Math.min(maxDamage, ship.damage + amount) };
@@ -419,10 +448,9 @@ function applyCappedDamage(
 // ship's actual damage instead of wasting it — see ship.ts's
 // applyRepairBanking. Everyone else keeps the plain clamp.
 function applyRepair(fleet: PlayerShipState[], shipIndex: number, amount: number, bank: boolean): PlayerShipState[] {
-  return fleet.map((ship, i) => {
-    if (i !== shipIndex) return ship;
-    return bank ? applyRepairBanking(ship, amount) : { ...ship, damage: Math.max(0, ship.damage - amount) };
-  });
+  return mapShip(fleet, shipIndex, (ship) =>
+    bank ? applyRepairBanking(ship, amount) : { ...ship, damage: Math.max(0, ship.damage - amount) },
+  );
 }
 
 // Fleet triage (iteration 20): every ship at once, instead of the tender's
@@ -435,11 +463,11 @@ function applyRepairAll(fleet: PlayerShipState[], amount: number, bank: boolean)
 }
 
 function randomPart(rng: RngFn, pool: PartId[]): PartId {
-  return pool[Math.floor(rng() * pool.length)];
+  return pickOne(pool, rng);
 }
 
 function pickFromPool(pool: EnemyDef[], rng: RngFn): EnemyDef {
-  return pool[Math.floor(rng() * pool.length)];
+  return pickOne(pool, rng);
 }
 
 // The defector-pursuit's "hunt squad": a random pick from the current act's
@@ -926,10 +954,3 @@ function revealAndCancel(state: RunState): { state: RunState; text?: string } {
   return { state: { ...state, escalations }, text: `a scheduled enemy upgrade ("${cancelled.id}")` };
 }
 
-function removeOnce<T>(list: T[], item: T): T[] {
-  const index = list.indexOf(item);
-  if (index === -1) return list;
-  const copy = [...list];
-  copy.splice(index, 1);
-  return copy;
-}

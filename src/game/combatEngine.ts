@@ -100,6 +100,13 @@ function isAlive(ship: CombatShip): boolean {
   return remainingHp(ship) > 0;
 }
 
+// 47.5g: the fleet-wide flak pool — summed across every alive ship's own
+// `flak` stat — computed inline 3 times (2 byte-identical, the 3rd
+// specifically written to agree with the other two, per its own comment).
+function totalFlak(ships: CombatShip[]): number {
+  return ships.filter(isAlive).reduce((sum, s) => sum + (s.stats.flak ?? 0), 0);
+}
+
 // Greedy lowest- (or, for the siege cannon, highest-) remaining-HP
 // targeting. A taunting defender, if alive, overrides everything — every
 // die must go to a taunter (still narrowed by HP preference among them).
@@ -115,12 +122,14 @@ function isAlive(ship: CombatShip): boolean {
 // default targeting now (see fireShip), with sniper-class ships (
 // stats.targetsLowestHp) the deliberate opt-out that still passes nothing
 // here and falls through to the greedy behavior.
+// 47.5o: an options object instead of 3 positional booleans — call sites
+// like `pickTarget(defenders, false, true)` were a boolean trap (which
+// flag is which, at the call site, with no names to read).
 function pickTarget(
   defenders: CombatShip[],
-  preferHighest = false,
-  ignoreTaunt = false,
-  randomRng?: RngFn,
+  opts: { preferHighest?: boolean; ignoreTaunt?: boolean; randomRng?: RngFn } = {},
 ): CombatShip | null {
+  const { preferHighest = false, ignoreTaunt = false, randomRng } = opts;
   const alive = defenders.filter(isAlive);
   if (alive.length === 0) return null;
 
@@ -380,8 +389,8 @@ function fireShip(
       // targeting stance, AND taunt — always the plain lowest-HP defender.
       // Cloak's all-cloaked exception still applies (pickTarget handles it).
       const target = weapon.bypassTaunt
-        ? pickTarget(defenders, false, true)
-        : (priority ?? pickTarget(defenders, preferHighest, false, enemyRandomRng));
+        ? pickTarget(defenders, { ignoreTaunt: true })
+        : (priority ?? pickTarget(defenders, { preferHighest, randomRng: enemyRandomRng }));
       if (!target) return checkWinner(); // no legal target — the barrage finds nothing
 
       // Piloting capacitors add bonus piloting only during the missile
@@ -609,7 +618,7 @@ function fireShip(
       if (hit && weapon.cleaveDamage) {
         const secondary = pickTarget(
           defenders.filter((d) => d.index !== target.index),
-          preferHighest,
+          { preferHighest },
         );
         if (secondary) {
           secondary.damage += weapon.cleaveDamage;
@@ -713,7 +722,7 @@ export function openingTargetIndex(
   stance: TargetingStance = 'weakest',
 ): number {
   const { enemyShips } = initCombat([], enemyDef, 1, stance);
-  const target = pickTarget(enemyShips, stance === 'strongest');
+  const target = pickTarget(enemyShips, { preferHighest: stance === 'strongest' });
   return target ? target.index : -1;
 }
 
@@ -762,8 +771,8 @@ export function advanceRound(state: CombatState): CombatState {
   log.push({ kind: 'phase-start', phase, round: roundNumber });
 
   const flakState: FlakState = {
-    playerRemaining: isMissilePhase ? playerShips.filter(isAlive).reduce((sum, s) => sum + (s.stats.flak ?? 0), 0) : 0,
-    enemyRemaining: isMissilePhase ? enemyShips.filter(isAlive).reduce((sum, s) => sum + (s.stats.flak ?? 0), 0) : 0,
+    playerRemaining: isMissilePhase ? totalFlak(playerShips) : 0,
+    enemyRemaining: isMissilePhase ? totalFlak(enemyShips) : 0,
   };
 
   const order = computeActivationOrder(playerShips, enemyShips, roundModifiers.initiativeBonus);
@@ -943,7 +952,10 @@ export function incomingFirePreview(state: CombatState): FirePreview {
     // previewing, so it can't share a live pick with the real resolution;
     // computing the identical pure function is how the two agree anyway.
     const randomRng = ship.stats.targetsLowestHp ? undefined : enemyTargetRng(state.seed, state.round, ship.index);
-    const target = pickTarget(legalDefenders(state.playerShips, state.roundModifiers), !!weapons[0]?.targetHighest, false, randomRng);
+    const target = pickTarget(legalDefenders(state.playerShips, state.roundModifiers), {
+      preferHighest: !!weapons[0]?.targetHighest,
+      randomRng,
+    });
     if (!target) continue;
     const outspeed = outspeedingEnemies.has(ship.index);
     const multiplier = outspeed ? 2 : 1;
@@ -952,8 +964,7 @@ export function incomingFirePreview(state: CombatState): FirePreview {
     entries.push({ shooterIndex: ship.index, targetIndex: target.index, diceCount, maxDamage, outspeed });
   }
 
-  const flakCancels =
-    phase === 'missile' ? state.playerShips.filter(isAlive).reduce((sum, s) => sum + (s.stats.flak ?? 0), 0) : 0;
+  const flakCancels = phase === 'missile' ? totalFlak(state.playerShips) : 0;
 
   return { phase, entries, flakCancels };
 }
@@ -974,6 +985,15 @@ export function runToEnd(state: CombatState): CombatState {
   return s;
 }
 
+// 47.5a: a ship's clamped end-of-fight damage + whether it's destroyed —
+// pure function of one CombatShip, no `state.winner` requirement. Exported
+// so the reducer's WITHDRAW case (which runs deliberately on an UNFINISHED
+// fight — `combatOutcome` below would throw) can compute the identical
+// destroyed/endDamage formula without re-deriving it by hand.
+export function shipEndState(s: CombatShip): { endDamage: number; destroyed: boolean } {
+  return { endDamage: Math.min(s.damage, s.stats.hp), destroyed: s.damage >= s.stats.hp };
+}
+
 export interface CombatOutcome {
   winner: Side;
   log: CombatEvent[];
@@ -985,10 +1005,7 @@ export function combatOutcome(state: CombatState): CombatOutcome {
   return {
     winner: state.winner,
     log: state.log,
-    playerShips: state.playerShips.map((s) => ({
-      endDamage: Math.min(s.damage, s.stats.hp),
-      destroyed: s.damage >= s.stats.hp,
-    })),
+    playerShips: state.playerShips.map(shipEndState),
   };
 }
 
