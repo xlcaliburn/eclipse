@@ -346,6 +346,37 @@ describe('EQUIP/UNEQUIP — works in both prep and shop phases', () => {
     expect(withHull.fleet[0].equipped).toContain('hull1'); // non-weapon still fits
   });
 
+  // 2026-08-07 bug fix: EQUIP's own room check omitted `state.protocols`,
+  // so Lone flagship's +2 bonus slots (real everywhere else — deriveStats,
+  // FleetPanel/FleetOverlay's "has room" checks) were invisible to the one
+  // gate that actually allows an equip. The UI showed room and let the
+  // player click; the reducer silently refused it anyway.
+  it('Lone flagship: the Flagship can actually use its +2 bonus slots, not just display them', () => {
+    const fleet: PlayerShipState[] = [
+      {
+        frameId: 'cruiser', // 6 base slots
+        equipped: ['comp1', 'comp1', 'comp1', 'comp1', 'comp1', 'comp1'], // full at base capacity
+        damage: 0,
+        upgrades: [],
+      },
+    ];
+    let state: RunState = {
+      ...initialRunState(),
+      phase: 'prep',
+      fleet,
+      protocols: ['lone-flagship'],
+      inventory: ['hull1', 'hull1'],
+    };
+    state = runReducer(state, { type: 'EQUIP', shipIndex: 0, partId: 'hull1' });
+    expect(state.fleet[0].equipped).toHaveLength(7); // bonus slot 1 — used to silently refuse here
+    state = runReducer(state, { type: 'EQUIP', shipIndex: 0, partId: 'hull1' });
+    expect(state.fleet[0].equipped).toHaveLength(8); // bonus slot 2
+
+    // A 9th part still refuses — the bonus is +2, not unlimited.
+    const overCap = runReducer({ ...state, inventory: ['hull1'] }, { type: 'EQUIP', shipIndex: 0, partId: 'hull1' });
+    expect(overCap.fleet[0].equipped).toHaveLength(8);
+  });
+
   it('unequipping a hull part never drops a ship below 1 HP remaining (bug: used to "destroy" it)', () => {
     // interceptor: base HP 2, +1 from hull1 = 3 max HP, sitting at 2 damage (1 HP left).
     const fleet: PlayerShipState[] = [{ frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 2, upgrades: [] }];
@@ -892,7 +923,7 @@ describe('CONTINUE — persists damage, salvages destroyed ships, awards credits
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('interlude');
     expect(result.pendingReward).toBeUndefined();
-    expect(result.credits).toBe(10); // eliteReward(globalColumn(1, 10)) = floor((11 + 10) / 2), act-1 halved
+    expect(result.credits).toBe(21); // eliteReward(globalColumn(1, 10)) = 11 + 10 (2026-08-07: un-halved)
   });
 
   it('winning the final (act-2) boss ends the run in victory and skips the reward screen', () => {
@@ -1329,7 +1360,7 @@ describe('ambush events (ancient-cache)', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('reward');
-    expect(result.pendingReward?.credits).toBe(4); // winReward(1) = floor(8/2), act-1 halved
+    expect(result.pendingReward?.credits).toBe(8); // winReward(1) = 7 + 1 (2026-08-07: un-halved)
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
   });
 });
@@ -1379,14 +1410,30 @@ describe('EVENT_CHOOSE — framework validation (14.1)', () => {
     expect(result).toEqual(state);
   });
 
-  it('credits never go negative through the reducer either', () => {
+  // 2026-08-07 bug fix: the Detour option ("-2 credits") had no
+  // `creditsAtLeast` requirement, unlike every other negative-credit
+  // option in events.ts — it was pickable at 0-1cr with no way to pay it.
+  // Now it's refused below 2cr, same as its siblings.
+  it('the Detour option is refused below its 2-credit cost, not clamped to 0', () => {
     const state = stateWithMap('event', {
       phase: 'event',
       currentEvent: { eventId: 'asteroid-field' },
       credits: 1,
     });
     const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 }); // detour, -2
+    expect(result.credits).toBe(1); // refused — unchanged
+    expect(result.currentEvent?.outcomeText).toBeUndefined(); // still undecided
+  });
+
+  it('the Detour option succeeds at exactly its cost and clamps at 0', () => {
+    const state = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'asteroid-field' },
+      credits: 2,
+    });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 }); // detour, -2
     expect(result.credits).toBe(0);
+    expect(result.currentEvent?.outcomeText).toBeDefined();
   });
 
   it('a second EVENT_CHOOSE dispatch after the event is already decided is a no-op', () => {
@@ -1554,7 +1601,7 @@ describe('ambush win bonus (14.2/14.3)', () => {
     };
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('reward');
-    expect(result.pendingReward?.credits).toBe(4 + 6); // winReward(1) = floor(8/2), act-1 halved + the ambush bonus
+    expect(result.pendingReward?.credits).toBe(8 + 6); // winReward(1) = 7 + 1 (un-halved) + the ambush bonus
     expect(result.inventory).toContain('plasma');
     expect(result.pendingAmbushBonus).toBeUndefined();
   });
@@ -2718,7 +2765,7 @@ describe('iteration 8: the opener (act-1 column 0)', () => {
       combat: { ...combat, winner: 'player' as const },
     };
     const result = runReducer(state, { type: 'CONTINUE' });
-    expect(result.pendingReward?.credits).toBe(3); // winReward(0) = floor(7/2), act-1 halved
+    expect(result.pendingReward?.credits).toBe(7); // winReward(0) = 7 + 0 (2026-08-07: un-halved)
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
   });
 

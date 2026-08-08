@@ -97,7 +97,11 @@ export const EVENTS: EventDef[] = [
     title: 'Asteroid field',
     flavor: 'A dense field blocks the direct route.',
     options: [
-      { label: 'Detour around it (-2 credits)' },
+      // 2026-08-07 bug fix: this had no requirement — every other
+      // negative-credit option in this file gates on 'creditsAtLeast'
+      // (see "Pay them off" / "Buy the final fragment" below); this one
+      // was missed, so it stayed pickable at 0cr, taking credits negative.
+      { label: 'Detour around it (-2 credits)', requirement: { kind: 'creditsAtLeast', value: 2 }, reqText: 'requires 2+ credits' },
       { label: 'Thread the field — pick a ship to lead the run through the rocks', chooseShip: true },
       {
         label: 'Full burn — every ship threads the gap in formation (+5 credits, clean)',

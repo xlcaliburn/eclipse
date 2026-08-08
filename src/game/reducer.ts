@@ -322,14 +322,19 @@ function hullRarityBonus(rarity: Rarity, rng: RngFn): { hp: number; upgrades: Up
 // reaching computer 2 by the mid pool or never reaching it at all (see
 // plans/iteration-22.md's status notes on the 0%-comp2-by-col6 finding).
 //
-// 2026-08-07: act 1 halved (floored) — a deliberate re-tightening of the
-// early game specifically, not a whole-run economy cut. Act 2 is
-// unaffected, which means the reward curve jumps sharply right at the act
-// boundary (global col 10 -> 11) — intentional, not a bug: the point is a
-// harder opening act, not a smoother ramp through it.
-export function winReward(col: number, act: 1 | 2 = 1): number {
-  const base = 7 + col;
-  return act === 1 ? Math.floor(base / 2) : base;
+// 2026-08-07: act 1 was briefly halved (floored) here — a deliberate
+// re-tightening of the early game specifically. Un-halved the same day,
+// after a playtest report plus an actRun.ts isolation sweep (see
+// plans/iteration-44.md's 44.1) showed the halving was overwhelmingly the
+// dominant cause of every commander's act-1 clear rate collapsing to
+// 0.6%-4.6% (vs. a historical 3.8%-20.8% best-case — see iteration-22.md;
+// the un-halved rate at least gets back to that healthier territory).
+// `act` stays a parameter (every call site still passes it explicitly)
+// even though act 1 and act 2 now compute identically — kept for the next
+// time these two eras' economies need to diverge again, rather than
+// stripping the parameter and re-adding it later.
+export function winReward(col: number, _act: 1 | 2 = 1): number {
+  return 7 + col;
 }
 
 // Credits earned for winning an elite node at the given (global) column.
@@ -337,10 +342,10 @@ export function winReward(col: number, act: 1 | 2 = 1): number {
 // hand was full) on top of this — now a flat +4cr bonus every time (see
 // the CONTINUE case). Iteration 22.6: base bumped 8->11, same reasoning as
 // winReward above — kept 3cr above it so an elite still reads as the
-// bigger payout. 2026-08-07: act-1 halving, same as winReward.
-export function eliteReward(col: number, act: 1 | 2 = 1): number {
-  const base = 11 + col;
-  return act === 1 ? Math.floor(base / 2) : base;
+// bigger payout. 2026-08-07: act-1 halving added, then un-halved the same
+// day — see winReward's note.
+export function eliteReward(col: number, _act: 1 | 2 = 1): number {
+  return 11 + col;
 }
 
 function bossEnemyForAct(map: GameMap, act: 1 | 2): EnemyDef {
@@ -1162,7 +1167,13 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'prep' && state.phase !== 'shop') return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
-      if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades)) return state;
+      // 2026-08-07 bug fix: this omitted `state.protocols`, so a Lone
+      // flagship Flagship's +2 bonus slots (real everywhere else —
+      // deriveStats, FleetPanel/FleetOverlay's "has room" checks) were
+      // silently invisible to the one gate that actually allows an EQUIP.
+      // The UI showed the slot as available and let the player click it;
+      // this then rejected the action with no feedback.
+      if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades, state.protocols)) return state;
       if (!state.inventory.includes(action.partId)) return state;
       const part = getPart(action.partId);
       const maxWeapons = getFrame(ship.frameId).maxWeapons;
