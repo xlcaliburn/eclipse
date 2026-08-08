@@ -3,7 +3,7 @@ import type { CounterProtocolId } from '../game/counterProtocols';
 import { getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import { upgradeCapFor } from '../game/reducer';
-import { deriveStats, effectiveSlots, formatStatLine, fusionSummary, playerShipLabel } from '../game/ship';
+import { deriveStats, effectiveSlots, formatStatLine, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { AdaptivePanel } from './AdaptivePanel';
 import { PartCard } from './PartCard';
@@ -46,7 +46,7 @@ function fleetBody(
       {counterProtocol && <CounterProtocolRow counterProtocolId={counterProtocol} />}
 
       {fleet.map((ship, shipIndex) => {
-        const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions);
+        const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols);
         const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols, commanderId) - ship.equipped.length;
         return (
           <div key={shipIndex} className="ship-card">
@@ -57,7 +57,6 @@ function fleetBody(
             <UpgradeBadgeRow
               upgrades={ship.upgrades}
               emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
-              fusionText={fusionSummary(ship.fusions)}
             />
             <div className="slot-grid">
               {ship.equipped.map((partId, i) => (

@@ -45,6 +45,17 @@ export interface RoundModifiers {
   // the opening exchange (missile phase + cannon round 1) when the protocol
   // is active.
   playerBaseShieldZeroed: boolean;
+  // Iteration 48 (fleet orders): the Brace order's target — like an evading
+  // ship, it fires nothing this round, but UNLIKE evade it stays targetable
+  // (legalDefenders doesn't exclude it) and gets a flat +2 piloting instead
+  // of full immunity. Distinct list from evadingShipIndices on both counts.
+  bracingShipIndices: number[];
+  // Iteration 48: the Exploit weakness order's target (Spymaster only) — the
+  // whole player fleet's dice gain +2 computer against this one enemy ship
+  // for the round. Null when no order is armed, or the marked ship has since
+  // died (dice simply never resolve against a dead target, so no explicit
+  // clear is needed — see fireShip's own comment).
+  markedEnemyIndex: number | null;
 }
 
 // A plain, serializable snapshot of an in-progress (or finished) fight. The
@@ -54,6 +65,18 @@ export interface RoundModifiers {
 // had zero production callers left; only `resolveHit`, the shared hit-math
 // primitive both engines called, survives (now in hitRule.ts).
 export type TargetingStance = 'weakest' | 'strongest';
+
+// Iteration 48 (fleet orders): the fixed 3-order menu (4 for the Spymaster,
+// who alone unlocks 'exploit-weakness' — see CombatState.exploitEnabled).
+// Deliberately a closed, always-the-same menu — nothing is drawn, collected,
+// or spent from a deck (iteration 35 removed reaction cards for exactly that
+// reason; orders must not reintroduce the shape under a new name).
+export type FleetOrderId = 'attack-run' | 'evasive-pattern' | 'brace' | 'exploit-weakness';
+
+// The 2 of the 4 orders that pick a ship rather than issuing immediately —
+// shared between CombatScreen's pick-mode state and CombatFleetView's
+// per-side click override, so the two can't drift on which orders need one.
+export type TargetedOrderId = Extract<FleetOrderId, 'brace' | 'exploit-weakness'>;
 
 export interface CombatState {
   seed: number;
@@ -85,6 +108,18 @@ export interface CombatState {
   // protocol would silently speed up every enemy in the game too.
   playerOutspeedGap: number;
   alphaDoctrineActive: boolean;
+  // Iteration 48 (fleet orders): a fleet-wide budget, set once at initCombat
+  // and never replenished mid-fight (unlike actives, which are per-part —
+  // this is a single shared pool). Spent 1 per issued order.
+  commandPoints: number;
+  // Iteration 48: Spymaster-only — set once at initCombat from
+  // commanderId, gates whether 'exploit-weakness' is a legal order at all
+  // (not just shown-disabled; see canIssueOrder).
+  exploitEnabled: boolean;
+  // Iteration 48: the order armed for the round about to resolve, or null.
+  // At most one per round (canIssueOrder refuses a second); cleared by
+  // advanceRound alongside the round-modifier reset.
+  orderThisRound: FleetOrderId | null;
 }
 
 export interface PlayerFleetInput {
@@ -326,8 +361,18 @@ function fireShip(
   priorityTargetIndex: number | null | undefined,
   checkWinner: () => Side | null,
   seed: number,
+  // 2026-08-08 bug fix: missiles are a simultaneous opening volley, not a
+  // sequential exchange — a ship destroyed by an earlier-activating ship's
+  // missiles THIS SAME phase should still get to fire its own before going
+  // down (the reported bug: "none of my missiles shot" when the enemy's
+  // higher-initiative alpha strike killed the ship first). Only meaningful
+  // for phase === 'missile'; cannon rounds stay sequential (a ship really
+  // is gone for the rest of an ongoing exchange once destroyed). Passed
+  // from advanceRound as a snapshot taken before any fire this round.
+  missileAliveAtPhaseStart?: Set<CombatShip>,
 ): Side | null {
-  if (!isAlive(ship)) return null;
+  const alive = phase === 'missile' && missileAliveAtPhaseStart ? missileAliveAtPhaseStart.has(ship) : isAlive(ship);
+  if (!alive) return null;
 
   // Emergency thrusters (evasive burn): this ship neither fires nor can be
   // targeted this round — it sits out entirely, including suppressing any
@@ -336,14 +381,15 @@ function fireShip(
     return null;
   }
 
-  const weapons = phase === 'missile' ? ship.stats.missiles : ship.stats.cannons;
+  // Iteration 48 (Brace order): fires nothing this round — but UNLIKE
+  // thrusters, stays a legal target (legalDefenders doesn't check this
+  // list) and keeps any taunt it carries. See the +2 piloting applied at
+  // the defender-shield computation below.
+  if (ship.side === 'player' && roundModifiers.bracingShipIndices.includes(ship.index)) {
+    return null;
+  }
 
-  // ECM pod (iteration 23): the enemy penalty applies only to enemy
-  // attackers, symmetric with how the player's own computerBonus (targeting
-  // uplink) only ever applies to player attackers.
-  const attackerComputer =
-    ship.stats.computer +
-    (ship.side === 'player' ? roundModifiers.computerBonus : -roundModifiers.enemyComputerPenalty);
+  const weapons = phase === 'missile' ? ship.stats.missiles : ship.stats.cannons;
 
   // 2026-08-08: this ship's committed random target for the round, if it
   // has one — every die it fires this round uses the same draw (see
@@ -393,6 +439,21 @@ function fireShip(
         : (priority ?? pickTarget(defenders, { preferHighest, randomRng: enemyRandomRng }));
       if (!target) return checkWinner(); // no legal target — the barrage finds nothing
 
+      // ECM pod (iteration 23): the enemy penalty applies only to enemy
+      // attackers, symmetric with how the player's own computerBonus
+      // (targeting uplink, and iteration 48's Attack run order) only ever
+      // applies to player attackers.
+      // Iteration 48 (Exploit weakness): +2 computer, but only for dice
+      // that land on the marked ship specifically — computed per-die (not
+      // once per ship-activation, unlike every other term here) since which
+      // target a die lands on can change activation-to-activation, and even
+      // die-to-die once `target` starts retargeting after a kill.
+      const exploitBonus =
+        ship.side === 'player' && roundModifiers.markedEnemyIndex === target.index ? 2 : 0;
+      const attackerComputer =
+        ship.stats.computer +
+        (ship.side === 'player' ? roundModifiers.computerBonus + exploitBonus : -roundModifiers.enemyComputerPenalty);
+
       // Piloting capacitors add bonus piloting only during the missile
       // phase and the first cannon round — gone from round 2 on. The
       // piloting modulator active adds a flat bonus to the whole player
@@ -402,12 +463,20 @@ function fireShip(
       // directly, not a round modifier.)
       const capacitorActive = phase === 'missile' || (phase === 'cannon' && round === 1);
       const modulatorBonus = target.side === 'player' ? roundModifiers.playerShieldBonus : 0;
+      // Iteration 48 (Brace order): +2 piloting on the braced ship
+      // specifically, on top of the fleet-wide playerShieldBonus above (an
+      // Evasive pattern round + a Brace on your Bastion stack additively —
+      // deliberate, same "every layer is additive" rule capacitor/modulator
+      // already follow).
+      const braceBonus =
+        target.side === 'player' && roundModifiers.bracingShipIndices.includes(target.index) ? 2 : 0;
       // Alpha doctrine (iteration 28): the player's base shield stat is
       // zeroed for the opening exchange — everything else (capacitor,
       // piloting modulator) is additive and still applies on top of that 0.
       const targetBaseShield =
         target.side === 'player' && roundModifiers.playerBaseShieldZeroed ? 0 : target.stats.shield;
-      const baseShield = targetBaseShield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus;
+      const baseShield =
+        targetBaseShield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus + braceBonus;
       const effectiveShield = Math.max(
         0,
         baseShield - (ship.stats.shieldPierce ?? 0) - (weapon.shieldPierce ?? 0),
@@ -650,6 +719,8 @@ function freshRoundModifiers(): RoundModifiers {
     chaffShipIndices: [],
     enemyComputerPenalty: 0,
     playerBaseShieldZeroed: false, // always recomputed per-round in advanceRound, never carried
+    bracingShipIndices: [],
+    markedEnemyIndex: null,
   };
 }
 
@@ -661,12 +732,24 @@ export interface CombatProtocolFlags {
   alphaDoctrine?: boolean; // player cannons also fire in the missile phase; player shield zeroed rounds 0-1
 }
 
+// Iteration 48 (fleet orders): commandPoints/exploitEnabled are a separate
+// options bag from CombatProtocolFlags — they're a commander-doctrine
+// concern (see reducer.ts's ENGAGE, which derives both from commanderId),
+// not a drafted-protocol one. Defaults (2 CP, no Exploit) apply whenever a
+// call site doesn't care — every existing initCombat call in the test
+// suite, scripts/sim, and EnemyPanel's preview keeps compiling unchanged.
+export interface CombatOrderOptions {
+  commandPoints?: number;
+  exploitEnabled?: boolean;
+}
+
 export function initCombat(
   playerFleet: PlayerFleetInput[],
   enemyDef: EnemyDef,
   seed: number,
   targetingStance: TargetingStance = 'weakest',
   protocolFlags?: CombatProtocolFlags,
+  orderOptions?: CombatOrderOptions,
 ): CombatState {
   const playerShips: CombatShip[] = playerFleet.map((p, index) => ({
     side: 'player',
@@ -707,6 +790,9 @@ export function initCombat(
     winner: undefined,
     playerOutspeedGap: protocolFlags?.overspeedProtocols ? OUTSPEED_GAP - 1 : OUTSPEED_GAP,
     alphaDoctrineActive: !!protocolFlags?.alphaDoctrine,
+    commandPoints: orderOptions?.commandPoints ?? 2,
+    exploitEnabled: !!orderOptions?.exploitEnabled,
+    orderThisRound: null,
   };
 }
 
@@ -776,10 +862,23 @@ export function advanceRound(state: CombatState): CombatState {
   };
 
   const order = computeActivationOrder(playerShips, enemyShips, roundModifiers.initiativeBonus);
+  // 2026-08-08: who's alive BEFORE any fire this round — the missile phase
+  // is a simultaneous volley, so a ship destroyed by an earlier-activating
+  // ship's missiles this same phase must still get to fire its own (see
+  // fireShip's own comment on the param this feeds).
+  const missileAliveAtPhaseStart = isMissilePhase ? new Set(order.filter(isAlive)) : undefined;
 
   let winner: Side | null = null;
+  // 2026-08-08: the missile phase doesn't stop early on a winner either —
+  // simultaneous means every ship alive when it began fires, even one
+  // whose side gets wiped out by an earlier-activating ship's missiles
+  // this same phase (the other half of the bug fireShip's own comment
+  // describes: fixing WHO gets to fire is pointless if the loop still
+  // stops calling fireShip at all once a winner is provisionally decided
+  // mid-phase). Cannon rounds keep the early-exit — they're a genuinely
+  // sequential ongoing exchange, not a simultaneous volley.
   for (const ship of order) {
-    winner = fireShip(
+    const roundWinner = fireShip(
       ship,
       phase,
       roundNumber,
@@ -792,8 +891,12 @@ export function advanceRound(state: CombatState): CombatState {
       state.priorityTargetIndex,
       checkWinner,
       state.seed,
+      missileAliveAtPhaseStart,
     );
-    if (winner) break;
+    if (roundWinner) {
+      winner = roundWinner;
+      if (!isMissilePhase) break;
+    }
   }
 
   // Iteration 28 (Alpha doctrine): the missile phase's normal activations
@@ -881,6 +984,9 @@ export function advanceRound(state: CombatState): CombatState {
     winner: winner ?? undefined,
     playerOutspeedGap: state.playerOutspeedGap,
     alphaDoctrineActive: state.alphaDoctrineActive,
+    commandPoints: state.commandPoints,
+    exploitEnabled: state.exploitEnabled,
+    orderThisRound: null, // iteration 48: at most one order arms per round — cleared same as roundModifiers
   };
 }
 
@@ -969,12 +1075,161 @@ export function incomingFirePreview(state: CombatState): FirePreview {
   return { phase, entries, flakCancels };
 }
 
+// 2026-08-08: the player's own half of the telegraph — which enemy each of
+// your ships is about to open on. Deliberately a separate function, not
+// `incomingFirePreview` parameterized by side: player targeting is priority
+// click > weapon.targetHighest/targetingStance, always deterministic, while
+// enemy targeting is random-by-default with a seeded draw (see
+// enemyTargetRng) — genuinely different rules, same as fireShip's own
+// side-branch. Mirrors fireShip's player-side target selection exactly.
+export interface OutgoingFire {
+  shooterIndex: number; // player-side flattened index
+  targetIndex: number; // enemy-side index its first die opens on
+  diceCount: number; // dice it will fire in the previewed phase (outspeed-doubled for cannons)
+  maxDamage: number; // sum of those dice's damage — an upper bound, before any roll
+  outspeed: boolean; // cannon preview only: this ship currently qualifies for a bonus activation
+}
+
+export interface OutgoingFirePreview {
+  phase: 'missile' | 'cannon';
+  entries: OutgoingFire[];
+  flakCancels: number; // missile phase only: the enemy's flak downs this many player dice first
+}
+
+export function outgoingFirePreview(state: CombatState): OutgoingFirePreview {
+  const phase: 'missile' | 'cannon' = state.round === 0 ? 'missile' : 'cannon';
+  const outspeedingPlayers =
+    phase === 'cannon'
+      ? new Set(
+          computeOutspeedShips(state.playerShips, state.enemyShips, state.roundModifiers.initiativeBonus, state.playerOutspeedGap)
+            .filter((s) => s.side === 'player')
+            .map((s) => s.index),
+        )
+      : new Set<number>();
+
+  const entries: OutgoingFire[] = [];
+  for (const ship of state.playerShips) {
+    if (!isAlive(ship)) continue;
+    // Emergency thrusters / iteration 48's Brace order: this ship sits out
+    // the round entirely — same guards fireShip itself checks before a
+    // player ship ever fires.
+    if (state.roundModifiers.evadingShipIndices.includes(ship.index)) continue;
+    if (state.roundModifiers.bracingShipIndices.includes(ship.index)) continue;
+    const weapons = phase === 'missile' ? ship.stats.missiles : ship.stats.cannons;
+    if (weapons.length === 0) continue;
+    const defenders = legalDefenders(state.enemyShips, state.roundModifiers);
+    const priority =
+      state.priorityTargetIndex != null ? defenders.find((s) => s.index === state.priorityTargetIndex) : undefined;
+    const preferHighest = !!weapons[0]?.targetHighest || state.targetingStance === 'strongest';
+    const target = weapons[0]?.bypassTaunt
+      ? pickTarget(defenders, { ignoreTaunt: true })
+      : (priority ?? pickTarget(defenders, { preferHighest }));
+    if (!target) continue;
+    const outspeed = outspeedingPlayers.has(ship.index);
+    const multiplier = outspeed ? 2 : 1;
+    const diceCount = weapons.reduce((n, w) => n + w.diceCount, 0) * multiplier;
+    const maxDamage = weapons.reduce((n, w) => n + w.diceCount * w.damage, 0) * multiplier;
+    entries.push({ shooterIndex: ship.index, targetIndex: target.index, diceCount, maxDamage, outspeed });
+  }
+
+  const flakCancels = phase === 'missile' ? totalFlak(state.enemyShips) : 0;
+
+  return { phase, entries, flakCancels };
+}
+
 // Iteration 13: set (or clear, with null) the manual priority target.
 // Only an alive enemy ship is accepted; anything else clears instead —
 // clicking a wreck should never leave a stale lock.
 export function setPriorityTarget(state: CombatState, index: number | null): CombatState {
   const valid = index !== null && state.enemyShips.some((s) => s.index === index && s.stats.hp - s.damage > 0);
   return { ...state, priorityTargetIndex: valid ? index : null };
+}
+
+// --- Fleet orders (iteration 48): a per-round tactical command layer ------
+// Two stance orders (fleet-wide, no target) and two targeted orders (pick
+// one ship). At most one order armed per round, 1 command point each, no
+// replenishment mid-fight — see CombatState.commandPoints. Orders consume
+// no rng: they're recorded player input, same determinism class as actives
+// and priority targeting. AUTO_RESOLVE/runToEnd never call issueOrder — the
+// established "auto presses no buttons" rule that already covers actives —
+// so every balance-sim number is unaffected by this feature by construction.
+
+const ORDER_NEEDS_TARGET: Record<FleetOrderId, 'player' | 'enemy' | null> = {
+  'attack-run': null,
+  'evasive-pattern': null,
+  brace: 'player',
+  'exploit-weakness': 'enemy',
+};
+
+export function canIssueOrder(state: CombatState, order: FleetOrderId, targetIndex?: number): boolean {
+  if (state.winner) return false;
+  if (state.commandPoints <= 0) return false;
+  if (state.orderThisRound !== null) return false;
+  if (order === 'exploit-weakness' && !state.exploitEnabled) return false;
+  const targetSide = ORDER_NEEDS_TARGET[order];
+  if (targetSide === null) return true;
+  if (targetIndex === undefined) return false;
+  const pool = targetSide === 'player' ? state.playerShips : state.enemyShips;
+  return pool.some((s) => s.index === targetIndex && isAlive(s));
+}
+
+export function issueOrder(state: CombatState, order: FleetOrderId, targetIndex?: number): CombatState {
+  if (!canIssueOrder(state, order, targetIndex)) return state;
+  const commandPoints = state.commandPoints - 1;
+  const orderThisRound = order;
+  const logged = (text: string): CombatEvent[] => [...state.log, { kind: 'part-effect', text }];
+
+  switch (order) {
+    case 'attack-run':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged('Order: Attack run — the fleet commits to the attack (+1 computer, −1 piloting this round).'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus + 1,
+          playerShieldBonus: state.roundModifiers.playerShieldBonus - 1,
+        },
+      };
+    case 'evasive-pattern':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged('Order: Evasive pattern — the fleet flies defensively (+1 piloting, −1 computer this round).'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus - 1,
+          playerShieldBonus: state.roundModifiers.playerShieldBonus + 1,
+        },
+      };
+    case 'brace': {
+      const ship = state.playerShips.find((s) => s.index === targetIndex);
+      const label = ship ? `ship ${ship.index + 1}` : 'the ship';
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged(`Order: Brace — ${label} holds fire and braces (+2 piloting this round).`),
+        roundModifiers: {
+          ...state.roundModifiers,
+          bracingShipIndices: [...state.roundModifiers.bracingShipIndices, targetIndex!],
+        },
+      };
+    }
+    case 'exploit-weakness': {
+      const ship = state.enemyShips.find((s) => s.index === targetIndex);
+      const label = ship ? `enemy ${ship.index + 1}` : 'the target';
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged(`Order: Exploit weakness — intel marks ${label} (+2 computer against it this round).`),
+        roundModifiers: { ...state.roundModifiers, markedEnemyIndex: targetIndex! },
+      };
+    }
+  }
 }
 
 export function runToEnd(state: CombatState): CombatState {

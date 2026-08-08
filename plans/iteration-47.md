@@ -1,16 +1,16 @@
 # Iteration 47 — The cleanup pass: dead code, shared components, deduplication (specced 2026-08-08)
 
-> **Status: 47.1–47.5 implemented and verified (2026-08-08); 47.5p
-> deliberately deferred; 47.6–47.7 not started.** `tsc -b --force`,
-> `vitest run` (724/724 — up from the pre-47 704: net +20 across 5
-> deletions and several new pure-logic test files, see status notes),
-> `vite build`, `npm run balance`, and (once, as an extra check on the
-> CONTINUE/WITHDRAW settlement dedup — the highest-risk change in the
-> whole pass) `npm run balance:full` all clean/unchanged after every
-> milestone — every FAIL/WARN/KNOWN-GAP line is byte-identical to the
-> pre-47 baseline throughout, including the agent sweep's per-commander
-> act-1-clear percentages to one decimal place. One pre-existing flaky
-> test (`reducer.test.ts`'s Dreadnought-offer probabilistic check,
+> **Status: 47.1–47.6 implemented and verified (2026-08-08); 47.7 not
+> started.** `tsc -b --force`, `vitest run` (724/724 — unchanged since
+> 47.5q/r; 47.5p and 47.6 are both pure boilerplate/mechanical moves with
+> no new test surface), `vite build`, and `npm run balance` all
+> clean/unchanged after every milestone — every FAIL/WARN/KNOWN-GAP line
+> is byte-identical to the pre-47 baseline throughout. `npm run
+> balance:full` was run once more this segment, as an extra check on
+> 47.6 (the reducer file split — the highest-risk-by-line-count change
+> in the whole pass): every gate verdict and every per-commander
+> act-1-clear percentage matched the pre-47 baseline. One pre-existing
+> flaky test (`reducer.test.ts`'s Dreadnought-offer probabilistic check,
 > unrelated to anything touched here) surfaced twice mid-session and was
 > flagged as its own out-of-scope task, not fixed inline. See "Status
 > notes" near the end for what actually landed, what was deliberately
@@ -487,6 +487,72 @@ un-replicated, and `ledger.ts:33` explicitly defers to the latter.
     `choiceIndex` positional coupling the plan flagged as a real risk
     currently has zero live drift.
 
+- **47.5p (`pay`/`grant` event-outcome builders)** — implemented after
+  all. Re-verifying the plan's own stated risk (inconsistent negative-
+  credit clamping across the ~19 sites) against the CURRENT file found
+  it no longer held: every negative-credit site already used
+  `clampCredits` consistently (the sites the original review flagged
+  had since been brought in line, likely during 47.5q/r's own pass over
+  the same function). With the premise gone, the risk dropped from
+  "needs careful per-site verification" to "safe mechanical collapse,"
+  so it was implemented directly rather than staying deferred. `pay(state,
+  delta, outcomeText)` and `grant(state, partId, outcomeText)` added to
+  `events.ts`; ~16 of the ~19 single-effect return sites converted.
+  Every multi-effect return (combining credits+inventory, credits+heat,
+  credits+relicFragments, fleet+relicFragments, etc.) deliberately kept
+  as a manual return — `pay`/`grant` only ever do ONE field, so a
+  multi-field site using either would either drop the other field or
+  need a third helper for a combination that occurs at only 1-2 call
+  sites each; not worth it. `events.test.ts`'s existing alignment/
+  requirement-derivation tests (47.5q/r) cover every option's outcome
+  text regardless of how it's built internally, so no new tests were
+  needed to confirm behavior preservation — they already passed
+  unchanged.
+- **47.6 (`reducer/shop.ts` split)** — implemented per the plan's
+  default scope (shop.ts only). The 11 shop cases (`BUY_PART` through
+  `LEAVE_SHOP`) and their pricing/pool/rarity helpers (~700 lines: the
+  starting-fit table, commodity-lot/repair/shipyard/mercenary/fleet-cap/
+  frame-cost pricing, `hullRarityBonus`, the 4 part pools, the rarity-
+  weighted draw, signature-part stock, `partCost`/`partSellPrice`/
+  `hullScrapValue`, `drawShopOffers`/`drawFrameOffers`) moved verbatim
+  into `src/game/reducer/shop.ts`, behind one `handleShopAction(state,
+  action)` dispatcher; `reducer.ts`'s switch delegates all 11 shop
+  action types to it in a single case-fallthrough block. Two non-shop
+  cases (`SET_TARGETING_STANCE`, `USE_ACTIVE`) were interleaved among
+  the shop cases in the original switch and stayed put in reducer.ts.
+  **One circular-import risk found and resolved before the split**: a
+  naive move would have needed `upgradeCapFor`/`withUpgrade` (used by
+  both shop cases AND non-shop cases like `CHOOSE_COMMANDER`/
+  `PICK_UPGRADE`/`REPAIR_CHOOSE`), `isSalvageablePart` (used by both
+  `SCUTTLE_SHIP` and CONTINUE/WITHDRAW's `settleFleetAfterFight`), and
+  `runRng` (used everywhere) to flow in both directions between
+  reducer.ts and reducer/shop.ts. Fixed by relocating each to a lower
+  shared module both files already import from independently:
+  `upgradeCapFor`/`withUpgrade`/`everyShipAtUpgradeCap` → `ship.ts`,
+  `isSalvageablePart` → `parts.ts`, `runRng` → `rng.ts`. The only
+  remaining cross-file dependency is one-directional (reducer.ts imports
+  `drawShopOffers`/`drawFrameOffers`/`hullRarityBonus`/`hullScrapValue`/
+  `handleShopAction` back from reducer/shop.ts, for PICK_NODE's shop-
+  node setup and PROTOCOL_CHOOSE's Lone-flagship scrap value — both
+  non-shop cases that happen to need shop pricing logic); reducer/
+  shop.ts imports `RunAction` from reducer.ts as a type only, which
+  erases at compile time and creates no runtime cycle. Every symbol
+  with an external consumer (`SHOP_OFFER_COUNT`, `STARTING_FIT`,
+  `COMMODITY_LOT_SELL_PRICE`, `commodityLotBuyCost`,
+  `SHIPYARD_UPGRADE_COST`, `commodityLotCap`, `mercenaryCost`,
+  `MERCENARY_FIT`, `fleetCap`, `frameCost`, `RARITY_ORDER`, `rollRarity`,
+  `partCost`, `partSellPrice`, `hullScrapValue`, `drawShopOffers`,
+  `REPAIR_COST_PER_HP`, plus `upgradeCapFor` from the ship.ts move)
+  is re-exported from `reducer.ts` — every existing `import { X } from
+  '../game/reducer'` across ShopScreen/FleetPanel/scripts/sim/agent.ts/
+  reducer.test.ts kept working with zero changes to any consumer file.
+  `reducer.ts` itself: 2126 lines → ~1450. Verified with `npm run
+  balance:full` on top of the normal bar, as an extra check given this
+  is the highest-line-count-moved change in the whole pass — every gate
+  verdict and every per-commander act-1-clear percentage matched the
+  pre-47 baseline exactly, confirming the move introduced no behavior
+  change despite touching almost every shop-adjacent import in the file.
+
 ### What was deferred, and why
 
 - **47.3l (`RunModifiers` prop bundle)**: the plan's own text already
@@ -498,43 +564,38 @@ un-replicated, and `ledger.ts:33` explicitly defers to the latter.
   correctness or duplication payoff — real risk of a wide, mechanical
   diff for a small benefit. Left for a future pass; not blocking
   anything else in this iteration.
-- **47.5p (`pay`/`grant` event-outcome builders)**: the plan's own text
-  flags a real behavior-preservation risk here — negative credit
-  payouts across `resolveEventChoice`'s ~19 blocks are inconsistently
-  clamped today, and collapsing them requires verifying each site's
-  guard individually before trusting a uniform `pay()` helper to clamp
-  always. Medium value (pure boilerplate compression, no correctness
-  payoff — unlike 47.5q/r, which closed a real "silent drift" risk
-  class), genuinely careful per-site verification required. Left for a
-  dedicated pass; 47.5q/r (the higher-value, lower-risk two thirds of
-  the same "events.ts boilerplate" theme) are done.
-- **47.6 (reducer/shop.ts split), 47.7 (scripts consolidation)**: not
-  started. Both are substantial, self-contained structural passes in
-  their own right, better done with their own dedicated verification
-  cycle than compressed onto the end of this one. The spec above is
-  unchanged and ready to resume from 47.6 (47.5k, the `PartId` union,
-  already landed as its prerequisite).
+- **47.7 (scripts consolidation)**: not started. A substantial,
+  self-contained structural pass in its own right (balance.ts/ledger.ts/
+  enemyValue.ts duplication, budget.ts/policy.ts archetype drift),
+  better done with its own dedicated verification cycle than compressed
+  onto the end of this one. The spec above (47.7.1-47.7.5) is unchanged
+  and ready to resume from.
 
 ### Verification history
 
-Every milestone (47.1–47.5) ran the full bar individually: `tsc -b
+Every milestone (47.1–47.6) ran the full bar individually: `tsc -b
 --force` clean throughout every single edit, not just at milestone
 boundaries; `vitest run` count moved 704 → 699 (47.1, forecast.test.ts
 removed) → 683 (47.2, resolver.test.ts's dead `resolveCombat` tests) →
 683 (47.3, pure component/prop refactoring, no count change) → 704
 (47.4, combatLogText.test.ts +14 and rollbackToRevealed's 6 new
 replaySteps.test.ts cases) → 716 (47.5 d–j, util.test.ts +6 and
-rng.test.ts +6) → 724 (47.5 q–r, events.test.ts +8). `vite build` clean
-throughout (CSS bundle 47.21 kB → 45.42 kB; JS main bundle net flat to
-slightly down despite ~10 new component/module files — duplication
-removed roughly offset the new-file overhead). `npm run balance`'s
-FAIL/WARN lines byte-identical to the pre-47 baseline after every
-single milestone (the one deliberate output change, 47.1.2's
-endgame-fleet column, was verified not to flip any gate). `npm run
-balance:full` run once more, after 47.5a-c specifically (the
-CONTINUE/WITHDRAW dedup) as an extra check beyond the unit suite —
-every per-commander act-1-clear percentage and every gate verdict
-matched the pre-47 baseline exactly.
+rng.test.ts +6) → 724 (47.5 q–r, events.test.ts +8) → 724 (47.5p and
+47.6, both no new test surface — pure mechanical/boilerplate moves).
+`vite build` clean throughout (CSS bundle 47.21 kB → 45.42 kB; JS main
+bundle net flat to slightly down despite ~10 new component/module
+files — duplication removed roughly offset the new-file overhead).
+`npm run balance`'s FAIL/WARN lines byte-identical to the pre-47
+baseline after every single milestone (the one deliberate output
+change, 47.1.2's endgame-fleet column, was verified not to flip any
+gate). `npm run balance:full` run twice total, each time as an extra
+check beyond the unit suite on that milestone's highest-risk change:
+once after 47.5a-c (the CONTINUE/WITHDRAW settlement dedup), once
+after 47.6 (the reducer file split) — every per-commander act-1-clear
+percentage and every gate verdict matched the pre-47 baseline exactly
+both times. 47.5p got the normal bar only (no rng-stream or pricing
+change, just where the return object gets built — lower risk than
+either balance:full check).
 
 One pre-existing flaky test surfaced twice during this session's runs
 — `reducer.test.ts`'s "can offer the Dreadnought in an act-2 shipyard"

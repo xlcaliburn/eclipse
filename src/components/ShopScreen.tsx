@@ -14,21 +14,12 @@ import {
   RARITY_ORDER,
   STARTING_FIT,
 } from '../game/reducer';
-import { FUSABLE_PARTS } from '../game/ship';
+import { commissionedFleetSize } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
-import { getUpgrade } from '../game/upgrades';
-import type { UpgradeId } from '../game/upgrades';
 import { FitChips } from './FitChips';
 import { FleetPanel } from './FleetPanel';
-import { ShipyardSections } from './ShipyardSections';
 import { FrameSilhouette } from './ShipSilhouette';
 import { StoreSections } from './StoreSections';
-
-// Iteration 31 (the Foundry): fuse it into the hull — permanent, no slot.
-// 2026-08-07: fusing now consumes an owned stat-ladder part (see
-// ship.ts's FUSABLE_PARTS) instead of picking an abstract stat category —
-// the part's own name/description already says what it grants, so no
-// separate label/desc table is needed any more.
 
 interface ShopScreenProps {
   credits: number;
@@ -39,18 +30,15 @@ interface ShopScreenProps {
   // before this field existed; treated as "nothing to offer."
   frameOffers?: Exclude<FrameId, 'cruiser'>[];
   // 2026-08-07: each shipyard offer's pre-rolled rarity bonus — lets the
-  // card show the actual upgrade(s) a purchase grants instead of just a
+  // card show the actual item(s) a purchase grants instead of just a
   // count. Undefined for a store visit (always common, no bonus).
-  frameBonusPreview?: Partial<Record<FrameId, { hp: number; upgrades: UpgradeId[] }>>;
+  frameBonusPreview?: Partial<Record<FrameId, { items: PartId[] }>>;
   // Iteration 33 (2026-08-07): which trade-station flavor this is —
-  // 'store' (parts + war assets + 2 hulls, common/rare only, no upgrade
-  // bay) or 'shipyard' (5 pristine hulls of any rarity + the upgrade bay,
-  // no parts/war assets). Defaults to 'store' for a save from before this
-  // field existed (that's what every shop visit was, back then).
+  // 'store' (parts + war assets + 2 hulls, common/rare only) or 'shipyard'
+  // (5 pristine hulls of any rarity, no parts/war assets). Defaults to
+  // 'store' for a save from before this field existed (that's what every
+  // shop visit was, back then).
   kind?: 'store' | 'shipyard';
-  // The shipyard's one purchasable upgrade this visit — only meaningful
-  // when kind === 'shipyard'.
-  upgradeOffer?: UpgradeId;
   fleet: PlayerShipState[];
   inventory: PartId[];
   commanderId?: CommanderId;
@@ -70,8 +58,6 @@ interface ShopScreenProps {
   onSellCommodityLot: () => void;
   onBuyMercenary: () => void;
   onBuyRepair: (shipIndex: number) => void; // 2026-08-06: pay to fully heal one ship
-  onBuyUpgrade: (shipIndex: number) => void; // 2026-08-07: shipyard only
-  onFuseStat: (shipIndex: number, partId: PartId) => void; // iteration 31, reworked 2026-08-07: consumes an owned part
   onLeave: () => void;
   onViewMap: () => void;
   onEquip: (shipIndex: number, partId: PartId) => void;
@@ -84,7 +70,6 @@ export function ShopScreen({
   frameOffers,
   frameBonusPreview,
   kind = 'store',
-  upgradeOffer,
   fleet,
   inventory,
   commanderId,
@@ -99,18 +84,17 @@ export function ShopScreen({
   onSellCommodityLot,
   onBuyMercenary,
   onBuyRepair,
-  onBuyUpgrade,
-  onFuseStat,
   onLeave,
   onViewMap,
   onEquip,
   onUnequip,
 }: ShopScreenProps) {
   const [selectedShipIndex, setSelectedShipIndex] = useState(0);
-  const [selectedFusionPart, setSelectedFusionPart] = useState<PartId | null>(null);
   const safeSelectedIndex = Math.min(selectedShipIndex, fleet.length - 1);
   const currentFleetCap = fleetCap(commanderId, protocols);
-  const fleetFull = fleet.length >= currentFleetCap;
+  // 2026-08-08: mercenary escorts don't count toward the displayed cap —
+  // see reducer/shop.ts's BUY_SHIP gate, the same rule applied here.
+  const fleetFull = commissionedFleetSize(fleet) >= currentFleetCap;
   const isShipyard = kind === 'shipyard';
   // 2026-08-06: counts inventory copies too, not just equipped ones — a
   // bought-but-not-yet-equipped lot still counts against the cap.
@@ -121,10 +105,6 @@ export function ShopScreen({
   const canBuyMoreLots = lotsCarried < lotCap;
   const lotBuyCost = commodityLotBuyCost(commanderId);
   const mercCost = mercenaryCost(commanderId);
-  // 2026-08-07 (Foundry rework): the Foundry can only fuse a stat-ladder
-  // part the player actually owns — unique ids only (owning 2 Gauss coils
-  // doesn't offer the same tile twice, picking it just consumes one).
-  const fusableInInventory = Array.from(new Set(inventory.filter((id) => FUSABLE_PARTS[id])));
 
   return (
     <div className="shop-screen">
@@ -185,13 +165,13 @@ export function ShopScreen({
             // common tier (no bonus) — 2026-08-08: no longer framed as
             // "second-hand" (the store's real distinction is now that it
             // never stocks epic/legendary hulls at all, see drawFrameOffers).
-            // A shipyard's arrive pristine AND fused/upgraded to match the
-            // frame's real rarity. 2026-08-07: the actual upgrade(s) are now
+            // A shipyard's arrive pristine AND fitted with bonus rare-tier
+            // gear to match the frame's real rarity. The actual item(s) are
             // pre-rolled at PICK_NODE time and shown by name
             // (frameBonusPreview) — no longer just a count with the specific
-            // upgrade a surprise until bought. bonusLevel stays as a
-            // fallback for the rare case the preview is unavailable (an old
-            // save resuming mid-shop-visit).
+            // gear a surprise until bought. bonusLevel stays as a fallback
+            // for the rare case the preview is unavailable (an old save
+            // resuming mid-shop-visit).
             const bonusLevel = isShipyard ? RARITY_ORDER.indexOf(frame.rarity) : 0;
             const preview = isShipyard ? frameBonusPreview?.[frameId] : undefined;
             // Iteration 41: preview what the hull arrives fitted with — every
@@ -220,14 +200,17 @@ export function ShopScreen({
                 </span>
                 <span className="frame-card__desc">{frame.blurb}</span>
                 {startingFit.length > 0 && <FitChips partIds={startingFit} />}
-                {preview && preview.hp > 0 && (
-                  <span className="frame-card__bonus">
-                    Arrives fused +{preview.hp} HP with {preview.upgrades.map((id) => getUpgrade(id).name).join(', ')}.
-                  </span>
+                {preview && preview.items.length > 0 && (
+                  // 2026-08-08: the actual bonus item(s), same chip row the
+                  // starting fit above already uses — one consistent way to
+                  // preview "what this hull arrives carrying."
+                  <FitChips partIds={preview.items} />
                 )}
                 {!preview && bonusLevel > 0 && (
+                  // No real item ids in this fallback path (see the comment
+                  // above) — just say how many.
                   <span className="frame-card__bonus">
-                    Arrives fused +{bonusLevel} HP with {bonusLevel} bonus upgrade{bonusLevel > 1 ? 's' : ''}.
+                    Arrives with {bonusLevel} bonus rare item{bonusLevel > 1 ? 's' : ''}.
                   </span>
                 )}
                 <span className="frame-card__cost">{cost} cr</span>
@@ -235,19 +218,6 @@ export function ShopScreen({
             );
           })}
         </div>
-      )}
-
-      {isShipyard && (
-        <ShipyardSections
-          upgradeOffer={upgradeOffer}
-          fleet={fleet}
-          credits={credits}
-          onBuyUpgrade={onBuyUpgrade}
-          fusableInInventory={fusableInInventory}
-          selectedFusionPart={selectedFusionPart}
-          onSelectFusionPart={setSelectedFusionPart}
-          onFuseStat={onFuseStat}
-        />
       )}
 
       <h3>Your fleet</h3>

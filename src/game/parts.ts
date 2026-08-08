@@ -665,6 +665,17 @@ export const PARTS: Part[] = [
 // shop's random draw (`PARTS[i]`) never offers it for sale.
 export const COMMODITY_LOT_PART_ID: PartId = 'commodity-lot';
 
+// 47.6: moved from reducer.ts — a commodity lot isn't real equipment
+// (unrealized profit, not a part) and is lost outright with a destroyed/
+// scuttled ship rather than salvaged to inventory; shared here so every
+// salvage site (CONTINUE/WITHDRAW's settleFleetAfterFight, the shop's
+// SCUTTLE_SHIP) excludes it the same way. Lives here rather than in
+// reducer.ts or reducer/shop.ts specifically because both of those need
+// it and neither should import from the other.
+export function isSalvageablePart(partId: PartId): boolean {
+  return partId !== COMMODITY_LOT_PART_ID;
+}
+
 const COMMODITY_LOT_PART: Part = {
   id: COMMODITY_LOT_PART_ID,
   name: 'Commodity lot',

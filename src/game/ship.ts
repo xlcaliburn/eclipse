@@ -20,13 +20,6 @@ export function deriveStats(
   equippedPartIds: PartId[],
   upgrades: UpgradeId[] = [],
   protocols?: ProtocolId[],
-  // Iteration 31 (the Foundry): permanent, slotless base-stat increments —
-  // structurally the same as `upgrades` above (per-ship additive, folded in
-  // once, no live combat-engine hook needed), so it sits as a sibling param
-  // rather than a separate derive-time wrapper. A caller with no `ship`
-  // object in scope (initial setup, pricing a not-yet-purchased hull) simply
-  // omits it — there's no ship to have fused anything into yet.
-  fusions?: PlayerShipState['fusions'],
 ): ShipStats {
   const frame = getFrame(frameId);
   const lonelyFlagship = frameId === 'cruiser' && hasProtocol(protocols, 'lone-flagship');
@@ -121,15 +114,6 @@ export function deriveStats(
     }
   }
 
-  // Iteration 31 (the Foundry): pure flat increments, folded in last since
-  // they interact with nothing else (no weapon dice, no conditional flags).
-  if (fusions) {
-    if (fusions.hp) stats.hp += fusions.hp;
-    if (fusions.computer) stats.computer += fusions.computer;
-    if (fusions.shield) stats.shield += fusions.shield;
-    if (fusions.initiative) stats.initiative += fusions.initiative;
-  }
-
   return stats;
 }
 
@@ -176,7 +160,7 @@ export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: Command
   const auraShield = fleetShieldAuraBonus(fleet);
   return fleet.map((ship) => {
     const stats = withAceBonus(
-      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions),
+      deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols),
       ship,
       commanderId,
       protocols,
@@ -226,87 +210,44 @@ export function applyRepairBanking(ship: PlayerShipState, amount: number, flatBa
   return { ...ship, damage: Math.max(0, ship.damage - amount), overRepairBank };
 }
 
-// Iteration 31 (the Foundry): total fusion PURCHASES already made on this
-// ship, across every stat — each purchase adds exactly +1 to its stat, so
-// this is just their sum. Feeds `fusionCost` below, which both ShopScreen
-// (display) and scripts/sim/budget.ts (the sim's spender, since iteration
-// 45 — actRun.ts's hand-rolled spender was retired) call, so every price
-// shown to a player and every price the balance sim pays come from the
-// same escalating-cost math.
-export function totalFusions(ship: PlayerShipState): number {
-  const f = ship.fusions;
-  if (!f) return 0;
-  return (f.hp ?? 0) + (f.computer ?? 0) + (f.shield ?? 0) + (f.initiative ?? 0);
+// 47.6: moved from reducer.ts. `upgradeCapFor`/`withUpgrade` are needed by
+// both the reducer's own non-shop cases (CHOOSE_COMMANDER's Warlord
+// bonus, PICK_UPGRADE, INTERLUDE_CHOOSE, REPAIR_CHOOSE's overhaul
+// branch) and the new reducer/shop.ts (BUY_UPGRADE) — living here (a
+// module both already import from) avoids reducer.ts and reducer/shop.ts
+// needing to import from each other for these.
+//
+// Addendum A.4: a ship holds at most 1 permanent upgrade — a second
+// acquisition (elite reward, the interlude's Field promotion, or now a
+// repair-yard overhaul) replaces the old one rather than stacking. The old
+// one is simply gone (destroyed), same as any upgrade lost with its ship.
+//
+// Iteration 21 (the Warlord, tall): the Flagship alone may hold more than
+// the standard 1. 2026-08-08: 2 -> 3 — the Warlord was reading as just a
+// worse Engineer (a discount and a free random upgrade, nothing that
+// actually built toward "one hull carrying what used to be spread across a
+// fleet"). A fourth pick still replaces rather than being refused outright
+// — same "oldest simply gone" rule as the base case, just with room for
+// more before it kicks in. `slice(-cap)` keeps only the most recent `cap`
+// entries either way, so this one function covers every cap without a
+// separate branch. Exported so FleetPanel/FleetOverlay can show exactly
+// how many augment slots are still open, not just the ones already filled.
+export function upgradeCapFor(ship: PlayerShipState, commanderId: CommanderId | undefined): number {
+  return commanderId === 'warlord' && ship.frameId === 'cruiser' ? 3 : 1;
 }
 
-// Iteration 31: escalating Foundry price — STAT_BASE + FUSION_STEP x
-// totalFusionsOn(ship), priced per stat's combat weight. Computer highest:
-// the `roll + computer - shield >= 6` formula makes it the single
-// strongest point in the game (see iteration 26's boss work on how
-// steeply win rates move per point of it). Escalation is per-ship and
-// per-fusion of ANY stat, not per-stat — the 4th fusion on a hull costs
-// +12cr over base regardless of which stat it's spent on, so spreading
-// fusions across stats is priced the same as stacking one.
-export type FusionStat = 'hp' | 'computer' | 'shield' | 'initiative';
-// Exported so ShopScreen can show the base price table even before a part
-// and ship are picked (2026-08-08) — the escalating step (FUSION_STEP)
-// isn't shown there since it depends on a specific ship's prior fusions.
-export const FUSION_STAT_BASE: Record<FusionStat, number> = {
-  hp: 6,
-  initiative: 7,
-  shield: 8,
-  computer: 10,
-};
-const FUSION_STEP = 4;
-// `amount` (2026-08-07): a single fuse can now grant more than +1 (fusing
-// an owned +2/+3 stat item, not just +1) — priced as `amount` separate
-// fusions back to back, each paying the escalating rate at its own point
-// in the sequence, so fusing a +3 part costs exactly what three +1
-// fusions in a row would have. Preserves the existing "spreading vs.
-// stacking is priced the same" invariant above at any amount.
-export function fusionCost(stat: FusionStat, ship: PlayerShipState, amount = 1): number {
-  const base = FUSION_STAT_BASE[stat];
-  const priorTotal = totalFusions(ship);
-  let cost = 0;
-  for (let i = 0; i < amount; i++) {
-    cost += base + FUSION_STEP * (priorTotal + i);
-  }
-  return cost;
+export function withUpgrade(ship: PlayerShipState, upgradeId: UpgradeId, commanderId?: CommanderId): PlayerShipState {
+  const cap = upgradeCapFor(ship, commanderId);
+  return { ...ship, upgrades: [...ship.upgrades, upgradeId].slice(-cap) };
 }
 
-// 2026-08-07 (Foundry rework): fusing now consumes an OWNED part instead
-// of being a pure credit purchase — "fuse the item you own," not a
-// straight upgrade. Only the stat-item ladder qualifies (iteration 36's
-// +1/+2/+3 hull/computer/shield/initiative parts) — each maps 1:1 onto a
-// FusionStat and an amount, reusing the part's own stat value rather than
-// inventing a separate conversion formula. The credit cost above still
-// applies on top (see fusionCost) — owning the part is an additional
-// cost, not a replacement for the escalating price.
-export const FUSABLE_PARTS: Partial<Record<PartId, { stat: FusionStat; amount: number }>> = {
-  hull1: { stat: 'hp', amount: 1 },
-  hull2: { stat: 'hp', amount: 2 },
-  hull3: { stat: 'hp', amount: 3 },
-  comp1: { stat: 'computer', amount: 1 },
-  comp2: { stat: 'computer', amount: 2 },
-  comp3: { stat: 'computer', amount: 3 },
-  shield1: { stat: 'shield', amount: 1 },
-  shield2: { stat: 'shield', amount: 2 },
-  shield3: { stat: 'shield', amount: 3 },
-  init1: { stat: 'initiative', amount: 1 },
-  init2: { stat: 'initiative', amount: 2 },
-  init3: { stat: 'initiative', amount: 3 },
-};
-
-// A short "Fused: +2 HP · +1 COMP" line for FleetPanel/FleetOverlay — same
-// visual weight as the upgrade badges next to it. The stats themselves
-// already read correctly via deriveStats; this just explains WHY the
-// numbers beat the parts list. Null (not rendered) when nothing's fused.
-export const FUSION_STAT_ABBR: Record<FusionStat, string> = { hp: 'HP', computer: 'COMP', shield: 'PLT', initiative: 'INIT' };
-export const FUSION_STAT_ORDER: FusionStat[] = ['hp', 'computer', 'shield', 'initiative'];
-export function fusionSummary(fusions: PlayerShipState['fusions']): string | null {
-  if (!fusions) return null;
-  const parts = FUSION_STAT_ORDER.filter((stat) => fusions[stat]).map((stat) => `+${fusions[stat]} ${FUSION_STAT_ABBR[stat]}`);
-  return parts.length > 0 ? parts.join(' · ') : null;
+// Iteration 15.3: overhaul is locked out once every ship already carries a
+// full complement of upgrades — swapping a player's own earned pick for a
+// random one is never the better choice, so the option is withheld rather
+// than offered as a trap. "Full complement" is per-ship since iteration 21
+// (the Warlord's Flagship holds 2, not 1).
+export function everyShipAtUpgradeCap(fleet: PlayerShipState[], commanderId: CommanderId | undefined): boolean {
+  return fleet.length > 0 && fleet.every((s) => s.upgrades.length >= upgradeCapFor(s, commanderId));
 }
 
 // 47.3f: the plain-text "HP x/y · Init … · Comp … · Piloting …" line —
@@ -384,4 +325,13 @@ export function fleetHasOnlyMissiles(fleetStats: ShipStats[]): boolean {
   const anyMissiles = fleetStats.some((s) => s.missiles.length > 0);
   const anyCannons = fleetStats.some((s) => s.cannons.length > 0);
   return anyMissiles && !anyCannons;
+}
+
+// 2026-08-08: mercenary escorts are hired outside the fleet cap (see
+// BUY_MERCENARY) and shouldn't count against it once aboard either — a
+// mercenary is a temporary hire, not a commissioned hull. Shared by
+// reducer/shop.ts's BUY_SHIP gate and ShopScreen's "fleet full" display so
+// the two can't drift out of sync on what counts.
+export function commissionedFleetSize(fleet: PlayerShipState[]): number {
+  return fleet.filter((s) => !s.mercenary).length;
 }

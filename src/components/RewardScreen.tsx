@@ -3,6 +3,7 @@ import { getPart } from '../game/parts';
 import type { PlayerShipState, RewardSummary } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
+import { PartCard } from './PartCard';
 import { ShipPickRow } from './ShipPickRow';
 import { shipUpgradeNote } from '../game/ship';
 
@@ -28,14 +29,28 @@ export function RewardScreen({ reward, fleet, onPickUpgrade, onLeave }: RewardSc
       {reward.lostShips.length > 0 && (
         <div className="reward-screen__losses">
           <p className="warning">Lost: {reward.lostShips.join(', ')}</p>
-          {reward.salvagedParts.length > 0 && <p className="hint">Salvaged: {reward.salvagedParts.join(', ')}</p>}
+          {reward.salvagedParts.length > 0 && (
+            <>
+              <p className="hint">Salvaged:</p>
+              <div className="reward-screen__part-grid">
+                {reward.salvagedParts.map((id, i) => (
+                  <PartCard key={`${id}-${i}`} part={getPart(id)} />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
       {reward.foundParts && reward.foundParts.length > 0 && (
-        <p className="hint reward-screen__found">
-          Found: {reward.foundParts.map((id) => getPart(id).name).join(', ')}
-        </p>
+        <div className="reward-screen__found">
+          <p className="hint">Found:</p>
+          <div className="reward-screen__part-grid">
+            {reward.foundParts.map((id, i) => (
+              <PartCard key={`${id}-${i}`} part={getPart(id)} />
+            ))}
+          </div>
+        </div>
       )}
 
       {needsUpgradePick && reward.upgradeOptions && (

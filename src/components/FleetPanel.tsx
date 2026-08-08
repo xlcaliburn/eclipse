@@ -5,7 +5,7 @@ import { getFrame } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import { partSellPrice, REPAIR_COST_PER_HP, upgradeCapFor } from '../game/reducer';
-import { deriveFleetStats, effectiveSlots, fusionSummary, playerShipLabel } from '../game/ship';
+import { deriveFleetStats, effectiveSlots, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { PartCard } from './PartCard';
 import { CounterProtocolRow, ProtocolRow } from './SettingsScreen';
@@ -169,7 +169,6 @@ export function FleetPanel({
             <UpgradeBadgeRow
               upgrades={ship.upgrades}
               emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
-              fusionText={fusionSummary(ship.fusions)}
             />
             {(() => {
               const grid = (

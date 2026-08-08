@@ -48,6 +48,18 @@ const CONTENT: Record<OnboardingKey, { title: string; body: React.ReactNode }> =
       <p className="tutorial-row__hint">Subtracts from the enemy's roll against you. A natural 6 ignores it.</p>
     ),
   },
+  // Iteration 48 (fleet orders).
+  orders: {
+    title: 'Fleet orders',
+    body: (
+      <>
+        <p className="tutorial-row__hint">
+          Spend a command point on an order before a round resolves — one per round, no refills mid-fight.
+        </p>
+        <p className="tutorial-row__hint">Brace and Exploit weakness pick a ship: click the tile, then click a card.</p>
+      </>
+    ),
+  },
 };
 
 export function OnboardingPopup({ topic, onClose }: OnboardingPopupProps) {

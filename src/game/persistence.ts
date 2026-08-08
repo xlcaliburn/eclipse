@@ -35,7 +35,18 @@ import type { RunState } from './types';
 // below now rejects any phase string it doesn't recognize, not just the
 // ones it has a specific companion-field check for, so the next removed
 // phase can't reintroduce this.
-export const SAVE_VERSION = 6;
+// v7 (iteration 48, fleet orders): CombatState gained 3 always-read
+// fields (`commandPoints`, `exploitEnabled`, `orderThisRound`) and
+// RoundModifiers gained 2 more (`bracingShipIndices`, `markedEnemyIndex`)
+// — unlike 18/20/21's optional-with-fallback additions (see their notes
+// below), these are read unconditionally, some via `.includes()`
+// (`fireShip`, `outgoingFirePreview`), which throws outright on
+// `undefined` rather than degrading gracefully. `isValidRunState`'s
+// combat check is presence-only (`!!state.combat`), so a pre-v7 save
+// resumed mid-fight would crash on the very first render, not just on a
+// user action — the same "new required-at-read nested field" hazard v5's
+// `heat` bump addressed, same fix.
+export const SAVE_VERSION = 7;
 const SAVE_KEY = 'eclipse.save.v1';
 // Iteration 18: the daily run gets its own slot so it can coexist with a
 // standard run; a small separate record tracks today's attempt + result.

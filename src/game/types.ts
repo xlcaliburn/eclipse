@@ -217,12 +217,6 @@ export interface PlayerShipState {
   // fight (deriveFleetForCombat) and cleared the moment that fight starts
   // (reducer.ts's ENGAGE), so it can never carry into a second fight.
   overRepairBank?: number;
-  // Iteration 31 (the Foundry): permanent, slotless base-stat increments
-  // fused into this hull for escalating credits — a late-run credit sink.
-  // Not a part (never salvaged, never unequipped), lost only if the ship
-  // carrying it is destroyed, same physics as `upgrades` above. Absent on
-  // every pre-31 save/ship; every read (deriveStats) falls back to 0.
-  fusions?: { hp?: number; computer?: number; shield?: number; initiative?: number };
 }
 
 // Iteration 18: run-wide counters for the end-screen summary and the daily
@@ -383,23 +377,19 @@ export interface RunState {
   pendingReward?: RewardSummary;
   shopOffers?: PartId[]; // parts currently for sale — a shipyard visit sets this to [] (no parts, still "present")
   shopFrameOffers?: Exclude<FrameId, 'cruiser'>[]; // ships currently for sale — a random subset, drawn per visit
-  // 2026-08-07: each shipyard offer's rarity bonus (fuse HP + upgrade
-  // ids), pre-rolled the same moment as shopFrameOffers rather than at
-  // purchase time — so ShopScreen can show the ACTUAL upgrade(s) a
-  // purchase will grant, not just a count, with no chance the preview
-  // drifts from what BUY_SHIP later applies. Absent for a store visit
-  // (always common, no bonus — nothing to preview).
-  shopFrameBonusPreview?: Partial<Record<FrameId, { hp: number; upgrades: UpgradeId[] }>>;
+  // 2026-08-07: each shipyard offer's rarity bonus (bonus rare-tier
+  // items), pre-rolled the same moment as shopFrameOffers rather than at
+  // purchase time — so ShopScreen can show the ACTUAL item(s) a purchase
+  // will grant, not just a count, with no chance the preview drifts from
+  // what BUY_SHIP later applies. Absent for a store visit (always common,
+  // no bonus — nothing to preview).
+  shopFrameBonusPreview?: Partial<Record<FrameId, { items: PartId[] }>>;
   // Iteration 33 (2026-08-07): which trade-station flavor this shop visit
   // is — set in PICK_NODE from the node's type ('shop' -> 'store',
   // 'shipyard' -> 'shipyard'), cleared on LEAVE_SHOP. Absent means a save
   // from before this field existed, which was always a 'store' (the only
   // kind that existed then) — every reader falls back to that.
   shopKind?: 'store' | 'shipyard';
-  // Iteration 33: the shipyard's single purchasable upgrade this visit,
-  // drawn on arrival like shopFrameOffers, cleared on purchase or on
-  // LEAVE_SHOP. Only ever set when shopKind === 'shipyard'.
-  shopUpgradeOffer?: UpgradeId;
   currentEvent?: CurrentEventState;
   lastEventId?: EventId; // avoids repeating the same event back-to-back
   // Iteration 14.3: set by the defector's "take them aboard" choice. The

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import { incomingFirePreview } from '../game/combatEngine';
+import { incomingFirePreview, outgoingFirePreview } from '../game/combatEngine';
 import type { CombatState } from '../game/combatEngine';
 import type { EnemyDef, Side } from '../game/types';
 import { playSfx } from '../audio';
@@ -80,20 +80,24 @@ export function useTheaterFx({ combat, enemy, playerLabels, revealedCount, reduc
   // enemy card to its opening target, measured from real card positions
   // after layout. Hidden while a round replays (the transient fx own the
   // stage) and once the fight ends; re-measured on state change and resize.
-  const [threatLines, setThreatLines] = useState<
-    { key: string; x1: number; y1: number; x2: number; y2: number }[]
-  >([]);
+  // 2026-08-08: the player's own outgoing half joins it (outgoingFirePreview),
+  // same measuring pass, kept as a separate array so CombatScreen can style
+  // "what's about to hit me" and "what I'm about to hit" differently.
+  type ThreatLine = { key: string; x1: number; y1: number; x2: number; y2: number };
+  const [threatLines, setThreatLines] = useState<ThreatLine[]>([]);
+  const [outgoingThreatLines, setOutgoingThreatLines] = useState<ThreatLine[]>([]);
   const finished = Boolean(combat.winner);
   const isReplayingNow = revealedCount < combat.log.length;
   const showTelegraph = !finished && !isReplayingNow;
   useEffect(() => {
     if (!showTelegraph) {
       setThreatLines([]);
+      setOutgoingThreatLines([]);
       return;
     }
     const measure = () => {
       const preview = incomingFirePreview(combat);
-      const lines: { key: string; x1: number; y1: number; x2: number; y2: number }[] = [];
+      const lines: ThreatLine[] = [];
       for (const entry of preview.entries) {
         const from = centerOf('enemy', entry.shooterIndex);
         const to = centerOf('player', entry.targetIndex);
@@ -102,6 +106,17 @@ export function useTheaterFx({ combat, enemy, playerLabels, revealedCount, reduc
         }
       }
       setThreatLines(lines);
+
+      const outgoing = outgoingFirePreview(combat);
+      const outgoingLines: ThreatLine[] = [];
+      for (const entry of outgoing.entries) {
+        const from = centerOf('player', entry.shooterIndex);
+        const to = centerOf('enemy', entry.targetIndex);
+        if (from && to) {
+          outgoingLines.push({ key: `${entry.shooterIndex}-${entry.targetIndex}`, x1: from.x, y1: from.y, x2: to.x, y2: to.y });
+        }
+      }
+      setOutgoingThreatLines(outgoingLines);
     };
     // Measured synchronously: by effect time the ship cards' ref callbacks
     // have run and layout is committed. (Not requestAnimationFrame — RAF
@@ -262,5 +277,5 @@ export function useTheaterFx({ combat, enemy, playerLabels, revealedCount, reduc
     setFx([]);
   }
 
-  return { theaterRef, fx, cardBadges, registerShipEl, threatLines, showTelegraph, clearFx };
+  return { theaterRef, fx, cardBadges, registerShipEl, threatLines, outgoingThreatLines, showTelegraph, clearFx };
 }

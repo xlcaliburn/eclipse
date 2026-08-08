@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   advanceRound,
+  canIssueOrder,
   canUseActive,
   combatOutcome,
   hasMissilePhase,
   incomingFirePreview,
   initCombat,
+  issueOrder,
   openingTargetIndex,
   OUTSPEED_GAP,
   outspeedingShipIndices,
@@ -295,6 +297,77 @@ describe('hasMissilePhase', () => {
     const fleet = [{ stats: blankStats({ missiles: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
     const foe = enemy({}, {});
     expect(hasMissilePhase(initCombat(fleet, foe, 1))).toBe(true);
+  });
+});
+
+describe('missile phase — simultaneous volley (2026-08-08 bug fix)', () => {
+  it("a ship destroyed by an earlier-activating enemy's missiles this same phase still fires its own", () => {
+    // The reported bug: sequential activation-order resolution meant a
+    // lower-initiative ship killed by the enemy's opening missile volley
+    // never got its own turn, even though missile fire is meant to be
+    // simultaneous — and even once that alive-check was fixed, the outer
+    // activation loop still stopped calling fireShip AT ALL the moment a
+    // winner was provisionally decided (here: the player's only ship
+    // dying), so a not-yet-activated ship's fireShip call never happened
+    // either. Both halves are exercised together here. A natural 1 always
+    // misses regardless of computer, so a hit isn't fully guaranteed —
+    // loop over seeds (same technique as the rift-backfire test above)
+    // until the kill actually lands this round, then inspect it.
+    const fleet = [
+      { stats: blankStats({ initiative: 0, hp: 1, missiles: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { initiative: 5, hp: 20, computer: 10, missiles: [{ diceCount: 3, damage: 5 }] });
+
+    let state = initCombat(fleet, foe, 1);
+    let seed = 1;
+    while (state.playerShips[0].damage < 1 && seed < 200) {
+      seed++;
+      state = advanceRound(initCombat(fleet, foe, seed));
+    }
+    // Confirms the scenario actually killed the player ship this round —
+    // otherwise the assertion below wouldn't be testing anything.
+    expect(state.playerShips[0].damage).toBeGreaterThanOrEqual(1);
+
+    const playerRoll = state.log.find((e) => e.kind === 'roll' && e.side === 'player');
+    expect(playerRoll).toBeDefined(); // the player's own missile still fired
+  });
+
+  it('the missile-phase loop keeps calling fireShip after a winner is provisionally decided — cannon rounds still break early', () => {
+    // A second enemy ship, slower than the player, activates AFTER the
+    // player's own (now-fixed) fire — but by then the player's only ship
+    // is already dead, so it has no legal target and correctly logs no
+    // roll of its own. This pins down the actual mechanics precisely: the
+    // fast enemy's own dice loop still stops after its FIRST die kills the
+    // 1-HP player (no reason to keep rolling at an already-dead target —
+    // that part is correct, unrelated to this fix), the player still
+    // fires exactly once despite being dead (the fix), and the slow enemy
+    // fires zero (no legal target left) rather than the old behavior of
+    // never even being reached because the loop had already `break`ed.
+    const fleet = [
+      { stats: blankStats({ initiative: 3, hp: 1, missiles: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const twoEnemies: EnemyDef = {
+      id: 'test-enemy',
+      name: 'Test enemy',
+      blurb: '',
+      groups: [
+        { label: 'fast', count: 1, stats: blankStats({ initiative: 5, hp: 20, computer: 10, missiles: [{ diceCount: 3, damage: 5 }] }) },
+        { label: 'slow', count: 1, stats: blankStats({ initiative: 1, hp: 20, missiles: [{ diceCount: 1, damage: 1 }] }) },
+      ],
+    };
+
+    let state = initCombat(fleet, twoEnemies, 1);
+    let seed = 1;
+    while (state.playerShips[0].damage < 1 && seed < 200) {
+      seed++;
+      state = advanceRound(initCombat(fleet, twoEnemies, seed));
+    }
+    expect(state.playerShips[0].damage).toBeGreaterThanOrEqual(1);
+    expect(state.winner).toBe('enemy');
+
+    const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(enemyRolls).toHaveLength(1); // fast's first die only — its own kill stops its own further dice
+    expect(state.log.some((e) => e.kind === 'roll' && e.side === 'player')).toBe(true); // the fix: still fired
   });
 });
 
@@ -1842,5 +1915,196 @@ describe('Homing missile — bypassTaunt (iteration 42)', () => {
     const rollEvents = state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile' && e.side === 'player');
     expect(rollEvents).toHaveLength(1);
     if (rollEvents[0].kind === 'roll') expect(rollEvents[0].targetIndex).toBe(0); // the taunter, as usual
+  });
+});
+
+describe('Fleet orders (iteration 48)', () => {
+  it('attack-run: +1 computer, -1 piloting for the fleet, for exactly one round', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1);
+    state = issueOrder(state, 'attack-run');
+    expect(state.roundModifiers.computerBonus).toBe(1);
+    expect(state.roundModifiers.playerShieldBonus).toBe(-1);
+    expect(state.commandPoints).toBe(1);
+    expect(state.orderThisRound).toBe('attack-run');
+    state = advanceRound(state);
+    expect(state.roundModifiers.computerBonus).toBe(0);
+    expect(state.roundModifiers.playerShieldBonus).toBe(0);
+  });
+
+  it('evasive-pattern: +1 piloting, -1 computer for the fleet, for exactly one round', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1);
+    state = issueOrder(state, 'evasive-pattern');
+    expect(state.roundModifiers.computerBonus).toBe(-1);
+    expect(state.roundModifiers.playerShieldBonus).toBe(1);
+  });
+
+  it('brace: fires nothing this round, but — unlike evade — stays a legal, targetable defender at +2 piloting', () => {
+    const fleet = [
+      { stats: blankStats({ initiative: 5, hp: 5, cannons: [{ diceCount: 1, damage: 5 }] }), initialDamage: 0 },
+    ];
+    // initiative 8 vs the fleet's 5 — a 3-point gap, below OUTSPEED_GAP(4),
+    // so the enemy gets exactly one activation (no bonus cannon round to
+    // complicate the roll count this test is checking).
+    const foe = enemy({}, { initiative: 8, hp: 5, computer: 0, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile (no-op)
+    state = issueOrder(state, 'brace', 0);
+    expect(state.roundModifiers.bracingShipIndices).toEqual([0]);
+    state = advanceRound(state); // cannon round 1
+    expect(state.log.filter((e) => e.kind === 'roll' && e.side === 'player')).toHaveLength(0);
+    const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(enemyRolls).toHaveLength(1); // braced, but still legally targetable
+    expect(enemyRolls.every((e) => e.kind === 'roll' && e.shield === 2)).toBe(true); // +2 piloting from Brace
+  });
+
+  it('brace: a braced ship keeps its taunt — unlike evade, the enemy still must fire at it', () => {
+    const fleet = [
+      { stats: blankStats({ initiative: 5, hp: 20, taunt: true }), initialDamage: 0 },
+      { stats: blankStats({ initiative: 5, hp: 2 }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { initiative: 10, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // missile (no-op)
+    state = issueOrder(state, 'brace', 0);
+    state = advanceRound(state); // cannon round 1
+    const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(enemyRolls.length).toBeGreaterThan(0);
+    expect(enemyRolls.every((e) => e.kind === 'roll' && e.targetIndex === 0)).toBe(true);
+  });
+
+  it('brace armed before round 0 forfeits that ship\'s missiles too', () => {
+    const fleet = [{ stats: blankStats({ hp: 10, missiles: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 20, computer: 0 });
+
+    let control = initCombat(fleet, foe, 1);
+    control = advanceRound(control); // round 0, no order — missiles fire normally
+    expect(control.log.some((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'missile')).toBe(true);
+
+    let braced = initCombat(fleet, foe, 1);
+    braced = issueOrder(braced, 'brace', 0);
+    braced = advanceRound(braced); // round 0, braced — no missiles at all
+    expect(braced.log.some((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'missile')).toBe(false);
+  });
+
+  it('exploit-weakness: +2 computer applies only to dice that land on the marked ship', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 0, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({ count: 2 }, { hp: 20, shield: 0 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { exploitEnabled: true });
+    state = advanceRound(state); // missile (no-op)
+    state = issueOrder(state, 'exploit-weakness', 0);
+    state = advanceRound(state); // cannon round 1
+    const rolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player');
+    expect(rolls).toHaveLength(1);
+    if (rolls[0].kind === 'roll') {
+      expect(rolls[0].targetIndex).toBe(0);
+      expect(rolls[0].computer).toBe(2);
+    }
+  });
+
+  it('exploit-weakness bonus does not apply to a die that retargets after the marked ship dies', () => {
+    // A seed sweep (same discipline as the Overcharged-rounds tests above) —
+    // no single fixed seed is known in advance to land the first die's hit,
+    // which this scenario needs in order to force the second die to retarget.
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 0, cannons: [{ diceCount: 2, damage: 5 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({ count: 2 }, { hp: 3, shield: 0 }); // dies outright to any hit
+    let found = false;
+    for (let seed = 1; seed <= 200 && !found; seed++) {
+      let state = initCombat(fleet, foe, seed, 'weakest', undefined, { exploitEnabled: true });
+      state = advanceRound(state); // missile (no-op)
+      state = issueOrder(state, 'exploit-weakness', 0);
+      state = advanceRound(state); // cannon round 1 — 2 dice from the one ship
+      const rolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player');
+      if (rolls.length !== 2 || rolls[0].kind !== 'roll' || rolls[1].kind !== 'roll') continue;
+      if (!rolls[0].hit || rolls[1].targetIndex !== 1) continue; // needs die 1 to kill index 0, die 2 to retarget
+      found = true;
+      expect(rolls[0].targetIndex).toBe(0);
+      expect(rolls[0].computer).toBe(2); // landed on the marked ship — bonus applied
+      expect(rolls[1].computer).toBe(0); // retargeted off the mark after the kill — no bonus
+    }
+    expect(found).toBe(true);
+  });
+
+  it('command points: 1 order per round, 2 total at base, exhausted after 2, a refused order is a no-op', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1);
+    expect(state.commandPoints).toBe(2);
+    expect(canIssueOrder(state, 'attack-run')).toBe(true);
+
+    state = issueOrder(state, 'attack-run');
+    expect(state.commandPoints).toBe(1);
+    expect(state.orderThisRound).toBe('attack-run');
+    expect(canIssueOrder(state, 'evasive-pattern')).toBe(false); // one per round
+    const refused = issueOrder(state, 'evasive-pattern');
+    expect(refused).toBe(state); // refused — the exact same reference back, not a new object
+
+    state = advanceRound(state);
+    expect(state.orderThisRound).toBeNull();
+    expect(canIssueOrder(state, 'evasive-pattern')).toBe(true);
+    state = issueOrder(state, 'evasive-pattern');
+    expect(state.commandPoints).toBe(0);
+
+    state = advanceRound(state);
+    expect(canIssueOrder(state, 'attack-run')).toBe(false); // out of command points, no replenishment
+  });
+
+  it('exploit-weakness is gated on exploitEnabled; targeted orders require a live ship of the right side', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    const noExploit = initCombat(fleet, foe, 1);
+    expect(canIssueOrder(noExploit, 'exploit-weakness', 0)).toBe(false);
+
+    const enabled = initCombat(fleet, foe, 1, 'weakest', undefined, { exploitEnabled: true });
+    expect(canIssueOrder(enabled, 'exploit-weakness')).toBe(false); // no targetIndex given
+    expect(canIssueOrder(enabled, 'exploit-weakness', 0)).toBe(true);
+    expect(canIssueOrder(enabled, 'exploit-weakness', 99)).toBe(false); // no such enemy ship
+    expect(canIssueOrder(enabled, 'brace', 99)).toBe(false); // no such player ship
+    expect(canIssueOrder(enabled, 'brace', 0)).toBe(true);
+  });
+
+  it('round-modifier order fields (bracingShipIndices, markedEnemyIndex) reset every round, same as orderThisRound', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { exploitEnabled: true });
+    state = issueOrder(state, 'exploit-weakness', 0);
+    expect(state.roundModifiers.markedEnemyIndex).toBe(0);
+    state = advanceRound(state);
+    expect(state.roundModifiers.markedEnemyIndex).toBeNull();
+    expect(state.roundModifiers.bracingShipIndices).toEqual([]);
+    expect(state.orderThisRound).toBeNull();
+  });
+
+  it('issuing an order consumes no rng — the roll sequence matches an un-ordered control run on the same seed', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 20, cannons: [{ diceCount: 1, damage: 1 }] });
+    const seed = 7;
+
+    let control = initCombat(fleet, foe, seed);
+    control = advanceRound(control); // missile (no-op)
+
+    let ordered = initCombat(fleet, foe, seed);
+    ordered = advanceRound(ordered);
+    const beforeCounter = ordered.rngCounter;
+    ordered = issueOrder(ordered, 'attack-run');
+    expect(ordered.rngCounter).toBe(beforeCounter); // the order itself consumed no rng
+
+    control = advanceRound(control);
+    ordered = advanceRound(ordered);
+    const controlRaws = control.log.filter((e) => e.kind === 'roll').map((e) => (e.kind === 'roll' ? e.raw : null));
+    const orderedRaws = ordered.log.filter((e) => e.kind === 'roll').map((e) => (e.kind === 'roll' ? e.raw : null));
+    // Same seed, same rng stream — every die's raw value matches regardless
+    // of the order armed (attack-run only changes whether a given raw value
+    // resolves as a hit, never the sequence of raws itself).
+    expect(orderedRaws).toEqual(controlRaws);
   });
 });

@@ -3,12 +3,13 @@ import {
   combatOutcome,
   hasMissilePhase,
   initCombat,
+  issueOrder,
   setPriorityTarget,
   runToEnd,
   shipEndState,
   useActive,
 } from './combatEngine';
-import type { TargetingStance } from './combatEngine';
+import type { FleetOrderId, TargetingStance } from './combatEngine';
 import { drawCommanderChoices } from './commanders';
 import type { CommanderId } from './commanders';
 import {
@@ -27,15 +28,15 @@ import { drawCounterProtocols } from './counterProtocols';
 import { drawEscalationSchedule } from './escalations';
 import { drawEvent, getEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
 import type { EventId } from './events';
-import { getFrame, MAX_FLEET_SIZE, PURCHASABLE_FRAME_IDS } from './frames';
+import { getFrame } from './frames';
 import type { FrameId } from './frames';
 import { addHeat, MAX_HEAT } from './heat';
 import { actColumns, bossColumn, generateMap, getNode, globalColumn, laneColumns, maxRows, reachableNodes } from './map';
 import type { CargoTag, GameMap, MapPosition } from './map';
-import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
+import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, getPart, isSalvageablePart, PARTS, STARTING_LOADOUT } from './parts';
 import { drawProtocolOffers, hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
-import { pickOne, randomSeed, resumeRng } from './rng';
+import { pickOne, randomSeed, resumeRng, runRng } from './rng';
 import type { RngFn } from './rng';
 import {
   applyRepairBanking,
@@ -44,17 +45,53 @@ import {
   deriveStats,
   effectiveSlots,
   equippedWeaponCount,
+  everyShipAtUpgradeCap,
   fleetHasWeapon,
-  FUSABLE_PARTS,
-  fusionCost,
   playerShipLabel,
+  withUpgrade,
 } from './ship';
+// 47.6: upgradeCapFor moved to ship.ts — re-exported here so
+// FleetOverlay.tsx/FleetPanel.tsx's existing
+// `import { upgradeCapFor } from '../game/reducer'` keeps working
+// unchanged, same "no consumer needs to touch its import path" discipline
+// the whole reducer.ts split follows. (Not in the value-import list above —
+// nothing in this file calls it directly any more; withUpgrade calls it
+// internally now, inside ship.ts.)
+export { upgradeCapFor } from './ship';
 import { getUpgrade, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
 import { emptyRunStats } from './daily';
 import { mapShip, removeOnce } from './util';
 import { shipName } from './shipNames';
-import type { CombatEvent, EnemyDef, PartId, PlayerShipState, Rarity, RewardSummary, RunState, RunStats } from './types';
+import type { CombatEvent, EnemyDef, PartId, PlayerShipState, RewardSummary, RunState, RunStats } from './types';
+// 47.6: the shop cases (BUY_PART..LEAVE_SHOP) and their pricing/pool/rarity
+// helpers live in reducer/shop.ts now — see that file's header comment for
+// the full split rationale. `handleShopAction` is this file's one
+// delegation point; the rest are re-exported below (external consumers
+// still import them from here) or imported back for PICK_NODE's/
+// PROTOCOL_CHOOSE's own non-shop use of shop-pricing logic.
+// Only the names PICK_NODE/PROTOCOL_CHOOSE/the switch delegation actually
+// reference — everything else re-exported below is re-exported straight
+// from the module (no local binding needed), same reasoning `export {
+// upgradeCapFor } from './ship'` above doesn't repeat it in a value import.
+import { drawFrameOffers, drawShopOffers, handleShopAction, hullRarityBonus, hullScrapValue } from './reducer/shop';
+export {
+  commodityLotBuyCost,
+  commodityLotCap,
+  COMMODITY_LOT_SELL_PRICE,
+  drawShopOffers,
+  fleetCap,
+  frameCost,
+  MERCENARY_FIT,
+  mercenaryCost,
+  partCost,
+  partSellPrice,
+  RARITY_ORDER,
+  REPAIR_COST_PER_HP,
+  rollRarity,
+  SHOP_OFFER_COUNT,
+  STARTING_FIT,
+} from './reducer/shop';
 
 export type RunAction =
   | { type: 'CHOOSE_COMMANDER'; commanderId: CommanderId }
@@ -70,6 +107,11 @@ export type RunAction =
   | { type: 'ADVANCE_ROUND' }
   | { type: 'AUTO_RESOLVE' }
   | { type: 'SET_PRIORITY_TARGET'; index: number | null }
+  // Iteration 48 (fleet orders): arms one order for the round about to
+  // resolve — costs 1 command point, at most one per round. `targetIndex`
+  // is required for 'brace' (a player-side index) and 'exploit-weakness'
+  // (an enemy-side index), omitted for the two fleet-wide stance orders.
+  | { type: 'ISSUE_ORDER'; order: FleetOrderId; targetIndex?: number }
   | { type: 'CONTINUE' }
   | { type: 'WITHDRAW' }
   | { type: 'PICK_UPGRADE'; upgradeId: UpgradeId; shipIndex: number }
@@ -99,16 +141,6 @@ export type RunAction =
   // REPAIR_COST_PER_HP credits per point, same shape as any other per-ship
   // shop action (Scuttle, Load commodity lot).
   | { type: 'BUY_REPAIR'; shipIndex: number }
-  // Iteration 33 (2026-08-07): the shipyard's one purchasable slotless
-  // upgrade this visit — shop phase + shopKind === 'shipyard' only.
-  | { type: 'BUY_UPGRADE'; shipIndex: number }
-  // Iteration 31 (the Foundry): fuse a permanent, slotless base-stat
-  // bonus into a hull — shipyard only, same as BUY_UPGRADE. 2026-08-07:
-  // now consumes an OWNED stat-ladder part from inventory (see
-  // ship.ts's FUSABLE_PARTS) on top of the escalating credit cost (see
-  // fusionCost) — `stat`/amount are both derived from `partId`, not
-  // passed separately.
-  | { type: 'FUSE_STAT'; shipIndex: number; partId: PartId }
   | { type: 'USE_ACTIVE'; shipIndex: number; abilityIndex: number }
   | { type: 'LEAVE_SHOP' }
   | { type: 'LEAVE_REPAIR' }
@@ -125,185 +157,28 @@ export type RunAction =
   | { type: 'NEW_RUN'; seed?: number; mode?: 'daily'; dailyDate?: string }
   | { type: 'LOAD_STATE'; state: RunState };
 
-// Iteration 41: 6 -> 8 — one more weapon slot, one more defense slot, to
-// match the roster's own growth (light-missile joining the weapon pool,
-// etc.) without either category crowding out the other.
-export const SHOP_OFFER_COUNT = 8;
 // How many columns beyond the current vision high-water mark a long-range
 // sweep reveals.
 const SECTOR_SCAN_DEPTH = 2;
 
-// A purchased ship arrives pre-fitted with a small stat loadout — never an
-// identity part. Iteration 36: hulls stopped bundling a specific part
-// (Bastion's lure beacon, the support hulls' signature actives) as their
-// whole role — identity now lives entirely on the part, which any hull can
-// carry. What's left here is pure "arrives combat-ready" QoL: an
-// Interceptor with an ion cannon, a Dreadnought/Cruiser with a fuller
-// starting fit matching their frames.ts blurb.
-// Iteration 41: every purchasable hull now arrives with at least one
-// weapon — an unarmed ship in the shop read wrong, however cheap. Bastion
-// and Freighter get an Ion cannon (each frame's own cost bumped to match,
-// see frames.ts); Derelict and Corvette get the new Light missile instead
-// (cheaper, and a missile still fits a hull too thin to reliably trade
-// blows). Frame prices are the single source of truth for what a starting
-// fit is "worth" — see frames.ts's own per-frame reprice notes.
-// Exported so ShopScreen's frame cards can preview what a hull arrives
-// fitted with — see the "Expand your fleet" section, iteration 41.
-export const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
-  interceptor: ['ion'],
-  bastion: ['ion'],
-  dreadnought: ['ion', 'ion', 'shield1'],
-  // 2026-08-06 (the same midrange-progression repricing): now arrives with
-  // Gauss coils alongside its ion cannon — a real starting stat, not just
-  // a bare identity part, matching the Dreadnought's fuller fit above.
-  'light-cruiser': ['ion', 'shield1'],
-  freighter: ['ion'],
-  derelict: ['light-missile'],
-  corvette: ['light-missile'],
-  // Legacy support hulls (iteration 23, retired iteration 36) — never
-  // purchasable any more (see frames.ts), so this never actually runs, but
-  // every FrameId key is still required here. Left blank rather than
-  // resurrecting their old bundles.
-  frigate: [],
-  aegis: [],
-  tender: [],
-  'ew-cutter': [],
-  'disruptor-cutter': [],
-};
+// Iteration 48 (fleet orders): the fleet-wide command-point budget ENGAGE
+// seeds into initCombat — see combatEngine.ts's CombatState.commandPoints
+// and the "Fleet orders" section for what a point buys. The Spymaster's
+// bump (2cr worth of "runs the battle on better intelligence" doctrine, in
+// mechanical terms) is the info-doctrine's first presence in the phase the
+// player actually spends their minutes in — the map-side kit (vision,
+// intel draws, heat-free salvage) never touches combat at all otherwise.
+// Exported so PrepScreen's one-line CP preview reads the same numbers
+// ENGAGE actually seeds — not a re-derived duplicate.
+export const BASE_COMMAND_POINTS = 2;
+export const SPYMASTER_COMMAND_POINTS = 3;
 
-// Iteration 20 (commodity runs): buy low at one shop, sell high at any
-// later one. The +5cr spread is the reward; the risk is the slot it ties up
-// for however many columns pass in between, and that it's lost outright if
-// the carrying ship is. The sell price never varies by commander — only the
-// Merchant's buy side and capacity change (iteration 21).
-export const COMMODITY_LOT_SELL_PRICE = 9;
-const BASE_COMMODITY_LOT_BUY_COST = 4;
-const MERCHANT_COMMODITY_LOT_BUY_COST = 3;
-export function commodityLotBuyCost(commanderId: CommanderId | undefined): number {
-  return commanderId === 'merchant' ? MERCHANT_COMMODITY_LOT_BUY_COST : BASE_COMMODITY_LOT_BUY_COST;
-}
-// 2026-08-06: shop-bought repairs — a credit sink for late-run wealth with
-// nowhere else to go, same reasoning as the Foundry idea but far simpler:
-// straight HP, no permanence, no build implications. Priced per point so a
-// ship sitting on 1 damage costs the same 2cr/HP as one sitting on 6 —
-// no flat "repair visit" fee to make topping off a scratch not worth it.
-export const REPAIR_COST_PER_HP = 2;
 // Iteration 46.2 (2026-08-08): a flat, free heal on every won fight,
 // universal (every commander, stacks with regen/the Engineer's bonus) —
 // see the CONTINUE win branch's comment for the attrition finding that
 // motivated this. Was actRun.ts's old POST_WIN_REPAIR experiment env var;
 // promoted from a measurement knob to a real rule.
 export const POST_WIN_REPAIR = 2;
-// Iteration 33 (2026-08-07): the shipyard's third acquisition path for a
-// slotless upgrade — rewards and repair-yard overhauls are both free
-// (paid for with risk or a forgone repair); this is the only path that
-// costs neither, priced above both accordingly.
-export const SHIPYARD_UPGRADE_COST = 12;
-const BASE_COMMODITY_LOT_CAP = 1;
-// 2026-08-06: was 2 — a doubled cap on top of the Merchant's already-cheaper
-// buy price didn't just add a bigger margin, it doubled the whole arbitrage
-// loop (buy low, ride a column, sell high, repeat every visit), and that
-// compounds hard across a full run. Capped back to the same 1 lot everyone
-// else gets; the cheaper buy-in (still 3cr vs 4cr) is enough on its own to
-// read as "better prices" without turning into a second income stream.
-const MERCHANT_COMMODITY_LOT_CAP = 1;
-export function commodityLotCap(commanderId: CommanderId | undefined): number {
-  return commanderId === 'merchant' ? MERCHANT_COMMODITY_LOT_CAP : BASE_COMMODITY_LOT_CAP;
-}
-
-// Re-priced 2026-08-04: originally priced ABOVE a real Interceptor (the
-// stated reasoning was that a one-fight rental "costs nothing but credits"
-// and should pay a premium for that) — but a permanent Interceptor is 6cr
-// and strictly more ship for the money (unlimited fights, can be equipped
-// and carried forward) than a one-fight rental, so charging more for less
-// never made sense. Priced below the permanent frame instead, same
-// buy-power-cheap logic as the rest of the Merchant's kit.
-const BASE_MERCENARY_COST = 5;
-const MERCHANT_MERCENARY_COST = 3;
-export function mercenaryCost(commanderId: CommanderId | undefined): number {
-  return commanderId === 'merchant' ? MERCHANT_MERCENARY_COST : BASE_MERCENARY_COST;
-}
-const MERCENARY_SHIP_NAME = 'Mercenary escort';
-// Exported so ShopScreen can preview what the hire actually arrives
-// fitted with (weapon + dice) — one source of truth, not a hardcoded
-// ['ion'] duplicated into the UI.
-export const MERCENARY_FIT: PartId[] = ['ion'];
-
-// Iteration 21 (the Admiral, wide): fleet cap 5 instead of the standard 4.
-// Iteration 28: two prismatic protocols change this further — Armada
-// mandate (+2, its whole benefit) and Lone flagship (hard-set to 1, its
-// whole cost). Lone flagship wins if somehow both are ever held (not
-// currently reachable — only one prismatic can be drafted per run — but
-// this is the sane precedence if that ever changes: the protocol whose
-// entire premise is "exactly one ship" should never be silently
-// overridden by a flat +2).
-const ADMIRAL_FLEET_CAP = 5;
-const ARMADA_MANDATE_BONUS = 2;
-const LONE_FLAGSHIP_CAP = 1;
-export function fleetCap(commanderId: CommanderId | undefined, protocols?: ProtocolId[]): number {
-  if (hasProtocol(protocols, 'lone-flagship')) return LONE_FLAGSHIP_CAP;
-  const base = commanderId === 'admiral' ? ADMIRAL_FLEET_CAP : MAX_FLEET_SIZE;
-  return base + (hasProtocol(protocols, 'armada-mandate') ? ARMADA_MANDATE_BONUS : 0);
-}
-
-// Iteration 21: purchasable-frame pricing for the two ship-doctrine
-// commanders. The Admiral (wide) discounts every frame 25%, rounded down —
-// a general shopping discount, since the doctrine is "many cheap hulls."
-// The Warlord (tall) discounts only the Dreadnought, flatly — the whole
-// doctrine is "one specific ship," not a general one. The two commanders
-// are mutually exclusive within a run, so there's no stacking case to
-// resolve. The Flagship is never purchasable, so it never reaches this.
-const ADMIRAL_FRAME_MULTIPLIER = 0.75; // 25% off
-const WARLORD_DREADNOUGHT_DISCOUNT = 5;
-// Iteration 28 (Armada mandate): a further 50% off every purchasable
-// frame, stacking multiplicatively after any commander discount already
-// applied (same "rounds in the player's favor, final price floored"
-// discipline as the Admiral's own multiplier below).
-const ARMADA_MANDATE_FRAME_MULTIPLIER = 0.5;
-// Iteration 33 (2026-08-07): the general store's hull rack is second-hand —
-// stacks on top of any commander/protocol discount already applied, same
-// "layer on top, floor at the end" discipline as armada-mandate above.
-// `shopKind` is optional so call sites that don't care about store vs.
-// shipyard (several reducer.test.ts cases) keep compiling unchanged.
-const SECOND_HAND_MULTIPLIER = 0.75;
-export function frameCost(
-  baseCost: number,
-  frameId: FrameId,
-  commanderId: CommanderId | undefined,
-  protocols?: ProtocolId[],
-  shopKind?: 'store' | 'shipyard',
-): number {
-  // Rounds the FINAL price down (not the discount amount down before
-  // subtracting) — Math.floor(cost * 0.75), not cost - Math.floor(cost *
-  // 0.25). The two differ whenever cost is odd (6cr: 4cr either way is
-  // fine, but 7cr gives 5cr vs. 6cr) and "rounds in the player's favor" is
-  // the more natural reading of a discount, so this is deliberate.
-  let cost = baseCost;
-  if (commanderId === 'admiral') cost = Math.floor(cost * ADMIRAL_FRAME_MULTIPLIER);
-  else if (commanderId === 'warlord' && frameId === 'dreadnought') cost = Math.max(0, cost - WARLORD_DREADNOUGHT_DISCOUNT);
-  if (hasProtocol(protocols, 'armada-mandate')) cost = Math.floor(cost * ARMADA_MANDATE_FRAME_MULTIPLIER);
-  if (shopKind === 'store') cost = Math.floor(cost * SECOND_HAND_MULTIPLIER);
-  return cost;
-}
-
-// Iteration 39: replaces the old arrival-damage mechanic (a second-hand
-// hull no longer arrives pre-damaged — its whole discount lives in price
-// now, via SECOND_HAND_MULTIPLIER above). Instead, a PRISTINE (shipyard)
-// purchase arrives with a bonus scaled to the hull's own rarity tier: +1
-// max HP (via `fusions.hp`, the same permanent slotless mechanic the
-// Foundry uses — stacks cleanly with any Foundry fusion bought later) and
-// +1 random upgrade (without replacement, from the full UPGRADES list —
-// see randomUpgradeIds's own comment for why there's no restricted pool
-// any more), PER rarity level above common (rare=1, epic=2, legendary=3;
-// common itself = 0, no bonus). A second-hand (store) purchase is always
-// treated as common regardless of the frame's real rarity — buying a
-// Bastion second-hand is cheap and plain; buying it from a shipyard is
-// full price but arrives already fused and upgraded.
-function hullRarityBonus(rarity: Rarity, rng: RngFn): { hp: number; upgrades: UpgradeId[] } {
-  const level = RARITY_ORDER.indexOf(rarity);
-  return { hp: level, upgrades: randomUpgradeIds(level, rng) };
-}
-
 // Credits earned for winning a combat node at the given (global) column.
 // `act` defaults to 1 since almost every call site is act-1 context
 // (act-2 callers pass `2` explicitly — see the CONTINUE case below).
@@ -325,12 +200,29 @@ function hullRarityBonus(rarity: Rarity, rng: RngFn): { hp: number; upgrades: Up
 // dominant cause of every commander's act-1 clear rate collapsing to
 // 0.6%-4.6% (vs. a historical 3.8%-20.8% best-case — see iteration-22.md;
 // the un-halved rate at least gets back to that healthier territory).
-// `act` stays a parameter (every call site still passes it explicitly)
-// even though act 1 and act 2 now compute identically — kept for the next
-// time these two eras' economies need to diverge again, rather than
-// stripping the parameter and re-adding it later.
-export function winReward(col: number, _act: 1 | 2 = 1): number {
-  return 7 + col;
+//
+// 2026-08-08: a narrower cut, not a repeat of that collapse — only
+// columns 1-3 (not the whole act) halved (floored), driven by a playtest
+// report: a straight run to the first shop (guaranteed reachable by
+// col 3-4, iteration 22.2) banks a forced 27cr (8+9+10) before the player
+// makes a single real choice, often more than the shop's own stock costs
+// to clear. Column 0 (the opener) is untouched — it's already excluded
+// from that 27cr tally. The removed early income (27->13, -14cr) is
+// redirected into act 2 instead, via ACT2_REWARD_BONUS below — which also
+// directly helps the iteration-46 finding that act 2's ~13-fight chain,
+// not any single fight, is the real bottleneck.
+const ACT1_HALVED_COLUMNS: readonly number[] = [1, 2, 3];
+// +3cr per win/elite, act 2 only. Across the ~13 fights iteration 46
+// measured act 2 requiring, that's roughly +39cr over a full act-2 clear
+// — more than double the 14cr pulled from act 1's first 3 columns above,
+// intentionally "more than 1:1" per the direction to shift more into
+// act 2, not just relocate the same total.
+const ACT2_REWARD_BONUS = 3;
+
+export function winReward(col: number, act: 1 | 2 = 1): number {
+  const base = 7 + col;
+  if (act === 1 && ACT1_HALVED_COLUMNS.includes(col)) return Math.floor(base / 2);
+  return act === 2 ? base + ACT2_REWARD_BONUS : base;
 }
 
 // Credits earned for winning an elite node at the given (global) column.
@@ -339,9 +231,14 @@ export function winReward(col: number, _act: 1 | 2 = 1): number {
 // the CONTINUE case). Iteration 22.6: base bumped 8->11, same reasoning as
 // winReward above — kept 3cr above it so an elite still reads as the
 // bigger payout. 2026-08-07: act-1 halving added, then un-halved the same
-// day — see winReward's note.
-export function eliteReward(col: number, _act: 1 | 2 = 1): number {
-  return 11 + col;
+// day — see winReward's note. Elites are optional, chosen risk (not part
+// of the forced "walk to the first shop" income winReward's 2026-08-08
+// note describes), so they don't get that early-column cut — but DO get
+// the same act-2 bonus, preserving the existing "+4 over winReward" gap
+// between the two at every column.
+export function eliteReward(col: number, act: 1 | 2 = 1): number {
+  const base = 11 + col;
+  return act === 2 ? base + ACT2_REWARD_BONUS : base;
 }
 
 function bossEnemyForAct(map: GameMap, act: 1 | 2): EnemyDef {
@@ -384,16 +281,6 @@ function withFlagshipRecoveryGate(originalFleet: PlayerShipState[], next: RunSta
       fightsSurvived: lostFlagship.fightsSurvived ?? 0,
     },
   };
-}
-
-// Iteration 9: every in-run draw (shop stock, enemy picks, event/card/
-// upgrade draws) continues the one run-level rng stream instead of calling
-// the browser's raw random source directly, so reload-and-replay can never
-// change fate. Call `rng()` as many times as needed for this action, then
-// read `nextCounter()` exactly once when building the returned state.
-function runRng(state: RunState): { rng: RngFn; nextCounter: () => number } {
-  const { rng, consumedThisCall } = resumeRng(state.map.seed, state.rngCounter);
-  return { rng, nextCounter: () => state.rngCounter + consumedThisCall() };
 }
 
 // Draws and stores this fight's combat seed at the moment `currentEnemy` is
@@ -543,7 +430,7 @@ function settleFleetAfterFight(
     // extraction preserves that rather than newly applying the protocol
     // somewhere it never used to reach.
     if (shipOutcome.destroyed && opts.ghostFleet) {
-      const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, opts.protocols, ship.fusions).hp;
+      const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, opts.protocols).hp;
       survivingFleet.push({
         ...ship,
         damage: Math.max(0, maxHp - 1),
@@ -700,226 +587,6 @@ function grantCommanderIntel(state: RunState, rng: RngFn): { state: RunState; te
   return grantIntel(state, rng);
 }
 
-// A commodity lot isn't real equipment — unrealized profit, not a part —
-// and is lost outright with a destroyed/scuttled ship rather than salvaged
-// to inventory; shared here so every salvage site excludes it the same way.
-function isSalvageablePart(partId: PartId): boolean {
-  return partId !== COMMODITY_LOT_PART_ID;
-}
-
-// Iteration 7: a flat uniform draw over ~30 parts can no longer reliably
-// surface an answer to a given threat. The 6 offers are drawn stratified
-// instead — 2 weapons, 2 defense (shield/hull), 1 computer-or-drive, 1
-// active part — uniform within each stratum. All six offers are unique
-// (2026-08-02): a duplicate wastes a slot, and the actives stratum overlaps
-// the typed ones (every active part also has a type), so cross-slot
-// duplicates were possible too, not just the double weapon/defense draws.
-const WEAPON_POOL = PARTS.filter((p) => p.type === 'weapon');
-const DEFENSE_POOL = PARTS.filter((p) => p.type === 'shield' || p.type === 'hull');
-const COMPUTER_DRIVE_POOL = PARTS.filter((p) => p.type === 'computer' || p.type === 'drive');
-const ACTIVE_POOL = PARTS.filter((p) => p.active);
-
-// Iteration 36 (rarity): shop odds per offer slot — legendary finds are
-// meant to be rare enough to feel like an event, common ones fill most of
-// the catalog. Sums to 1.
-const RARITY_WEIGHTS: Record<Rarity, number> = {
-  common: 0.73,
-  rare: 0.2,
-  epic: 0.05,
-  legendary: 0.02,
-};
-// Ordered low -> high; index doubles as "distance from common" for the
-// fallback walk below.
-// Exported (iteration 39) so ShopScreen can preview a shipyard hull's
-// rarity-bonus level (hullRarityBonus below) without duplicating this list.
-export const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
-
-// Exported for a direct unit test of the tier-boundary math (same
-// discipline as applyCargoReward's export above) — the reducer-level
-// integration tests can't cheaply pin an exact rng value mid-draw.
-export function rollRarity(rng: RngFn): Rarity {
-  const roll = rng();
-  let cumulative = 0;
-  for (const tier of RARITY_ORDER) {
-    cumulative += RARITY_WEIGHTS[tier];
-    if (roll < cumulative) return tier;
-  }
-  return 'legendary'; // floating-point guard — cumulative should hit 1 exactly
-}
-
-// The single draw every shop offer slot (part or hull) goes through: roll a
-// tier by RARITY_WEIGHTS, then draw uniformly from (pool ∩ that tier ∖
-// taken). If that's empty — the tier's exhausted, or nothing of that tier
-// exists in this particular type-filtered pool — fall back one tier at a
-// time toward common, then walk back up past the rolled tier toward
-// legendary. The slot always fills as long as the pool itself isn't fully
-// taken (every real call site has far more candidates than offer slots).
-// 47.5l: generic over the id type itself (was `T extends {id: string}`,
-// returning bare `string` — every call site cast the result back to
-// PartId/FrameId by hand, including one genuinely unsound
-// `as Exclude<FrameId, 'cruiser'>` that the compiler had no way to verify).
-// `Id` is inferred from the pool's own element type, so a pool whose `.id`
-// is already narrowed (Part['id']: PartId since 47.5k) returns that exact
-// type with no cast at all.
-function drawRarityWeighted<Id extends string, T extends { id: Id; rarity: Rarity }>(
-  pool: T[],
-  taken: Set<Id>,
-  rng: RngFn,
-): Id {
-  const rolledIndex = RARITY_ORDER.indexOf(rollRarity(rng));
-  const tryOrder = [0, -1, -2, -3, 1, 2, 3].map((offset) => rolledIndex + offset);
-  for (const idx of tryOrder) {
-    if (idx < 0 || idx >= RARITY_ORDER.length) continue;
-    const tier = RARITY_ORDER[idx];
-    const candidates = pool.filter((p) => p.rarity === tier && !taken.has(p.id));
-    if (candidates.length === 0) continue;
-    const id = candidates[Math.floor(rng() * candidates.length)].id;
-    taken.add(id);
-    return id;
-  }
-  // Defensive only: every tier (including cross-tier) came up empty, which
-  // means the whole pool is already taken. Never crash a shop draw over it.
-  const fallback = pool.find((p) => !taken.has(p.id)) ?? pool[0];
-  taken.add(fallback.id);
-  return fallback.id;
-}
-
-// Iteration 21 (signature stock): each commander always finds their
-// signature part in stock, at a discount — a cheap alternative to true
-// exclusive item pools (a much bigger content/balance surface). No entry
-// for the Merchant: 21.2 covers their doctrine entirely via the commodity
-// lot (already guaranteed by commodityLotCap/commodityLotBuyCost) and the
-// mercenary discount, with no additional part.
-const SIGNATURE_PART: Partial<Record<CommanderId, PartId>> = {
-  engineer: 'dcbay',
-  spymaster: 'cloak',
-  warlord: 'siege',
-  admiral: 'uplink2',
-};
-const SIGNATURE_DISCOUNT = 2;
-
-// The offer slot a signature part is force-inserted into if the normal
-// stratified draw didn't already surface it — matched to the part's own
-// type so a guaranteed slot never distorts the offer's usual balance (one
-// weapon slot, one defense slot, etc. either way). Index into the fixed
-// 8-slot layout drawShopOffers builds below (iteration 41: 3 weapon / 3
-// defense / 1 computer-drive / 1 active).
-const SIGNATURE_SLOT: Partial<Record<CommanderId, number>> = {
-  engineer: 7, // dcbay: hull + active -> the active slot
-  spymaster: 3, // cloak: shield -> the first defense slot
-  warlord: 0, // siege: weapon -> the first weapon slot
-  admiral: 6, // uplink2: computer + active -> the computer/drive slot
-};
-
-// Iteration 28 (Munitions contracts): a flat -2cr on every part in every
-// shop, floored at 1cr (never free) — stacks with the signature discount
-// above (both are flat, so they simply add).
-const MUNITIONS_CONTRACTS_DISCOUNT = 2;
-export function partCost(partId: PartId, commanderId: CommanderId | undefined, protocols?: ProtocolId[]): number {
-  let cost = getPart(partId).cost;
-  if (commanderId && SIGNATURE_PART[commanderId] === partId) cost -= SIGNATURE_DISCOUNT;
-  if (hasProtocol(protocols, 'munitions-contracts')) cost -= MUNITIONS_CONTRACTS_DISCOUNT;
-  return Math.max(1, cost);
-}
-
-// 47.5f: half a part's LIST price (not partCost's discounted price — a
-// sell isn't a purchase), floored. Exported so FleetPanel's sell-price
-// preview reads from the exact same number SELL_PART actually pays,
-// same "one source of truth" reasoning MERCENARY_FIT was exported for.
-export function partSellPrice(partId: PartId): number {
-  return Math.floor(getPart(partId).cost / 2);
-}
-
-// 47.5f: same halving rule as partSellPrice, for a whole hull — currently
-// only PROTOCOL_CHOOSE's Lone flagship pick (scrapping every escort).
-export function hullScrapValue(frameId: FrameId): number {
-  return Math.floor(getFrame(frameId).cost / 2);
-}
-
-// Iteration 28 (Armada mandate): shops stock one fewer part — the offer's
-// last slot (the active-part slot) is dropped. That slot is also where the
-// Engineer's signature part (dcbay) gets force-inserted (see SIGNATURE_SLOT
-// below); with Armada mandate active, that insertion simply has nowhere to
-// land and is skipped — a deliberate, documented overlap between two
-// separate systems, not a bug.
-// Iteration 41: 8 slots — 3 weapon / 3 defense / 1 computer-drive / 1
-// active (was 2/2/1/1) — bumped alongside SHOP_OFFER_COUNT.
-// Exported for direct testing of the draw's uniqueness invariants across
-// many seeds — the old test drove this via repeated REROLL actions
-// (removed 2026-08-08), which is no longer available as a mechanism.
-export function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: ProtocolId[]): PartId[] {
-  const taken = new Set<PartId>();
-  const offers = [
-    drawRarityWeighted(WEAPON_POOL, taken, rng),
-    drawRarityWeighted(WEAPON_POOL, taken, rng),
-    drawRarityWeighted(WEAPON_POOL, taken, rng),
-    drawRarityWeighted(DEFENSE_POOL, taken, rng),
-    drawRarityWeighted(DEFENSE_POOL, taken, rng),
-    drawRarityWeighted(DEFENSE_POOL, taken, rng),
-    drawRarityWeighted(COMPUTER_DRIVE_POOL, taken, rng),
-    drawRarityWeighted(ACTIVE_POOL, taken, rng),
-  ];
-  const trimmed = hasProtocol(protocols, 'armada-mandate') ? offers.slice(0, SHOP_OFFER_COUNT - 1) : offers;
-  const signaturePart = commanderId ? SIGNATURE_PART[commanderId] : undefined;
-  const signatureSlot = commanderId ? SIGNATURE_SLOT[commanderId] : undefined;
-  if (signaturePart && signatureSlot !== undefined && signatureSlot < trimmed.length && !trimmed.includes(signaturePart)) {
-    trimmed[signatureSlot] = signaturePart;
-  }
-  return trimmed;
-}
-
-// Re-tuned 2026-08-04: the "Expand your fleet" section used to always show
-// every purchasable frame — the same four ships, every single visit. 3 of
-// the (now 6) purchasable frames instead, drawn fresh per shop visit, no
-// commander-signature guarantee (frames aren't commander-specific gear the
-// way parts are — every commander benefits from a wide roster showing up).
-// 2026-08-06: the Dreadnought is act-2-only — a 30cr giant showing up
-// (and being affordable to a wealthy player) as early as column 1 undercuts
-// the interceptor -> midrange -> dreadnought progression the repricing
-// above was built around. Excluded from the draw pool entirely in act 1
-// rather than shown-but-disabled, matching how the fleet-cap case shows
-// everything and gates only the buy action — this is a genuine "not yet",
-// not a "can't afford it yet", so hiding it reads truer than a greyed-out
-// card a player can't do anything about all act.
-// Iteration 33 (2026-08-07): `kind` now also drives count and Dreadnought
-// eligibility — a store shows 2, a shipyard shows more (Dreadnought
-// eligible once act 2 makes it eligible at all — the two gates AND
-// together).
-// Iteration 36 (rarity): each offer slot rolls a rarity tier same as a part
-// slot does — the Dreadnought-eligibility filter above already excludes it
-// from `pool` in an act-1 store, so a legendary roll there simply falls
-// back to the next tier down (the Cruiser, epic) rather than ever leaking
-// a capital ship early.
-// 2026-08-08: the store's old pitch was "second-hand" (cheaper, always-
-// common bonus, no separate rarity story) — now that hulls carry real
-// rarity tiers, that's expressed directly instead: a store simply never
-// stocks an epic or legendary hull, full stop, rather than stocking one at
-// a fake "common" bonus level. Shipyard count 4 -> 5, both to read as the
-// clearly bigger selection and to make room now that a store visit can
-// never be the place you find the roster's top tier.
-function drawFrameOffers(rng: RngFn, act: 1 | 2, kind: 'store' | 'shipyard'): Exclude<FrameId, 'cruiser'>[] {
-  const dreadnoughtEligible = act === 2 && kind === 'shipyard';
-  // 47.5l: pool built as {id, rarity} pairs, not full Frame objects — a
-  // pool of `Frame[]` widens `.id` back to the whole FrameId union (Frame's
-  // own field type, `getFrame`'s return), losing PURCHASABLE_FRAME_IDS's
-  // `Exclude<'cruiser'>` narrowing at the type level even though no
-  // 'cruiser' ever appears at the value level. This is the only other
-  // field drawRarityWeighted's result depended on below, so nothing is
-  // lost by not carrying the rest of Frame through.
-  let pool = PURCHASABLE_FRAME_IDS.filter((id) => dreadnoughtEligible || id !== 'dreadnought').map((id) => ({
-    id,
-    rarity: getFrame(id).rarity,
-  }));
-  if (kind === 'store') pool = pool.filter((f) => f.rarity !== 'epic' && f.rarity !== 'legendary');
-  const count = kind === 'shipyard' ? 5 : 2;
-  const taken = new Set<Exclude<FrameId, 'cruiser'>>();
-  const offers: Exclude<FrameId, 'cruiser'>[] = [];
-  for (let i = 0; i < count && taken.size < pool.length; i++) {
-    offers.push(drawRarityWeighted(pool, taken, rng));
-  }
-  return offers;
-}
-
 function pickFromPool(pool: EnemyDef[], rng: RngFn): EnemyDef {
   return pickOne(pool, rng);
 }
@@ -966,42 +633,6 @@ function repairFleet(
 function repairSummaryText(totalRepaired: number, shipCount: number): string {
   if (totalRepaired === 0) return 'Your fleet is already at full strength.';
   return `Repaired ${totalRepaired} damage across ${shipCount} ship${shipCount > 1 ? 's' : ''}.`;
-}
-
-// Addendum A.4: a ship holds at most 1 permanent upgrade — a second
-// acquisition (elite reward, the interlude's Field promotion, or now a
-// repair-yard overhaul) replaces the old one rather than stacking. The old
-// one is simply gone (destroyed), same as any upgrade lost with its ship.
-//
-// Iteration 21 (the Warlord, tall): the Flagship alone may hold more than
-// the standard 1. 2026-08-08: 2 -> 3 — the Warlord was reading as just a
-// worse Engineer (a discount and a free random upgrade, nothing that
-// actually built toward "one hull carrying what used to be spread across a
-// fleet"). A fourth pick still replaces rather than being refused outright
-// — same "oldest simply gone" rule as the base case, just with room for
-// more before it kicks in. `slice(-cap)` keeps only the most recent `cap`
-// entries either way, so this one function covers every cap without a
-// separate branch. Exported so FleetPanel/FleetOverlay can show exactly
-// how many augment slots are still open, not just the ones already filled.
-export function upgradeCapFor(ship: PlayerShipState, commanderId: CommanderId | undefined): number {
-  return commanderId === 'warlord' && ship.frameId === 'cruiser' ? 3 : 1;
-}
-function withUpgrade(
-  ship: PlayerShipState,
-  upgradeId: UpgradeId,
-  commanderId?: CommanderId,
-): PlayerShipState {
-  const cap = upgradeCapFor(ship, commanderId);
-  return { ...ship, upgrades: [...ship.upgrades, upgradeId].slice(-cap) };
-}
-
-// Iteration 15.3: overhaul is locked out once every ship already carries a
-// full complement of upgrades — swapping a player's own earned pick for a
-// random one is never the better choice, so the option is withheld rather
-// than offered as a trap. "Full complement" is per-ship since iteration 21
-// (the Warlord's Flagship holds 2, not 1).
-function everyShipAtUpgradeCap(fleet: PlayerShipState[], commanderId: CommanderId | undefined): boolean {
-  return fleet.length > 0 && fleet.every((s) => s.upgrades.length >= upgradeCapFor(s, commanderId));
 }
 
 function samePosition(a: MapPosition, b: MapPosition): boolean {
@@ -1212,27 +843,24 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // Iteration 33: both node types resolve to the same 'shop' phase,
         // branched everywhere else by shopKind. A shipyard sells no parts
         // (shopOffers: [] — present-but-empty, distinct from undefined so
-        // isValidRunState's `!!state.shopOffers` check still passes) and
-        // draws one upgrade offer instead; a store draws parts as before
-        // and never touches shopUpgradeOffer.
+        // isValidRunState's `!!state.shopOffers` check still passes).
         const shopKind: 'store' | 'shipyard' = node.type === 'shipyard' ? 'shipyard' : 'store';
         const shopFrameOffers = drawFrameOffers(rng, state.act, shopKind);
         // 2026-08-07: pre-roll each shipyard offer's rarity bonus at DRAW
         // time, not purchase time — so the card can show the actual
-        // upgrade(s) a purchase will grant, not just a count, with no
-        // chance of the preview drifting from what BUY_SHIP later grants.
-        // A store's hulls are always common (no bonus) — nothing to
-        // pre-roll there.
-        const shopFrameBonusPreview: Partial<Record<FrameId, { hp: number; upgrades: UpgradeId[] }>> | undefined =
+        // item(s) a purchase will grant, not just a count, with no chance
+        // of the preview drifting from what BUY_SHIP later grants. A
+        // store's hulls are always common (no bonus) — nothing to pre-roll
+        // there.
+        const shopFrameBonusPreview: Partial<Record<FrameId, { items: PartId[] }>> | undefined =
           shopKind === 'shipyard'
-            ? Object.fromEntries(shopFrameOffers.map((id) => [id, hullRarityBonus(getFrame(id).rarity, rng)]))
+            ? Object.fromEntries(shopFrameOffers.map((id) => [id, hullRarityBonus(id, getFrame(id).rarity, rng)]))
             : undefined;
         return {
           ...base,
           phase: 'shop',
           shopKind,
           shopOffers: shopKind === 'shipyard' ? [] : drawShopOffers(rng, state.commanderId, state.protocols),
-          shopUpgradeOffer: shopKind === 'shipyard' ? randomUpgradeIds(1, rng)[0] : undefined,
           shopFrameOffers,
           shopFrameBonusPreview,
           heat,
@@ -1325,8 +953,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // round trip lands back at max/max either way — that's the point:
       // swapping a hull part is an equipment change, not free healing, but
       // it should also never cost you HP you hadn't actually lost yet.
-      const oldHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, undefined, ship.fusions).hp;
-      const newHp = deriveStats(ship.frameId, equipped, ship.upgrades, undefined, ship.fusions).hp;
+      const oldHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, undefined).hp;
+      const newHp = deriveStats(ship.frameId, equipped, ship.upgrades, undefined).hp;
       const hullReduction = Math.max(0, oldHp - newHp);
       const damage = Math.min(Math.max(0, ship.damage - hullReduction), Math.max(0, newHp - 1));
       const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({ ...s, equipped, damage }));
@@ -1341,10 +969,26 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const fleetInput = deriveFleetForCombat(state.fleet, state.commanderId, state.protocols);
       // The combat seed was already drawn (and stored) when this fight was
       // set up, not now — a reload before Engage can never reroll it (9.1).
-      let combat = initCombat(fleetInput, state.currentEnemy, state.currentCombatSeed, state.targetingStance, {
-        overspeedProtocols: hasProtocol(state.protocols, 'overspeed-protocols'),
-        alphaDoctrine: hasProtocol(state.protocols, 'alpha-doctrine'),
-      });
+      let combat = initCombat(
+        fleetInput,
+        state.currentEnemy,
+        state.currentCombatSeed,
+        state.targetingStance,
+        {
+          overspeedProtocols: hasProtocol(state.protocols, 'overspeed-protocols'),
+          alphaDoctrine: hasProtocol(state.protocols, 'alpha-doctrine'),
+        },
+        // Iteration 48 (fleet orders): the Spymaster runs the battle on
+        // better intelligence — 3 command points instead of 2, and
+        // exclusive access to the Exploit weakness order. The engine never
+        // reads commanderId itself; this is the one place the doctrine
+        // becomes two resolved numbers/flags, same pattern the protocol
+        // flags just above already use.
+        {
+          commandPoints: state.commanderId === 'spymaster' ? SPYMASTER_COMMAND_POINTS : BASE_COMMAND_POINTS,
+          exploitEnabled: state.commanderId === 'spymaster',
+        },
+      );
       // Neither fleet has a missile weapon — round 0 is a guaranteed no-op,
       // so skip straight past it rather than making the player click through.
       if (!hasMissilePhase(combat)) combat = advanceRound(combat);
@@ -1374,6 +1018,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'combat' || !state.combat || state.combat.winner) return state;
       const index = state.combat.priorityTargetIndex === action.index ? null : action.index;
       return { ...state, combat: setPriorityTarget(state.combat, index) };
+    }
+
+    case 'ISSUE_ORDER': {
+      if (state.phase !== 'combat' || !state.combat) return state;
+      return { ...state, combat: issueOrder(state.combat, action.order, action.targetIndex) };
     }
 
     case 'CONTINUE': {
@@ -1801,109 +1450,19 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       };
     }
 
-    case 'BUY_PART': {
-      if (state.phase !== 'shop' || !state.shopOffers) return state;
-      const partId = state.shopOffers[action.offerIndex];
-      if (!partId) return state;
-      const cost = partCost(partId, state.commanderId, state.protocols);
-      if (state.credits < cost) return state;
-      const shopOffers = [...state.shopOffers];
-      shopOffers.splice(action.offerIndex, 1);
-      return { ...state, credits: state.credits - cost, inventory: [...state.inventory, partId], shopOffers };
-    }
-
-    case 'SELL_PART': {
-      if (state.phase !== 'shop') return state;
-      // 2026-08-06: a commodity lot bought to inventory isn't a normal
-      // part — it has no half-cost salvage value (its listed cost is 0,
-      // which would let the generic sell button quietly bin it for
-      // nothing). SELL_COMMODITY_LOT is the only way to cash one in,
-      // same guard UNEQUIP already carries for the equipped case.
-      if (action.partId === COMMODITY_LOT_PART_ID) return state;
-      if (!state.inventory.includes(action.partId)) return state;
-      const payout = partSellPrice(action.partId);
-      return {
-        ...state,
-        credits: state.credits + payout,
-        inventory: removeOnce(state.inventory, action.partId),
-      };
-    }
-
-    case 'BUY_SHIP': {
-      if (state.phase !== 'shop') return state;
-      if (state.fleet.length >= fleetCap(state.commanderId, state.protocols)) return state;
-      // 2026-08-06: only 1 of each frame type per shop visit — once bought,
-      // it's gone from this visit's offers (below), so a second attempt at
-      // the same frameId is refused here rather than silently re-selling
-      // something that's no longer on offer.
-      if (!state.shopFrameOffers?.includes(action.frameId)) return state;
-      // 2026-08-06: Dreadnought is act-2-only. drawFrameOffers already never
-      // puts it in an act-1 shopFrameOffers, so this is belt-and-suspenders
-      // against a stale/forced offers list rather than something normal
-      // play can trigger. 2026-08-07 (iteration 33): also shipyard-only —
-      // same belt-and-suspenders reasoning, drawFrameOffers already excludes
-      // it from a store's pool.
-      if (action.frameId === 'dreadnought' && (state.act === 1 || state.shopKind !== 'shipyard')) return state;
-      const frame = getFrame(action.frameId); // the Flagship ('cruiser') is never purchasable
-      const cost = frameCost(frame.cost, action.frameId, state.commanderId, state.protocols, state.shopKind);
-      if (state.credits < cost) return state;
-      const commissioned = state.shipsCommissioned ?? state.fleet.length;
-      // Iteration 39: a store's hulls are always treated as common tier
-      // (no rarity bonus, no arrival damage either any more); a shipyard's
-      // arrive pristine AND fused/upgraded to match the frame's real
-      // rarity — see hullRarityBonus above. 2026-08-07: the bonus is
-      // normally pre-rolled at PICK_NODE time (shopFrameBonusPreview), so
-      // what ShopScreen showed before purchase is exactly what's granted
-      // here, no fresh rng draw needed. Falls back to rolling fresh (the
-      // pre-39 behavior) when the preview is absent — a state that
-      // reached BUY_SHIP without going through PICK_NODE's normal draw
-      // (an old save, or a hand-built fixture in a test).
-      let bonus = state.shopFrameBonusPreview?.[action.frameId];
-      let rngCounter = state.rngCounter;
-      if (!bonus) {
-        const { rng, nextCounter } = runRng(state);
-        bonus = hullRarityBonus(state.shopKind === 'shipyard' ? frame.rarity : 'common', rng);
-        rngCounter = nextCounter();
-      }
-      return {
-        ...state,
-        rngCounter,
-        credits: state.credits - cost,
-        fleet: [
-          ...state.fleet,
-          {
-            frameId: action.frameId,
-            equipped: [...STARTING_FIT[action.frameId]],
-            damage: 0,
-            upgrades: bonus.upgrades,
-            fusions: bonus.hp > 0 ? { hp: bonus.hp } : undefined,
-            name: shipName(state.map.seed, commissioned, action.frameId),
-            kills: 0,
-            fightsSurvived: 0,
-          },
-        ],
-        shipsCommissioned: commissioned + 1,
-        // 2026-08-06: one buy consumes that offer, same as BUY_PART splicing
-        // shopOffers — each frame type is unique within a visit's draw
-        // (drawFrameOffers), so filtering it out by id is equivalent to
-        // removing exactly the one bought. Otherwise it just sat there,
-        // buyable again and again up to fleet cap or credits.
-        shopFrameOffers: state.shopFrameOffers?.filter((id) => id !== action.frameId),
-      };
-    }
-
-    case 'SCUTTLE_SHIP': {
-      // Iteration 8 (8.7): decommission a non-Flagship ship — parts return
-      // to inventory, upgrades are destroyed (consistent with combat loss),
-      // no credit refund. The Flagship guard alone guarantees the fleet can
-      // never be emptied, since it's always present and never scuttleable.
-      if (state.phase !== 'shop') return state;
-      const ship = state.fleet[action.shipIndex];
-      if (!ship || ship.frameId === 'cruiser') return state;
-      const salvage = ship.equipped.filter(isSalvageablePart);
-      const fleet = state.fleet.filter((_, i) => i !== action.shipIndex);
-      return { ...state, fleet, inventory: [...state.inventory, ...salvage] };
-    }
+    // 47.6: the 9 shop actions all delegate to reducer/shop.ts's single
+    // handleShopAction dispatcher — see that file's header for why this
+    // split exists and what stays here vs. there.
+    case 'BUY_PART':
+    case 'SELL_PART':
+    case 'BUY_SHIP':
+    case 'SCUTTLE_SHIP':
+    case 'BUY_COMMODITY_LOT':
+    case 'SELL_COMMODITY_LOT':
+    case 'BUY_MERCENARY':
+    case 'BUY_REPAIR':
+    case 'LEAVE_SHOP':
+      return handleShopAction(state, action);
 
     case 'SET_TARGETING_STANCE': {
       // Iteration 9.4: set on the prep screen, persists between fights
@@ -1912,162 +1471,10 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return { ...state, targetingStance: action.stance };
     }
 
-
-    case 'BUY_COMMODITY_LOT': {
-      // 2026-08-06: buys straight to inventory, like any other part — which
-      // ship (if any) carries it is now a separate EQUIP, not a choice made
-      // at purchase time. The old version took a shipIndex and loaded it in
-      // one step; that per-ship button row read fine with 2 hulls and
-      // unreadable with 5.
-      if (state.phase !== 'shop') return state;
-      const cost = commodityLotBuyCost(state.commanderId);
-      if (state.credits < cost) return state;
-      // Cap 1 normally, 2 for the Merchant — a second lot for anyone else
-      // would just be a second bet on the same trade, not a new decision.
-      // Counts inventory copies too, not just equipped ones, so the cap
-      // can't be dodged by stockpiling unequipped lots.
-      const lotsOwned =
-        state.fleet.filter((s) => s.equipped.includes(COMMODITY_LOT_PART_ID)).length +
-        state.inventory.filter((id) => id === COMMODITY_LOT_PART_ID).length;
-      if (lotsOwned >= commodityLotCap(state.commanderId)) return state;
-      return { ...state, credits: state.credits - cost, inventory: [...state.inventory, COMMODITY_LOT_PART_ID] };
-    }
-
-    case 'SELL_COMMODITY_LOT': {
-      if (state.phase !== 'shop') return state;
-      const here = globalColumn(state.act, state.position?.col ?? 0);
-      // Sells EVERY lot that's eligible (bought at an earlier station) in
-      // one action, not just one — with the Merchant able to carry 2 at
-      // once, requiring a second click to clear the second lot would be
-      // friction the single-lot case never had. Same-visit flipping is
-      // impossible by construction (shops are forward-only nodes the
-      // player can't revisit), but the per-ship check stands on its own
-      // regardless of how a future map feature might change that.
-      let sold = 0;
-      const fleet = state.fleet.map((s) => {
-        const boughtAt = s.commodityLotBoughtAtGlobalColumn;
-        if (!s.equipped.includes(COMMODITY_LOT_PART_ID) || boughtAt === undefined || here <= boughtAt) return s;
-        sold++;
-        return {
-          ...s,
-          equipped: removeOnce(s.equipped, COMMODITY_LOT_PART_ID),
-          commodityLotBoughtAtGlobalColumn: undefined,
-        };
-      });
-      if (sold === 0) return state;
-      return { ...state, fleet, credits: state.credits + sold * COMMODITY_LOT_SELL_PRICE };
-    }
-
-    case 'BUY_MERCENARY': {
-      if (state.phase !== 'shop') return state;
-      // Deliberately NOT capped by fleetCap (2026-08-04) — a mercenary is a
-      // one-fight rental, not a permanent addition to the roster (it's
-      // already excluded from shipsCommissioned above, and every mustering-
-      // out path — CONTINUE, WITHDRAW, the act-1/2 boundary — drops it
-      // regardless of fleet size). A player already at the cap is exactly
-      // who most wants a temporary extra hull for one hard fight; blocking
-      // that made the cap punish the one purchase it can't actually
-      // overcrowd anything with.
-      const cost = mercenaryCost(state.commanderId);
-      if (state.credits < cost) return state;
-      return {
-        ...state,
-        credits: state.credits - cost,
-        fleet: [
-          ...state.fleet,
-          {
-            frameId: 'interceptor',
-            equipped: [...MERCENARY_FIT],
-            damage: 0,
-            upgrades: [],
-            name: MERCENARY_SHIP_NAME,
-            kills: 0,
-            fightsSurvived: 0,
-            mercenary: true,
-          },
-        ],
-        // Deliberately NOT counted against shipsCommissioned — the naming
-        // counter is for the fleet's real, permanent roster (ships that
-        // earn a seeded name); a one-fight hire has a literal name instead
-        // and shouldn't shift later ships' names by consuming a slot in
-        // that sequence.
-      };
-    }
-
-    case 'BUY_REPAIR': {
-      // 2026-08-06: a credit sink at every trade station — full repair
-      // yards are their own map node (free, but you have to route to one);
-      // this is the "just pay for it, wherever you are" alternative for a
-      // player sitting on more credits than shopping list. Priced per HP so
-      // it scales with how hurt the ship actually is, not a flat visit fee.
-      if (state.phase !== 'shop') return state;
-      const ship = state.fleet[action.shipIndex];
-      if (!ship || ship.damage <= 0) return state;
-      const cost = ship.damage * REPAIR_COST_PER_HP;
-      if (state.credits < cost) return state;
-      const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({ ...s, damage: 0 }));
-      return { ...state, fleet, credits: state.credits - cost };
-    }
-
-    case 'BUY_UPGRADE': {
-      // Iteration 33: the shipyard's paid upgrade — same withUpgrade path
-      // as PICK_UPGRADE (a ship already at its cap simply has its oldest
-      // upgrade replaced, not refused; that's PICK_UPGRADE's existing rule,
-      // not a new one). Mercenaries excluded — a one-fight rental carries
-      // no permanent investment, same rule as fusions (iteration 31) and
-      // the commodity lot's EQUIP-time guard.
-      if (state.phase !== 'shop' || state.shopKind !== 'shipyard' || !state.shopUpgradeOffer) return state;
-      const ship = state.fleet[action.shipIndex];
-      if (!ship || ship.mercenary) return state;
-      if (state.credits < SHIPYARD_UPGRADE_COST) return state;
-      const fleet = mapShip(state.fleet, action.shipIndex, (s) =>
-        withUpgrade(s, state.shopUpgradeOffer!, state.commanderId),
-      );
-      return { ...state, fleet, credits: state.credits - SHIPYARD_UPGRADE_COST, shopUpgradeOffer: undefined };
-    }
-
-    case 'FUSE_STAT': {
-      // Iteration 31 (the Foundry): shipyard only, same surface as the
-      // upgrade bay. No rng, no rngCounter touch — pure arithmetic, same as
-      // every other shop purchase. Mercenaries excluded — a one-fight
-      // rental takes no permanent investment, same rule as BUY_UPGRADE.
-      // 2026-08-07: also consumes an owned stat-ladder part from
-      // inventory — the part determines which stat and how much (see
-      // ship.ts's FUSABLE_PARTS); the escalating credit cost is on top,
-      // not a replacement for it.
-      if (state.phase !== 'shop' || state.shopKind !== 'shipyard') return state;
-      const ship = state.fleet[action.shipIndex];
-      if (!ship || ship.mercenary) return state;
-      if (!state.inventory.includes(action.partId)) return state;
-      const fusable = FUSABLE_PARTS[action.partId];
-      if (!fusable) return state; // not a fusable stat-ladder part
-      const cost = fusionCost(fusable.stat, ship, fusable.amount);
-      if (state.credits < cost) return state;
-      const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({
-        ...s,
-        fusions: { ...s.fusions, [fusable.stat]: (s.fusions?.[fusable.stat] ?? 0) + fusable.amount },
-      }));
-      return { ...state, fleet, credits: state.credits - cost, inventory: removeOnce(state.inventory, action.partId) };
-    }
-
     case 'USE_ACTIVE': {
       if (state.phase !== 'combat' || !state.combat) return state;
       const combat = useActive(state.combat, action.shipIndex, action.abilityIndex);
       return { ...state, combat };
-    }
-
-    case 'LEAVE_SHOP': {
-      if (state.phase !== 'shop') return state;
-      return {
-        ...state,
-        phase: 'map',
-        shopOffers: undefined,
-        shopFrameOffers: undefined,
-        shopFrameBonusPreview: undefined,
-        shopKind: undefined,
-        shopUpgradeOffer: undefined,
-        currentEnemy: undefined,
-      };
     }
 
     case 'REPAIR_CHOOSE': {

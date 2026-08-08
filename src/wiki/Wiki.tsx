@@ -30,10 +30,8 @@ import { heatTier, MAX_HEAT } from '../game/heat';
 import { PARTS } from '../game/parts';
 import { PROTOCOLS } from '../game/protocols';
 import type { ProtocolDef } from '../game/protocols';
-import { fusionCost } from '../game/ship';
-import type { FusionStat } from '../game/ship';
 import { UPGRADES } from '../game/upgrades';
-import type { EnemyDef, Part, PlayerShipState, Rarity, WeaponStats } from '../game/types';
+import type { EnemyDef, Part, Rarity, WeaponStats } from '../game/types';
 // Reused straight from the game's own presentation layer — same code-
 // authored inline-SVG ship/enemy art and commander crests the game itself
 // renders, so the wiki never needs its own art asset pipeline or drifts
@@ -58,19 +56,6 @@ function weaponText(w: WeaponStats, kind: 'cannon' | 'missile'): string {
 function totalHp(enemy: EnemyDef): number {
   return enemy.groups.reduce((sum, g) => sum + g.stats.hp * g.count, 0);
 }
-
-// fusionCost only reads `ship.fusions`; a stub with N prior fusions is enough
-// to read the price ladder without a whole run state.
-function fusionShipStub(priorFusions: number): PlayerShipState {
-  return { fusions: priorFusions > 0 ? { hp: priorFusions } : undefined } as unknown as PlayerShipState;
-}
-const FUSION_STATS: { stat: FusionStat; label: string }[] = [
-  { stat: 'hp', label: '+1 max HP' },
-  { stat: 'computer', label: '+1 computer' },
-  { stat: 'shield', label: '+1 piloting' },
-  { stat: 'initiative', label: '+1 initiative' },
-];
-const FUSION_STEP_SHOWN = fusionCost('hp', fusionShipStub(1)) - fusionCost('hp', fusionShipStub(0));
 
 // ---------------------------------------------------------------------------
 // Building blocks
@@ -225,7 +210,6 @@ const NAV = [
   ['parts', 'Parts'],
   ['hulls', 'Hulls'],
   ['upgrades', 'Upgrades'],
-  ['foundry', 'Foundry'],
   ['commanders', 'Commanders'],
   ['protocols', 'Protocols'],
   ['enemies-act1', 'Act 1 enemies'],
@@ -366,11 +350,8 @@ export function Wiki() {
         <section id="upgrades">
           <h2>Upgrades</h2>
           <p className="wiki-note">
-            Slotless and permanent, attached to one ship. Lost only if that ship is destroyed. Elites, the act-1
-            boss, and a shipyard hull purchase (+1 max HP and 1 random upgrade per rarity level above common —
-            rare = 1, epic = 2, legendary = 3) all draw from the same list below, without duplicates. A store hull
-            purchase is always treated as common — cheaper, but no upgrade bonus (and never epic or legendary —
-            the shipyard is the only place to buy the roster's top tier).
+            Slotless and permanent, attached to one ship. Lost only if that ship is destroyed. Elites and the
+            act-1 boss draw from the same list below, without duplicates.
           </p>
           <TableWrap>
             <table className="wiki-table">
@@ -385,33 +366,7 @@ export function Wiki() {
             </table>
           </TableWrap>
         </section>
-  
-        <section id="foundry">
-          <h2>The Foundry — fusions</h2>
-          <p className="wiki-note">
-            At shipyard nodes: fuse a permanent, slotless stat point into one hull. Each fusion already on a hull
-            raises the price of the next by {FUSION_STEP_SHOWN}cr, regardless of stat.
-          </p>
-          <TableWrap>
-            <table className="wiki-table">
-              <thead>
-                <tr>
-                  <th>Fusion</th>
-                  <th>Base cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {FUSION_STATS.map(({ stat, label }) => (
-                  <tr key={stat}>
-                    <td>{label}</td>
-                    <td className="wiki-num">{fusionCost(stat, fusionShipStub(0))}cr</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableWrap>
-        </section>
-  
+
         <section id="commanders">
           <h2>Commanders</h2>
           <p className="wiki-note">Pick 1 of 3 (seeded) at the start of each run.</p>

@@ -603,6 +603,14 @@ h1, h2, h3 {
   font-size: 14px;
 }
 
+/* Fleet orders (iteration 48): the "click a ship to complete this order"
+   hint — accent-colored (not the plain --text-dim of a normal hint) since
+   it names an action the player is expected to take right now, same
+   urgency register as the priority-target hint just above it in markup. */
+.combat-order-pick-hint {
+  color: var(--warning);
+}
+
 .warning {
   color: var(--warning);
   font-size: 14px;
@@ -748,6 +756,17 @@ h1, h2, h3 {
 .combat-ship--priority {
   border: 1px solid var(--danger);
   box-shadow: 0 0 0 2px var(--danger-glow), 0 0 14px var(--danger-glow);
+}
+
+/* Fleet orders (iteration 48): the side/ships currently pickable for a
+   mid-pick targeted order (Brace on a player ship, Exploit weakness on an
+   enemy). A distinct hue (warning, matching the order tile's own
+   --picking state) from the priority ring's --danger, so a ship that's
+   simultaneously the priority target AND pickable never reads as one
+   ambiguous glow. */
+.combat-ship--pick-target {
+  border: 1px solid var(--warning);
+  box-shadow: 0 0 0 2px var(--warning-glow), 0 0 14px var(--warning-glow);
 }
 
 .combat-ship__priority-mark {
@@ -1208,6 +1227,9 @@ h1, h2, h3 {
 }
 
 .card-tile__ship {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10px;
   color: var(--accent);
   font-weight: 600;
@@ -1223,6 +1245,23 @@ h1, h2, h3 {
 }
 
 .card-tile--deep-scan {
+  cursor: default;
+}
+
+/* Fleet orders (iteration 48): the two targeted orders (Brace, Exploit
+   weakness) get a distinct "awaiting a theater click" state between
+   clicking the tile and completing the pick — visually different from
+   both the plain idle tile and the "already resolved" armed state below,
+   so the player can tell at a glance which of the three they're looking
+   at. */
+.card-tile--picking {
+  border-color: var(--warning);
+  box-shadow: 0 0 8px var(--warning-glow);
+}
+
+.card-tile--armed {
+  border-color: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
   cursor: default;
 }
 
@@ -2159,6 +2198,33 @@ h1, h2, h3 {
   padding-top: 12px;
 }
 
+/* Fleet orders (iteration 48): the command-point readout sitting inline
+   in the "Fleet orders" heading — same segmented-pip language as HP
+   (.hp-pips), but its own class since it's a resource count, not a health
+   bar, and the row is always short (2-3 points) so no wrap/max-width
+   handling is needed. */
+.command-points {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.command-points__pip {
+  width: 8px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 3px var(--accent-glow);
+}
+
+.command-points__count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* Collapse control: mobile-only, where the pinned dock costs ~300px of a
    phone screen. Above the breakpoint the bar is an in-flow strip inside the
    panel that costs nothing to leave open, so the control would be noise —
@@ -2762,6 +2828,20 @@ h1, h2, h3 {
   margin: 12px 0;
 }
 
+.reward-screen__found {
+  margin: 12px 0;
+}
+
+/* 2026-08-08: found/salvaged parts show as real PartCards, same as
+   anywhere else in the game a "you now have this item" moment shows a
+   part — no separate name-list styling needed. */
+.reward-screen__part-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
 .reward-screen__upgrades {
   margin-top: 20px;
   text-align: left;
@@ -3185,11 +3265,37 @@ h1, h2, h3 {
 }
 
 .threat-line {
-  stroke: var(--danger);
   stroke-width: 1.5;
   stroke-dasharray: 4 7;
   opacity: 0.4;
   animation: threat-drift 2.2s linear infinite;
+}
+
+/* Enemy card -> its opening target on your side: a warning. */
+.threat-line--incoming {
+  stroke: var(--danger);
+}
+
+/* 2026-08-08: your own ship -> the enemy it's about to open on — a
+   distinct color (the accent, not danger) so the two directions read
+   apart even mid-glance, not just by tracing each line to its origin. */
+.threat-line--outgoing {
+  stroke: var(--accent);
+}
+
+/* 2026-08-08: an arrowhead at the target end, more opaque than the line
+   itself — the request this answers was "the line alone doesn't read as
+   a *targeting* line" specifically at the end that matters (who gets hit). */
+.threat-arrow {
+  opacity: 0.85;
+}
+
+.threat-arrow--incoming {
+  fill: var(--danger);
+}
+
+.threat-arrow--outgoing {
+  fill: var(--accent);
 }
 
 @keyframes threat-drift {

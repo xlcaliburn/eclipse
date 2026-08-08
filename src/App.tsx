@@ -334,13 +334,13 @@ function App() {
               enemy={state.currentEnemy}
               playerLabels={state.fleet.map((_, i) => playerShipLabel(state.fleet, i))}
               playerFrameIds={state.fleet.map((ship) => ship.frameId)}
-              playerUpgrades={state.fleet.map((ship) => ship.upgrades)}
               canWithdraw={hasLineOfRetreat(state)}
               onAdvanceRound={() => dispatch({ type: 'ADVANCE_ROUND' })}
               onContinue={() => dispatch({ type: 'CONTINUE' })}
               onWithdraw={() => dispatch({ type: 'WITHDRAW' })}
               onUseActive={(shipIndex, abilityIndex) => dispatch({ type: 'USE_ACTIVE', shipIndex, abilityIndex })}
               onSelectEnemy={(index) => dispatch({ type: 'SET_PRIORITY_TARGET', index })}
+              onIssueOrder={(order, targetIndex) => dispatch({ type: 'ISSUE_ORDER', order, targetIndex })}
             />
           )}
 
@@ -360,7 +360,6 @@ function App() {
               frameOffers={state.shopFrameOffers}
               frameBonusPreview={state.shopFrameBonusPreview}
               kind={state.shopKind}
-              upgradeOffer={state.shopUpgradeOffer}
               fleet={state.fleet}
               inventory={state.inventory}
               commanderId={state.commanderId}
@@ -375,8 +374,6 @@ function App() {
               onSellCommodityLot={() => dispatch({ type: 'SELL_COMMODITY_LOT' })}
               onBuyMercenary={() => dispatchWithToast({ type: 'BUY_MERCENARY' })}
               onBuyRepair={(shipIndex) => dispatchWithToast({ type: 'BUY_REPAIR', shipIndex })}
-              onBuyUpgrade={(shipIndex) => dispatchWithToast({ type: 'BUY_UPGRADE', shipIndex })}
-              onFuseStat={(shipIndex, partId) => dispatchWithToast({ type: 'FUSE_STAT', shipIndex, partId })}
               onLeave={() => dispatch({ type: 'LEAVE_SHOP' })}
               onViewMap={() => setSurface('chart')}
               onEquip={(shipIndex, partId) => dispatch({ type: 'EQUIP', shipIndex, partId })}

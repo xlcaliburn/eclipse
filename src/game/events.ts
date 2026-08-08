@@ -428,6 +428,24 @@ function clampCredits(credits: number): number {
   return Math.max(0, credits);
 }
 
+// 47.5p: outcome builders for resolveEventChoice's single-effect returns
+// (a pure credit change, or a pure inventory grant, with nothing else
+// touched). Verified before writing these: every one of the 5 existing
+// negative-credit call sites already clamped via clampCredits — the
+// plan's original caution about inconsistent clamping didn't hold
+// against the current file, so `pay` clamping unconditionally changes
+// nothing for any of them. Multi-effect returns (credits AND inventory,
+// credits AND heat, fleet AND relicFragments, etc.) are left as manual
+// returns — forcing those through a 2-argument builder would obscure
+// them, not simplify them.
+function pay(state: RunState, delta: number, outcomeText: string): EventResolution {
+  return { state: { ...state, credits: clampCredits(state.credits + delta) }, outcomeText };
+}
+
+function grant(state: RunState, partId: PartId, outcomeText: string): EventResolution {
+  return { state: { ...state, inventory: [...state.inventory, partId] }, outcomeText };
+}
+
 // Applies damage to one chosen ship, capped so it always survives with
 // >= 1 HP. The design law for this iteration: costs are chosen (the player
 // picked this ship for this option), never random.
@@ -438,7 +456,7 @@ function applyCappedDamage(
   protocols?: ProtocolId[],
 ): PlayerShipState[] {
   return mapShip(fleet, shipIndex, (ship) => {
-    const hp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions).hp;
+    const hp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols).hp;
     const maxDamage = hp - 1;
     return { ...ship, damage: Math.min(maxDamage, ship.damage + amount) };
   });
@@ -569,19 +587,13 @@ export function resolveEventChoice(
   switch (eventId) {
     case 'derelict-cruiser': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: state.credits + 4 },
-          outcomeText: 'You strip the hull for 4 credits.',
-        };
+        return pay(state, 4, 'You strip the hull for 4 credits.');
       }
       if (choiceIndex === 1) {
         const shipIndex = selection.shipIndex ?? 0;
         if (rng() < 0.5) {
           const partId = randomPart(rng, FIVE_CREDIT_PARTS);
-          return {
-            state: { ...state, inventory: [...state.inventory, partId] },
-            outcomeText: `The reactor yields a working ${getPart(partId).name}.`,
-          };
+          return grant(state, partId, `The reactor yields a working ${getPart(partId).name}.`);
         }
         return {
           state: { ...state, fleet: applyCappedDamage(state.fleet, shipIndex, 2, state.protocols) },
@@ -598,18 +610,12 @@ export function resolveEventChoice(
 
     case 'asteroid-field': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: clampCredits(state.credits - 2) },
-          outcomeText: 'The detour costs 2 credits in burned fuel.',
-        };
+        return pay(state, -2, 'The detour costs 2 credits in burned fuel.');
       }
       if (choiceIndex === 1) {
         const shipIndex = selection.shipIndex ?? 0;
         if (rng() < 0.5) {
-          return {
-            state: { ...state, credits: state.credits + 5 },
-            outcomeText: 'You thread the field and find 5 credits of salvage.',
-          };
+          return pay(state, 5, 'You thread the field and find 5 credits of salvage.');
         }
         return {
           state: { ...state, fleet: applyCappedDamage(state.fleet, shipIndex, 2, state.protocols) },
@@ -617,10 +623,7 @@ export function resolveEventChoice(
         };
       }
       // choiceIndex 2: full burn — every ship clears initiative 2, clean.
-      return {
-        state: { ...state, credits: state.credits + 5 },
-        outcomeText: 'Every ship threads the gap in formation — 5 credits of salvage, no scrapes.',
-      };
+      return pay(state, 5, 'Every ship threads the gap in formation — 5 credits of salvage, no scrapes.');
     }
 
     case 'ancient-cache': {
@@ -642,33 +645,21 @@ export function resolveEventChoice(
       }
       // choiceIndex 2: cloaked entry — no fight, no risk, capped at rare.
       const safePartId = randomPart(rng, FIVE_CREDIT_PARTS);
-      return {
-        state: { ...state, inventory: [...state.inventory, safePartId] },
-        outcomeText: `Cloaked, you pull a ${getPart(safePartId).name} from the core without tripping the alarm.`,
-      };
+      return grant(state, safePartId, `Cloaked, you pull a ${getPart(safePartId).name} from the core without tripping the alarm.`);
     }
 
     case 'abandoned-arsenal': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: state.credits + 3 },
-          outcomeText: 'You sell the scrap for 3 credits.',
-        };
+        return pay(state, 3, 'You sell the scrap for 3 credits.');
       }
       // choiceIndex 1: take a crate — a random part, sight unseen.
       const partId = randomPart(rng, FIVE_CREDIT_PARTS);
-      return {
-        state: { ...state, inventory: [...state.inventory, partId] },
-        outcomeText: `You take a crate — inside is a working ${getPart(partId).name}.`,
-      };
+      return grant(state, partId, `You take a crate — inside is a working ${getPart(partId).name}.`);
     }
 
     case 'intercepted-signal': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: state.credits + 5 },
-          outcomeText: 'You sell the codes for 5 credits.',
-        };
+        return pay(state, 5, 'You sell the codes for 5 credits.');
       }
       if (choiceIndex === 1) {
         const { state: nextState, text } = revealNextEscalation(state);
@@ -691,10 +682,7 @@ export function resolveEventChoice(
 
     case 'recon-probe': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: state.credits + 4 },
-          outcomeText: 'You strip the drone for 4 credits.',
-        };
+        return pay(state, 4, 'You strip the drone for 4 credits.');
       }
       const nextCol = (state.position?.col ?? -1) + 1;
       if (choiceIndex === 1) {
@@ -717,10 +705,7 @@ export function resolveEventChoice(
 
     case 'sabotage-raid': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: state.credits + 3 },
-          outcomeText: 'You decide it is too risky and move on for 3 credits.',
-        };
+        return pay(state, 3, 'You decide it is too risky and move on for 3 credits.');
       }
       const { state: cancelledState, text } = revealAndCancel(state);
       if (choiceIndex === 1) {
@@ -744,10 +729,7 @@ export function resolveEventChoice(
 
     case 'defector': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: state.credits + 6 },
-          outcomeText: 'You turn them in for 6 credits.',
-        };
+        return pay(state, 6, 'You turn them in for 6 credits.');
       }
       const escalations = state.escalations.map((e) => ({ ...e, revealed: true }));
       return {
@@ -772,10 +754,7 @@ export function resolveEventChoice(
         };
       }
       // choiceIndex 2: pay them off.
-      return {
-        state: { ...state, credits: clampCredits(state.credits - 6) },
-        outcomeText: 'You pay the ransom the old wing demands. They peel off.',
-      };
+      return pay(state, -6, 'You pay the ransom the old wing demands. They peel off.');
     }
 
     case 'distress-beacon': {
@@ -792,10 +771,7 @@ export function resolveEventChoice(
         };
       }
       // choiceIndex 2: lure beacon — no fight.
-      return {
-        state: { ...state, credits: state.credits + 4 },
-        outcomeText: 'Your lure beacon draws the raiders onto a false trail; the grateful survivors wire over 4 credits.',
-      };
+      return pay(state, 4, 'Your lure beacon draws the raiders onto a false trail; the grateful survivors wire over 4 credits.');
     }
 
     case 'repair-tender': {
@@ -871,10 +847,7 @@ export function resolveEventChoice(
 
     case 'relic-signal': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: state.credits + 4 },
-          outcomeText: 'You sell the coordinates for 4 credits and leave the beacon behind.',
-        };
+        return pay(state, 4, 'You sell the coordinates for 4 credits and leave the beacon behind.');
       }
       // choiceIndex 1: take the fragment.
       return {
@@ -886,10 +859,7 @@ export function resolveEventChoice(
 
     case 'relic-vault': {
       if (choiceIndex === 0) {
-        return {
-          state: { ...state, credits: state.credits + 5 },
-          outcomeText: "You strip the vault's fittings for 5 credits, leaving the fragment sealed inside.",
-        };
+        return pay(state, 5, "You strip the vault's fittings for 5 credits, leaving the fragment sealed inside.");
       }
       if (choiceIndex === 1) {
         const shipIndex = selection.shipIndex ?? 0;

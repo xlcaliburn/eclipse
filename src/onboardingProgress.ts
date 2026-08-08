@@ -1,4 +1,4 @@
-// Iteration 29: which of the three contextual first-run popups (dice roll,
+// Iteration 29: which of the contextual first-run popups (dice roll,
 // missiles, piloting — see components/OnboardingPopup.tsx) a player has
 // already seen, so each shows exactly once per browser rather than every
 // time its trigger condition recurs. Same shape as motionPreference.ts/
@@ -6,7 +6,9 @@
 // the subscriber-set plumbing those two need — nothing else in the UI
 // needs to react live to this changing, only CombatScreen's own mount-time
 // check, so a plain read/write pair is enough here.
-export type OnboardingKey = 'diceRoll' | 'missiles' | 'piloting';
+// Iteration 48: 'orders' added — fires the first time the fleet-orders row
+// is visible (every fight, every commander), same one-shot mechanism.
+export type OnboardingKey = 'diceRoll' | 'missiles' | 'piloting' | 'orders';
 
 const KEY = 'eclipse.onboardingSeen';
 

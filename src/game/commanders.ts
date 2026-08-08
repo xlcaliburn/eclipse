@@ -54,11 +54,14 @@ export const COMMANDERS: Record<CommanderId, Commander> = {
   spymaster: {
     id: 'spymaster',
     name: 'The Spymaster',
-    description: 'Sees further than anyone, and every wreck along the way is free money nobody notices.',
+    description:
+      'Sees further than anyone, on the map and in the fight — every wreck along the way is free money nobody notices, and every battle plays out on better intelligence.',
     bullets: [
       'Sees 2 columns ahead on the map instead of 1',
       'A free piece of intel after every fight won',
       'Salvage-claim events cost no heat',
+      '3 command points per fight instead of 2',
+      "Unlocks the Exploit weakness order — mark an enemy ship; your whole fleet gains +2 computer against it for the round",
     ],
   },
   admiral: {

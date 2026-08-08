@@ -19,6 +19,10 @@ function nextOnboardingPopup(combat: CombatState, enemy: EnemyDef): OnboardingKe
   if (!hasSeenOnboarding('diceRoll')) return 'diceRoll';
   if (!hasSeenOnboarding('missiles') && hasMissilePhase(combat)) return 'missiles';
   if (!hasSeenOnboarding('piloting') && enemy.groups.some((g) => g.stats.shield > 0)) return 'piloting';
+  // Iteration 48: unconditional, like diceRoll — the orders row renders in
+  // every fight regardless of composition, so there's no trigger condition
+  // to check beyond "not yet seen."
+  if (!hasSeenOnboarding('orders')) return 'orders';
   return null;
 }
 

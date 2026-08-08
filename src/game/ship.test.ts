@@ -6,15 +6,8 @@ import {
   deriveFleetStats,
   deriveStats,
   effectiveSlots,
-  fusionCost,
-  fusionSummary,
-  totalFusions,
 } from './ship';
 import type { PlayerShipState } from './types';
-
-function shipWith(fusions: PlayerShipState['fusions']): PlayerShipState {
-  return { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [], fusions };
-}
 
 function ship(overrides: Partial<PlayerShipState> = {}): PlayerShipState {
   return { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [], ...overrides };
@@ -230,61 +223,6 @@ describe('protocols — stat and build hooks', () => {
     const base = deriveStats('cruiser', ['ion']);
     const withUnrelated = deriveStats('cruiser', ['ion'], [], ['salvage-rigs', 'overspeed-protocols']);
     expect(withUnrelated).toEqual(base);
-  });
-});
-
-describe('the Foundry — fusions (iteration 31)', () => {
-  it('deriveStats folds fusions in on top of everything else, one point per stat per purchase', () => {
-    const base = deriveStats('cruiser', ['ion']);
-    const fused = deriveStats('cruiser', ['ion'], [], undefined, { hp: 2, computer: 1, shield: 1, initiative: 3 });
-    expect(fused.hp).toBe(base.hp + 2);
-    expect(fused.computer).toBe(base.computer + 1);
-    expect(fused.shield).toBe(base.shield + 1);
-    expect(fused.initiative).toBe(base.initiative + 3);
-  });
-
-  it('an absent or empty fusions record leaves stats untouched', () => {
-    const base = deriveStats('cruiser', ['ion']);
-    expect(deriveStats('cruiser', ['ion'], [], undefined, undefined)).toEqual(base);
-    expect(deriveStats('cruiser', ['ion'], [], undefined, {})).toEqual(base);
-  });
-
-  it('deriveFleetStats/deriveFleetForCombat also fold a ship\'s own fusions in automatically', () => {
-    const fleet: PlayerShipState[] = [shipWith({ hp: 4 })];
-    const base = deriveFleetStats([{ ...fleet[0], fusions: undefined }])[0];
-    const withFusion = deriveFleetStats(fleet)[0];
-    expect(withFusion.hp).toBe(base.hp + 4);
-
-    const combatInput = deriveFleetForCombat(fleet)[0];
-    expect(combatInput.stats.hp).toBe(base.hp + 4);
-  });
-
-  it('totalFusions sums purchases across every stat; absent fusions is 0', () => {
-    expect(totalFusions(shipWith(undefined))).toBe(0);
-    expect(totalFusions(shipWith({}))).toBe(0);
-    expect(totalFusions(shipWith({ hp: 2, computer: 1 }))).toBe(3);
-    expect(totalFusions(shipWith({ hp: 1, computer: 1, shield: 1, initiative: 1 }))).toBe(4);
-  });
-
-  it('fusionCost escalates per fusion of ANY stat on the ship, not just the stat being bought', () => {
-    const fresh = shipWith(undefined);
-    // STAT_BASE: hp 6, initiative 7, shield 8, computer 10; FUSION_STEP 4.
-    expect(fusionCost('hp', fresh)).toBe(6);
-    expect(fusionCost('computer', fresh)).toBe(10);
-    expect(fusionCost('shield', fresh)).toBe(8);
-    expect(fusionCost('initiative', fresh)).toBe(7);
-
-    // 3 prior fusions on ANY stats — the 4th (of any stat) costs +12 over base.
-    const seasoned = shipWith({ hp: 1, computer: 1, shield: 1 });
-    expect(fusionCost('hp', seasoned)).toBe(6 + 4 * 3);
-    expect(fusionCost('initiative', seasoned)).toBe(7 + 4 * 3); // even a stat never bought before escalates
-  });
-
-  it('fusionSummary formats a compact per-stat line, in a fixed order, and is null when nothing is fused', () => {
-    expect(fusionSummary(undefined)).toBeNull();
-    expect(fusionSummary({})).toBeNull();
-    expect(fusionSummary({ computer: 1, hp: 2 })).toBe('+2 HP · +1 COMP'); // fixed hp/computer/shield/initiative order
-    expect(fusionSummary({ initiative: 3 })).toBe('+3 INIT');
   });
 });
 

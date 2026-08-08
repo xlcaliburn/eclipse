@@ -1,3 +1,5 @@
+import type { RunState } from './types';
+
 export type RngFn = () => number; // returns a float in [0, 1)
 
 // mulberry32 — small, fast, deterministic seeded PRNG.
@@ -41,6 +43,20 @@ export function resumeRng(seed: number, alreadyConsumed: number): { rng: RngFn; 
     return base();
   };
   return { rng, consumedThisCall: () => consumed };
+}
+
+// 47.6: moved from reducer.ts, where it lived alongside the reducer's own
+// helpers. Moved here (not left there) specifically so both reducer.ts
+// and the new reducer/shop.ts can import it without either importing
+// FROM the other — a genuinely shared entry point (every in-run draw —
+// shop stock, enemy picks, event draws — continues the one run-level rng
+// stream instead of touching the browser's raw random source, so
+// reload-and-replay can never change fate). Call `rng()` as many times
+// as needed for one action, then read `nextCounter()` exactly once when
+// building the returned state.
+export function runRng(state: RunState): { rng: RngFn; nextCounter: () => number } {
+  const { rng, consumedThisCall } = resumeRng(state.map.seed, state.rngCounter);
+  return { rng, nextCounter: () => state.rngCounter + consumedThisCall() };
 }
 
 // 47.5i: a uniformly random element of `pool`, weighted by nothing (see

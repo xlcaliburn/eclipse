@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { outspeedingShipIndices } from '../game/combatEngine';
-import type { CombatState } from '../game/combatEngine';
+import type { CombatState, FleetOrderId, TargetedOrderId } from '../game/combatEngine';
 import type { FrameId } from '../game/frames';
 import type { EnemyDef } from '../game/types';
-import type { UpgradeId } from '../game/upgrades';
 import { classifyArchetype } from './ShipSilhouette';
 import { CombatCommandBar } from './CombatCommandBar';
 import { CombatFleetView } from './CombatFleetView';
@@ -30,13 +29,13 @@ interface CombatScreenProps {
   enemy: EnemyDef;
   playerLabels: string[];
   playerFrameIds: FrameId[];
-  playerUpgrades?: UpgradeId[][];
   canWithdraw: boolean;
   onAdvanceRound: () => void;
   onContinue: () => void;
   onWithdraw: () => void;
   onUseActive: (shipIndex: number, abilityIndex: number) => void;
   onSelectEnemy: (index: number) => void;
+  onIssueOrder: (order: FleetOrderId, targetIndex?: number) => void;
 }
 
 export function CombatScreen({
@@ -44,17 +43,45 @@ export function CombatScreen({
   enemy,
   playerLabels,
   playerFrameIds,
-  playerUpgrades,
   canWithdraw,
   onAdvanceRound,
   onContinue,
   onWithdraw,
   onUseActive,
   onSelectEnemy,
+  onIssueOrder,
 }: CombatScreenProps) {
   const finished = Boolean(combat.winner);
   const won = combat.winner === 'player';
   const withdrawEnabled = canWithdraw && combat.round >= 1;
+
+  // Iteration 48 (fleet orders): which targeted order (Brace/Exploit
+  // weakness) is mid-pick, awaiting a theater click — null for the two
+  // untargeted stance orders, which issue immediately on tile click and
+  // never touch this state at all. Owned here (not CombatCommandBar) since
+  // completing a pick means clicking a ship card in the theater, outside
+  // the command bar's own DOM.
+  const [pickingOrder, setPickingOrder] = useState<TargetedOrderId | null>(null);
+  // A pick left open across a round boundary would be stale (CP/armed
+  // state just reset) — same "the round moved on" cleanup the replay
+  // ticker/fx layer already do via their own effects.
+  useEffect(() => {
+    setPickingOrder(null);
+  }, [combat.round]);
+
+  function handleOrderTileClick(order: FleetOrderId) {
+    if (order === 'brace' || order === 'exploit-weakness') {
+      setPickingOrder((current) => (current === order ? null : order));
+      return;
+    }
+    onIssueOrder(order);
+  }
+
+  function handleOrderPick(index: number) {
+    if (!pickingOrder) return;
+    onIssueOrder(pickingOrder, index);
+    setPickingOrder(null);
+  }
 
   const { onboardingPopup, dismissOnboardingPopup } = useOnboardingPopup(combat, enemy);
 
@@ -83,7 +110,7 @@ export function CombatScreen({
     combat.log,
     reducedMotion,
   );
-  const { theaterRef, fx, cardBadges, registerShipEl, threatLines, showTelegraph, clearFx } = useTheaterFx({
+  const { theaterRef, fx, cardBadges, registerShipEl, threatLines, outgoingThreatLines, showTelegraph, clearFx } = useTheaterFx({
     combat,
     enemy,
     playerLabels,
@@ -134,10 +161,57 @@ export function CombatScreen({
         onClick={isReplaying ? fastForwardReplay : undefined}
         title={isReplaying ? 'Click to skip ahead' : undefined}
       >
-        {showTelegraph && threatLines.length > 0 && (
+        {showTelegraph && (threatLines.length > 0 || outgoingThreatLines.length > 0) && (
           <svg className="threat-lines" aria-hidden="true">
+            {/* Arrowhead at the target end — the same marker shape for both
+                directions, colored per line so a glance at just the tip
+                says "incoming" (danger) or "outgoing" (accent) without
+                needing to trace the whole line back to its ship. */}
+            <defs>
+              <marker
+                id="threat-arrow-incoming"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M0,0 L10,5 L0,10 z" className="threat-arrow threat-arrow--incoming" />
+              </marker>
+              <marker
+                id="threat-arrow-outgoing"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M0,0 L10,5 L0,10 z" className="threat-arrow threat-arrow--outgoing" />
+              </marker>
+            </defs>
             {threatLines.map((l) => (
-              <line key={l.key} className="threat-line" x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} />
+              <line
+                key={`in-${l.key}`}
+                className="threat-line threat-line--incoming"
+                x1={l.x1}
+                y1={l.y1}
+                x2={l.x2}
+                y2={l.y2}
+                markerEnd="url(#threat-arrow-incoming)"
+              />
+            ))}
+            {outgoingThreatLines.map((l) => (
+              <line
+                key={`out-${l.key}`}
+                className="threat-line threat-line--outgoing"
+                x1={l.x1}
+                y1={l.y1}
+                x2={l.x2}
+                y2={l.y2}
+                markerEnd="url(#threat-arrow-outgoing)"
+              />
             ))}
           </svg>
         )}
@@ -147,7 +221,6 @@ export function CombatScreen({
           enemyShips={combat.enemyShips}
           playerLabels={playerLabels}
           playerFrameIds={playerFrameIds}
-          playerUpgrades={playerUpgrades}
           enemyName={enemy.name}
           enemyLabels={combat.enemyShips.map((_, i) => shipLabel('enemy', i, enemy, playerLabels))}
           enemyArchetypes={combat.enemyShips.map((_, i) => {
@@ -163,6 +236,7 @@ export function CombatScreen({
           onSelectEnemy={!finished && !isReplaying ? onSelectEnemy : undefined}
           priorityTargetIndex={effectivePriority}
           outspeedingIndices={outspeeding}
+          orderPickMode={!finished && !isReplaying && pickingOrder ? { order: pickingOrder, onPick: handleOrderPick } : null}
         />
       </div>
       {/* The static "click an enemy ship..." instruction is gone — onboarding
@@ -184,7 +258,12 @@ export function CombatScreen({
               disabled={isReplaying}
               onClick={onAdvanceRound}
             >
-              Next round
+              {/* round 0 is always a real missile phase by the time this
+                  renders — reducer.ts's ENGAGE already auto-skips it
+                  entirely when neither fleet carries a missile (see
+                  hasMissilePhase), so round 0 here never means "nothing's
+                  about to happen." */}
+              {combat.round === 0 ? 'Start Missile Phase' : 'Next round'}
             </button>
             <button
               type="button"
@@ -214,10 +293,20 @@ export function CombatScreen({
           combat={combat}
           activeAbilities={activeAbilities}
           playerLabels={playerLabels}
+          playerFrameIds={playerFrameIds}
           handCollapsed={handCollapsed}
           onToggleCollapsed={() => setHandCollapsed((v) => !v)}
           onUseActive={onUseActive}
+          pickingOrder={pickingOrder}
+          onOrderTileClick={handleOrderTileClick}
         />
+      )}
+      {!finished && pickingOrder && (
+        <p className="hint combat-order-pick-hint">
+          {pickingOrder === 'brace'
+            ? 'Click one of your ships in the theater to brace it — click the Brace tile again to cancel.'
+            : 'Click an enemy ship in the theater to mark it — click the Exploit weakness tile again to cancel.'}
+        </p>
       )}
       {!finished && !canWithdraw && (
         <p className="hint">No line of retreat here — this fight must be finished.</p>

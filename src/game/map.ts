@@ -56,7 +56,7 @@ export const CARGO_DESCRIPTION: Record<CargoTag, string> = {
   patrol: 'Standard payout.',
   convoy: 'A hardened escort rides with this shipment — tougher fight, better pay.',
   wreck: 'Pays 2 credits less (never below 1), but drops a salvaged part.',
-  command: 'Pays a reaction card on top of the normal reward (+4 credits instead if your hand is full).',
+  command: 'A high-value target — pays +8 credits on top of the normal reward.',
 };
 
 // Iteration 8: the run is two acts, generated together from one continued

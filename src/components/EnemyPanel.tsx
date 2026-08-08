@@ -224,7 +224,7 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId, protocols }:
       {((enemy.appliedEscalations && enemy.appliedEscalations.length > 0) || !!enemy.veterancyBonus || !!enemy.appliedCounter) && (
         <div className="enemy-panel__escalations">
           {!!enemy.veterancyBonus && (
-            <span className="escalation-badge" title="Iteration 8: scales with map depth within the act">
+            <span className="escalation-badge" title="Scales with map depth within the act">
               Veteran: +{enemy.veterancyBonus} HP
             </span>
           )}

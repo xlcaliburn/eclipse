@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { fastestInitiative } from '../game/enemies';
 import { deriveFleetStats, fleetHasOnlyMissiles, fleetHasWeapon } from '../game/ship';
 import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, getNode } from '../game/map';
+import { BASE_COMMAND_POINTS, SPYMASTER_COMMAND_POINTS } from '../game/reducer';
 import type { RunAction } from '../game/reducer';
 import type { RunState } from '../game/types';
 import { EnemyPanel } from './EnemyPanel';
@@ -29,6 +30,9 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
 
   const canEngage = fleetHasWeapon(fleetStats);
   const missileOnlyWarning = fleetHasOnlyMissiles(fleetStats);
+  // Iteration 48 (fleet orders): a one-line preview so the resource is
+  // visible before ENGAGE, not a surprise once the fight opens.
+  const commandPoints = state.commanderId === 'spymaster' ? SPYMASTER_COMMAND_POINTS : BASE_COMMAND_POINTS;
   // 15.1: state it plainly — the same fog rule that lets the starchart show
   // the glyph already means the player is standing on the node, so there's
   // nothing left to hide here.
@@ -75,6 +79,10 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
             {CARGO_LABEL[cargo]} — {CARGO_DESCRIPTION[cargo]}
           </p>
         )}
+        <p className="hint">
+          Command points: {commandPoints}
+          {state.commanderId === 'spymaster' && ' — including Exploit weakness'}
+        </p>
         <button
           type="button"
           className="engage-button"
