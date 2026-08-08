@@ -27,12 +27,14 @@ describe('drawCommanderChoices (iteration 21: 5-commander roster)', () => {
 });
 
 describe('getCommander / COMMANDERS (iteration 21)', () => {
-  it('has an entry, name, and non-empty description for every id', () => {
+  it('has an entry, name, non-empty description, and at least one bullet for every id', () => {
     for (const id of ALL_IDS) {
       const commander = getCommander(id);
       expect(commander.id).toBe(id);
       expect(commander.name.length).toBeGreaterThan(0);
       expect(commander.description.length).toBeGreaterThan(0);
+      expect(commander.bullets.length).toBeGreaterThan(0);
+      for (const bullet of commander.bullets) expect(bullet.length).toBeGreaterThan(0);
     }
   });
 

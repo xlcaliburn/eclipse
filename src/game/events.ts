@@ -1,4 +1,12 @@
-import { combatEnemyPool, EASY_POOL, EASY_POOL_ACT2, HARD_POOL, HARD_POOL_ACT2, hardestEnemyForAmbush } from './enemies';
+import {
+  combatEnemyPool,
+  EASY_POOL,
+  EASY_POOL_ACT2,
+  eliteVariant,
+  HARD_POOL,
+  HARD_POOL_ACT2,
+  hardestEnemyForAmbush,
+} from './enemies';
 import { addHeat } from './heat';
 import { actColumns, globalColumn } from './map';
 import type { MapPosition } from './map';
@@ -116,7 +124,10 @@ export const EVENTS: EventDef[] = [
     flavor: 'A sealed Ancient container, still humming with power.',
     options: [
       { label: 'Leave it sealed' },
-      { label: 'Force it open — the seal screams; that will draw eyes' },
+      // 2026-08-07: made explicit that this draws an ELITE-strength
+      // ambush, not a regular one — the epic/legendary-tier reward is the
+      // payoff for that specific risk, so the label has to say so upfront.
+      { label: 'Force it open — the seal screams and draws an ELITE patrol' },
       {
         label: 'Cloaking field: slip in and pull the core quietly',
         requirement: { kind: 'partEquipped', partId: 'cloak' },
@@ -372,8 +383,16 @@ export function drawEvent(rng: RngFn, state: RunState): EventId {
   return options[Math.floor(rng() * options.length)].id;
 }
 
+// 2026-08-07: every no-fight or regular-enemy event reward caps at rare —
+// FIVE_CREDIT_PARTS is entirely rare-tier (plasma/missile/comp2/shield2/
+// hull2 are all 5-6cr rare parts). The one exception is 'ancient-cache''s
+// risky path, which now fights a true ELITE (not just the depth band's
+// hardest regular enemy) and draws from ELITE_CACHE_PARTS instead — see
+// that event below.
 const FIVE_CREDIT_PARTS: PartId[] = ['plasma', 'missile', 'comp2', 'shield2', 'hull2'];
-const SEVEN_CREDIT_PARTS: PartId[] = ['comp3', 'init3'];
+// Epic, with one legendary mixed in — only ever drawn for a fight against
+// a genuine elite-strength enemy (eliteVariant), never a regular one.
+const ELITE_CACHE_PARTS: PartId[] = ['comp3', 'init3', 'shield3', 'hull3', 'shieldharmonic'];
 
 function clampCredits(credits: number): number {
   return Math.max(0, credits);
@@ -580,19 +599,24 @@ export function resolveEventChoice(
       if (choiceIndex === 0) {
         return { state, outcomeText: 'You leave the cache sealed.' };
       }
-      const partId = randomPart(rng, SEVEN_CREDIT_PARTS);
+      // 2026-08-07: the risky, fight-linked path draws a genuine ELITE
+      // (eliteVariant, not just the depth band's hardest regular enemy)
+      // and a matching epic/legendary reward — regular-enemy or no-fight
+      // paths cap at rare (see FIVE_CREDIT_PARTS's own note).
       if (choiceIndex === 1) {
         const col = state.position?.col ?? 0;
+        const partId = randomPart(rng, ELITE_CACHE_PARTS);
         return {
           state: { ...state, inventory: [...state.inventory, partId] },
-          outcomeText: `The cache yields a ${getPart(partId).name} — but the surge attracts a patrol.`,
-          ambushEnemy: hardestEnemyForAmbush(state.act, col),
+          outcomeText: `The cache yields a ${getPart(partId).name} — but the surge attracts an ELITE patrol.`,
+          ambushEnemy: eliteVariant(hardestEnemyForAmbush(state.act, col)),
         };
       }
-      // choiceIndex 2: cloaked entry — same part, no ambush.
+      // choiceIndex 2: cloaked entry — no fight, no risk, capped at rare.
+      const safePartId = randomPart(rng, FIVE_CREDIT_PARTS);
       return {
-        state: { ...state, inventory: [...state.inventory, partId] },
-        outcomeText: `Cloaked, you pull a ${getPart(partId).name} from the core without tripping the alarm.`,
+        state: { ...state, inventory: [...state.inventory, safePartId] },
+        outcomeText: `Cloaked, you pull a ${getPart(safePartId).name} from the core without tripping the alarm.`,
       };
     }
 

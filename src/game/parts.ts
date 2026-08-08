@@ -173,15 +173,10 @@ export const PARTS: Part[] = [
     cost: 12,
     weapon: { kind: 'cannon', diceCount: 1, damage: 4 },
   },
-  {
-    id: 'rift',
-    name: 'Rift cannon',
-    type: 'weapon',
-    rarity: 'rare',
-    description: '1 cannon die, 3 damage. Natural 1 backfires: 1 damage to this ship instead of missing.',
-    cost: 6, // 3 dmg would price at 9cr plain; -3cr for the real self-damage risk
-    weapon: { kind: 'cannon', diceCount: 1, damage: 3, selfDamageOnNatOne: 1 },
-  },
+  // 2026-08-08: Rift cannon pulled from the shop pool "for now" — parked in
+  // plans/parking-lot.md rather than deleted outright. The shared
+  // self-damage-on-nat-1 mechanic (selfDamageOnNatOne) stays live in
+  // combatEngine.ts/resolver.ts — the enemy Rift cult still uses it.
   {
     id: 'flak',
     name: 'Flak battery',
@@ -678,4 +673,9 @@ export function getPart(id: PartId): Part {
 // (uplink2, dcbay, chaff, tacrelay, repairbay, ecm, disruptor), and handing
 // one out for free to everyone would blunt exactly the thing that makes
 // drafting that commander or hull feel distinct.
-export const STARTING_LOADOUT: PartId[] = ['ion', 'ion', 'comp1', 'hull1', 'injector'];
+// 2026-08-08: dropped hull1 from the starting fit — a starting stat item
+// occupying a slot read as "the reference build already needs upgrading."
+// The +1 HP it granted moved to the Flagship's own base stats instead (see
+// frames.ts's cruiser entry) — same net HP, one fewer part cluttering the
+// first loadout, and the fitting budget the item cost is simply gone.
+export const STARTING_LOADOUT: PartId[] = ['ion', 'ion', 'comp1', 'injector'];

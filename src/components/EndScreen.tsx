@@ -94,9 +94,9 @@ export function EndScreen({
       <dl className="end-screen__stats stat-grid">
         <dt>Systems explored</dt>
         <dd>{visitedCount}</dd>
-        <dt>Credits</dt>
+        <dt>Total credits earned</dt>
         <dd>{credits}</dd>
-        <dt>Ships remaining</dt>
+        <dt>Ships owned</dt>
         <dd>{fleet.length}</dd>
         {runStats && (
           <>

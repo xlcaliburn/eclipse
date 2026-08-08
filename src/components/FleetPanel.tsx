@@ -5,7 +5,7 @@ import { getFrame } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import { hasProtocol } from '../game/protocols';
 import type { ProtocolId } from '../game/protocols';
-import { REPAIR_COST_PER_HP } from '../game/reducer';
+import { REPAIR_COST_PER_HP, upgradeCapFor } from '../game/reducer';
 import { deriveFleetStats, effectiveSlots, fusionSummary, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
@@ -76,7 +76,7 @@ export function FleetPanel({
 }: FleetPanelProps) {
   const selectedShip = fleet[selectedShipIndex];
   const selectedHasRoom = selectedShip
-    ? selectedShip.equipped.length < effectiveSlots(selectedShip.frameId, selectedShip.upgrades, protocols)
+    ? selectedShip.equipped.length < effectiveSlots(selectedShip.frameId, selectedShip.upgrades, protocols, commanderId)
     : false;
 
   const instructions =
@@ -106,7 +106,7 @@ export function FleetPanel({
       {fleet.map((ship, shipIndex) => {
         const stats = deriveFleetStats([ship], commanderId, protocols)[0];
         const selected = shipIndex === selectedShipIndex;
-        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols) - ship.equipped.length;
+        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols, commanderId) - ship.equipped.length;
         const outspeeding =
           outspeedFastestEnemyInitiative !== undefined &&
           qualifiesForOutspeed(stats.initiative, outspeedFastestEnemyInitiative, outspeedGap);
@@ -170,20 +170,27 @@ export function FleetPanel({
             </div>
             {/* Iteration 13: same StatBar as the enemy panel and combat cards. */}
             <StatBar stats={stats} damage={ship.damage} />
-            {(ship.upgrades.length > 0 || fusionSummary(ship.fusions)) && (
-              <div className="ship-card__upgrades">
-                {ship.upgrades.map((upgradeId, i) => (
-                  <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
-                    {getUpgrade(upgradeId).name}
-                  </span>
-                ))}
-                {fusionSummary(ship.fusions) && (
-                  <span className="upgrade-badge" title="Iteration 31: permanent, slotless — fused at the Foundry">
-                    Fused: {fusionSummary(ship.fusions)}
-                  </span>
-                )}
-              </div>
-            )}
+            {/* 2026-08-08: always shown now, not just when something's
+                fitted — an open augment slot (dashed, dim) is exactly the
+                info a Warlord player needs to see at a glance, now that
+                the Flagship can hold 3. */}
+            <div className="ship-card__upgrades">
+              {ship.upgrades.map((upgradeId, i) => (
+                <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
+                  {getUpgrade(upgradeId).name}
+                </span>
+              ))}
+              {Array.from({ length: Math.max(0, upgradeCapFor(ship, commanderId) - ship.upgrades.length) }).map((_, i) => (
+                <span key={`empty-augment-${i}`} className="upgrade-badge upgrade-badge--empty" title="Open augment slot">
+                  Open augment slot
+                </span>
+              ))}
+              {fusionSummary(ship.fusions) && (
+                <span className="upgrade-badge" title="Iteration 31: permanent, slotless — fused at the Foundry">
+                  Fused: {fusionSummary(ship.fusions)}
+                </span>
+              )}
+            </div>
             {(() => {
               const grid = (
                 <div className="slot-grid">

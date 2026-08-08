@@ -12,14 +12,13 @@ import {
   fleetCap,
   frameCost,
   mercenaryCost,
+  MERCENARY_FIT,
   partCost,
   RARITY_ORDER,
-  rerollCost,
   SHIPYARD_UPGRADE_COST,
   STARTING_FIT,
 } from '../game/reducer';
-import { fusionCost, playerShipLabel } from '../game/ship';
-import type { FusionStat } from '../game/ship';
+import { FUSABLE_PARTS, FUSION_STAT_ABBR, FUSION_STAT_BASE, FUSION_STAT_ORDER, fusionCost, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
@@ -29,19 +28,10 @@ import { PartCard } from './PartCard';
 import { FrameSilhouette } from './ShipSilhouette';
 
 // Iteration 31 (the Foundry): fuse it into the hull — permanent, no slot.
-const FUSION_STATS: FusionStat[] = ['hp', 'computer', 'shield', 'initiative'];
-const FUSION_STAT_LABEL: Record<FusionStat, string> = {
-  hp: 'Max HP',
-  computer: 'Computer',
-  shield: 'Piloting',
-  initiative: 'Initiative',
-};
-const FUSION_STAT_DESC: Record<FusionStat, string> = {
-  hp: '+1 max HP, permanent.',
-  computer: '+1 computer, permanent.',
-  shield: '+1 piloting, permanent.',
-  initiative: '+1 initiative, permanent.',
-};
+// 2026-08-07: fusing now consumes an owned stat-ladder part (see
+// ship.ts's FUSABLE_PARTS) instead of picking an abstract stat category —
+// the part's own name/description already says what it grants, so no
+// separate label/desc table is needed any more.
 
 interface ShopScreenProps {
   credits: number;
@@ -51,11 +41,15 @@ interface ShopScreenProps {
   // (see reducer.ts's drawFrameOffers). Undefined only for a save from
   // before this field existed; treated as "nothing to offer."
   frameOffers?: Exclude<FrameId, 'cruiser'>[];
+  // 2026-08-07: each shipyard offer's pre-rolled rarity bonus — lets the
+  // card show the actual upgrade(s) a purchase grants instead of just a
+  // count. Undefined for a store visit (always common, no bonus).
+  frameBonusPreview?: Partial<Record<FrameId, { hp: number; upgrades: UpgradeId[] }>>;
   // Iteration 33 (2026-08-07): which trade-station flavor this is —
-  // 'store' (parts + war assets + 2 second-hand hulls, no upgrade bay) or
-  // 'shipyard' (4 pristine hulls + the upgrade bay, no parts/war assets/
-  // reroll). Defaults to 'store' for a save from before this field existed
-  // (that's what every shop visit was, back then).
+  // 'store' (parts + war assets + 2 hulls, common/rare only, no upgrade
+  // bay) or 'shipyard' (5 pristine hulls of any rarity + the upgrade bay,
+  // no parts/war assets). Defaults to 'store' for a save from before this
+  // field existed (that's what every shop visit was, back then).
   kind?: 'store' | 'shipyard';
   // The shipyard's one purchasable upgrade this visit — only meaningful
   // when kind === 'shipyard'.
@@ -65,11 +59,6 @@ interface ShopScreenProps {
   commanderId?: CommanderId;
   protocols?: ProtocolId[];
   counterProtocol?: CounterProtocolId;
-  // 2026-08-06: how many rerolls this shop visit has already used — the
-  // Nth reroll costs N credits (half that, rounded up, for the Merchant),
-  // so this is what the "Reroll stock" button's displayed price derives
-  // from. Reset to undefined on every fresh shop visit (reducer.ts).
-  rerollsUsed?: number;
   // Iteration 20 (commodity runs): whether the fleet's currently-carried lot
   // (if any) was bought at an earlier station than this one — the shop
   // itself doesn't know the global column math, so App.tsx precomputes it.
@@ -85,8 +74,7 @@ interface ShopScreenProps {
   onBuyMercenary: () => void;
   onBuyRepair: (shipIndex: number) => void; // 2026-08-06: pay to fully heal one ship
   onBuyUpgrade: (shipIndex: number) => void; // 2026-08-07: shipyard only
-  onFuseStat: (shipIndex: number, stat: FusionStat) => void; // 2026-08-07 (iteration 31): shipyard only
-  onReroll: () => void;
+  onFuseStat: (shipIndex: number, partId: PartId) => void; // iteration 31, reworked 2026-08-07: consumes an owned part
   onLeave: () => void;
   onViewMap: () => void;
   onEquip: (shipIndex: number, partId: PartId) => void;
@@ -97,6 +85,7 @@ export function ShopScreen({
   credits,
   offers,
   frameOffers,
+  frameBonusPreview,
   kind = 'store',
   upgradeOffer,
   fleet,
@@ -104,7 +93,6 @@ export function ShopScreen({
   commanderId,
   protocols,
   counterProtocol,
-  rerollsUsed,
   commodityLotSellable,
   onBuyPart,
   onSellPart,
@@ -116,18 +104,16 @@ export function ShopScreen({
   onBuyRepair,
   onBuyUpgrade,
   onFuseStat,
-  onReroll,
   onLeave,
   onViewMap,
   onEquip,
   onUnequip,
 }: ShopScreenProps) {
   const [selectedShipIndex, setSelectedShipIndex] = useState(0);
-  const [selectedFusionStat, setSelectedFusionStat] = useState<FusionStat | null>(null);
+  const [selectedFusionPart, setSelectedFusionPart] = useState<PartId | null>(null);
   const safeSelectedIndex = Math.min(selectedShipIndex, fleet.length - 1);
   const currentFleetCap = fleetCap(commanderId, protocols);
   const fleetFull = fleet.length >= currentFleetCap;
-  const effectiveRerollCost = rerollCost(commanderId, rerollsUsed ?? 0);
   const isShipyard = kind === 'shipyard';
   // 2026-08-06: counts inventory copies too, not just equipped ones — a
   // bought-but-not-yet-equipped lot still counts against the cap.
@@ -138,6 +124,10 @@ export function ShopScreen({
   const canBuyMoreLots = lotsCarried < lotCap;
   const lotBuyCost = commodityLotBuyCost(commanderId);
   const mercCost = mercenaryCost(commanderId);
+  // 2026-08-07 (Foundry rework): the Foundry can only fuse a stat-ladder
+  // part the player actually owns — unique ids only (owning 2 Gauss coils
+  // doesn't offer the same tile twice, picking it just consumes one).
+  const fusableInInventory = Array.from(new Set(inventory.filter((id) => FUSABLE_PARTS[id])));
 
   return (
     <div className="shop-screen">
@@ -150,12 +140,12 @@ export function ShopScreen({
       </div>
       <p className="hint">
         {isShipyard
-          ? 'Pristine hulls, priced to match, plus one upgrade worth fusing in — no parts stocked here.'
+          ? 'Fresh off the line, painted and pressurized — nothing here has seen a fight yet.'
           : 'Spend credits on parts and ships — or bank them for the next station.'}
       </p>
 
-      {/* Iteration 33: a shipyard sells no parts and runs no reroll — its
-          whole identity is hulls + the upgrade bay below. */}
+      {/* Iteration 33: a shipyard sells no parts — its whole identity is
+          hulls + the upgrade bay below. */}
       {!isShipyard && (
         <>
           <h3>Parts for sale</h3>
@@ -183,9 +173,6 @@ export function ShopScreen({
               })}
             </div>
           )}
-          <button type="button" className="shop-button" onClick={onReroll} disabled={credits < effectiveRerollCost}>
-            Reroll stock ({effectiveRerollCost} cr)
-          </button>
         </>
       )}
 
@@ -233,6 +220,20 @@ export function ShopScreen({
               <span className="card-tile__desc">
                 An Interceptor for hire, one fight only — no salvage if it falls. Works even at fleet capacity.
               </span>
+              {/* 2026-08-08: show the weapon it actually arrives fitted with —
+                  same "always show the weapon with its dice" rule the frame
+                  cards' starting-fit preview already follows. */}
+              <div className="frame-card__fit">
+                {MERCENARY_FIT.map((partId, i) => {
+                  const part = getPart(partId);
+                  return (
+                    <span key={`${partId}-${i}`} className="frame-card__fit-item" title={part.description}>
+                      {part.weapon && <WeaponDie damage={part.weapon.damage} kind={part.weapon.kind} size={16} />}
+                      {part.name}
+                    </span>
+                  );
+                })}
+              </div>
               <button type="button" className="shop-button" onClick={onBuyMercenary} disabled={credits < mercCost}>
                 Hire ({mercCost} cr)
               </button>
@@ -242,7 +243,7 @@ export function ShopScreen({
         </>
       )}
 
-      <h3>{isShipyard ? 'Hulls in dock' : 'Expand your fleet'}</h3>
+      <h3>{isShipyard ? 'Ships' : 'Expand your fleet'}</h3>
       {/* 2026-08-06: what's for sale used to disappear entirely once the
           fleet hit its cap — a player at cap could never see (let alone
           plan around) what was in dock this visit, even though scuttling
@@ -259,14 +260,19 @@ export function ShopScreen({
             const frame = FRAMES[frameId];
             const cost = frameCost(frame.cost, frameId, commanderId, protocols, kind);
             const disabled = fleetFull || credits < cost;
-            // Iteration 39: a store's rack is second-hand — cheaper, but
-            // always treated as common tier (no bonus). A shipyard's arrive
-            // pristine AND fused/upgraded to match the frame's real rarity —
-            // this level count is the same one BUY_SHIP's hullRarityBonus
-            // uses, so the preview can't drift from what purchase actually
-            // grants (WHICH upgrade(s) stays a surprise until bought, same
-            // as an elite reward).
+            // Iteration 39: a store's rack is cheaper but always treated as
+            // common tier (no bonus) — 2026-08-08: no longer framed as
+            // "second-hand" (the store's real distinction is now that it
+            // never stocks epic/legendary hulls at all, see drawFrameOffers).
+            // A shipyard's arrive pristine AND fused/upgraded to match the
+            // frame's real rarity. 2026-08-07: the actual upgrade(s) are now
+            // pre-rolled at PICK_NODE time and shown by name
+            // (frameBonusPreview) — no longer just a count with the specific
+            // upgrade a surprise until bought. bonusLevel stays as a
+            // fallback for the rare case the preview is unavailable (an old
+            // save resuming mid-shop-visit).
             const bonusLevel = isShipyard ? RARITY_ORDER.indexOf(frame.rarity) : 0;
+            const preview = isShipyard ? frameBonusPreview?.[frameId] : undefined;
             // Iteration 41: preview what the hull arrives fitted with — every
             // purchasable frame carries at least one weapon now, and this is
             // the only place that was previously invisible until after buying.
@@ -280,7 +286,6 @@ export function ShopScreen({
                 disabled={disabled}
                 title={fleetFull ? `Fleet is full — scuttle a ship below first.` : undefined}
               >
-                {!isShipyard && <span className="frame-card__badge">Second-hand</span>}
                 <FrameSilhouette frameId={frame.id} size={40} />
                 <span className="frame-card__name">
                   {frame.name}
@@ -306,7 +311,12 @@ export function ShopScreen({
                     })}
                   </div>
                 )}
-                {bonusLevel > 0 && (
+                {preview && preview.hp > 0 && (
+                  <span className="frame-card__bonus">
+                    Arrives fused +{preview.hp} HP with {preview.upgrades.map((id) => getUpgrade(id).name).join(', ')}.
+                  </span>
+                )}
+                {!preview && bonusLevel > 0 && (
                   <span className="frame-card__bonus">
                     Arrives fused +{bonusLevel} HP with {bonusLevel} bonus upgrade{bonusLevel > 1 ? 's' : ''}.
                   </span>
@@ -353,37 +363,67 @@ export function ShopScreen({
           )}
 
           {/* Iteration 31: the Foundry — fuse a part's worth of power
-              directly into a hull. Permanent, slotless, escalating price;
-              the late-run credit sink for a fleet with full slots and
-              nowhere else to spend. */}
+              directly into a hull. Permanent, slotless; the late-run
+              credit sink for a fleet with full slots and nowhere else to
+              spend. 2026-08-07: fuses an OWNED stat-ladder part from
+              inventory (consumed on fuse), not a straight credit-only
+              upgrade — the escalating credit cost is shown as soon as a
+              part and a ship are picked, same as it always was, just one
+              step earlier in the flow now that there's a part to pick first. */}
           <h3>Foundry</h3>
-          <p className="hint">Fuse it into the hull — permanent, no slot. Price escalates per fusion, any stat, per ship.</p>
-          <div className="shop-screen__offers">
-            {FUSION_STATS.map((stat) => (
-              <button
-                key={stat}
-                type="button"
-                className={`card-tile card-tile--deep-scan${selectedFusionStat === stat ? ' card-tile--selected' : ''}`}
-                onClick={() => setSelectedFusionStat(stat)}
-              >
-                <span className="card-tile__name">{FUSION_STAT_LABEL[stat]}</span>
-                <span className="card-tile__desc">{FUSION_STAT_DESC[stat]}</span>
-              </button>
-            ))}
-          </div>
-          {selectedFusionStat && (
+          <p className="hint">
+            Fuse an owned stat part into a hull — permanent, no slot, and the part is consumed. Credit cost still
+            escalates per fusion, any stat, per ship.
+          </p>
+          {fusableInInventory.length === 0 ? (
+            <p className="hint">
+              No fusable parts in inventory — buy a stat item first (Hull plating, Gauss coils, Electron computer,
+              Ion thruster, or one of their +2/+3 upgrades). Base fuse price, before any prior fusions on that ship:{' '}
+              {FUSION_STAT_ORDER.map((stat, i) => (
+                <span key={stat}>
+                  {i > 0 && ' · '}
+                  {FUSION_STAT_BASE[stat]}cr {FUSION_STAT_ABBR[stat]}
+                </span>
+              ))}
+              .
+            </p>
+          ) : (
+            <div className="shop-screen__offers">
+              {fusableInInventory.map((partId) => {
+                const part = getPart(partId);
+                return (
+                  <button
+                    key={partId}
+                    type="button"
+                    className={`card-tile card-tile--deep-scan${selectedFusionPart === partId ? ' card-tile--selected' : ''}`}
+                    onClick={() => setSelectedFusionPart(partId)}
+                  >
+                    <span className="card-tile__name">{part.name}</span>
+                    <span className="card-tile__desc">{part.description}, permanent, consumed on fuse.</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {/* fusableInInventory.includes(...), not just FUSABLE_PARTS[...] —
+              once the last copy is consumed, this step disappears instead
+              of showing a stale, silently-refused ship-pick (the exact
+              "UI shows it as usable, reducer quietly refuses" bug class
+              fixed elsewhere this session for Lone flagship's slots). */}
+          {selectedFusionPart && fusableInInventory.includes(selectedFusionPart) && (
             <>
               <p className="hint">Fuse into which ship?</p>
               <div className="reward-screen__ship-picks">
                 {fleet.map((ship, i) => {
-                  const cost = fusionCost(selectedFusionStat, ship);
+                  const fusable = FUSABLE_PARTS[selectedFusionPart]!;
+                  const cost = fusionCost(fusable.stat, ship, fusable.amount);
                   const merc = ship.mercenary;
                   return (
                     <button
                       key={i}
                       type="button"
                       className="shop-button"
-                      onClick={() => onFuseStat(i, selectedFusionStat)}
+                      onClick={() => onFuseStat(i, selectedFusionPart)}
                       disabled={credits < cost || merc}
                       title={merc ? "A mercenary won't carry a permanent fusion past its one fight." : undefined}
                     >
@@ -417,7 +457,7 @@ export function ShopScreen({
 
       <div className="shop-screen__footer">
         <button type="button" className="continue-button" onClick={onLeave}>
-          Back to map
+          Leave shop
         </button>
       </div>
     </div>

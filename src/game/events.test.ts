@@ -3,7 +3,7 @@ import { actColumns, generateMap } from './map';
 import { mulberry32 } from './rng';
 import type { RngFn } from './rng';
 import { drawEvent, meetsRequirement, nextUnrevealedIndex, resolveEventChoice } from './events';
-import { ANCIENT_ARTIFACT_PART_ID } from './parts';
+import { ANCIENT_ARTIFACT_PART_ID, getPart } from './parts';
 import type { RunState } from './types';
 
 function fixedRng(values: number[]): RngFn {
@@ -189,10 +189,25 @@ describe('resolveEventChoice — ancient-cache', () => {
     expect(early.ambushEnemy?.id).not.toBe(late.ambushEnemy?.id);
   });
 
-  it('option 2 (Cloaking field): same part, no ambush', () => {
+  // 2026-08-07: choiceIndex 2 draws from a different (rare-capped) pool
+  // than choiceIndex 1's elite-fight path now — no fight, no risk, so no
+  // epic/legendary reward either. Still grants a part and sets no ambush.
+  it('option 2 (Cloaking field): a rare-tier part, no ambush', () => {
     const { state, ambushEnemy } = resolveEventChoice('ancient-cache', 2, baseState(), fixedRng([0.1]));
     expect(state.inventory).toHaveLength(1);
     expect(ambushEnemy).toBeUndefined();
+  });
+
+  it('option 1 draws an elite-strength ambush and an epic/legendary reward; option 2 stays a regular rare drop', () => {
+    const s1 = baseState({ position: { col: 1, row: 0 } });
+    const { state: state1, ambushEnemy } = resolveEventChoice('ancient-cache', 1, s1, fixedRng([0.1]));
+    expect(ambushEnemy?.id.endsWith('-elite')).toBe(true);
+    const part1 = getPart(state1.inventory[0]);
+    expect(['epic', 'legendary']).toContain(part1.rarity);
+
+    const { state: state2 } = resolveEventChoice('ancient-cache', 2, s1, fixedRng([0.1]));
+    const part2 = getPart(state2.inventory[0]);
+    expect(part2.rarity).toBe('rare');
   });
 });
 

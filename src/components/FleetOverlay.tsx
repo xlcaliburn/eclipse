@@ -1,6 +1,8 @@
+import type { CommanderId } from '../game/commanders';
 import type { CounterProtocolId } from '../game/counterProtocols';
 import { getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
+import { upgradeCapFor } from '../game/reducer';
 import { deriveStats, effectiveSlots, fusionSummary, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
@@ -11,6 +13,7 @@ interface FleetOverlayProps {
   fleet: PlayerShipState[];
   inventory: PartId[];
   credits: number;
+  commanderId?: CommanderId;
   protocols?: ProtocolId[];
   counterProtocol?: CounterProtocolId;
   onClose: () => void;
@@ -23,6 +26,7 @@ interface FleetOverlayProps {
 function fleetBody(
   fleet: PlayerShipState[],
   inventory: PartId[],
+  commanderId?: CommanderId,
   protocols?: ProtocolId[],
   counterProtocol?: CounterProtocolId,
 ) {
@@ -39,7 +43,7 @@ function fleetBody(
 
       {fleet.map((ship, shipIndex) => {
         const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols, ship.fusions);
-        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols) - ship.equipped.length;
+        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols, commanderId) - ship.equipped.length;
         return (
           <div key={shipIndex} className="ship-card">
             <div className="ship-card__header">
@@ -49,20 +53,23 @@ function fleetBody(
                 {stats.computer} · Piloting {stats.shield}
               </span>
             </div>
-            {(ship.upgrades.length > 0 || fusionSummary(ship.fusions)) && (
-              <div className="ship-card__upgrades">
-                {ship.upgrades.map((upgradeId, i) => (
-                  <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
-                    {getUpgrade(upgradeId).name}
-                  </span>
-                ))}
-                {fusionSummary(ship.fusions) && (
-                  <span className="upgrade-badge" title="Iteration 31: permanent, slotless — fused at the Foundry">
-                    Fused: {fusionSummary(ship.fusions)}
-                  </span>
-                )}
-              </div>
-            )}
+            <div className="ship-card__upgrades">
+              {ship.upgrades.map((upgradeId, i) => (
+                <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
+                  {getUpgrade(upgradeId).name}
+                </span>
+              ))}
+              {Array.from({ length: Math.max(0, upgradeCapFor(ship, commanderId) - ship.upgrades.length) }).map((_, i) => (
+                <span key={`empty-augment-${i}`} className="upgrade-badge upgrade-badge--empty" title="Open augment slot">
+                  Open augment slot
+                </span>
+              ))}
+              {fusionSummary(ship.fusions) && (
+                <span className="upgrade-badge" title="Iteration 31: permanent, slotless — fused at the Foundry">
+                  Fused: {fusionSummary(ship.fusions)}
+                </span>
+              )}
+            </div>
             <div className="slot-grid">
               {ship.equipped.map((partId, i) => (
                 <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
@@ -92,7 +99,7 @@ function fleetBody(
 // A read-only snapshot of the fleet + inventory,
 // viewable as a popup from the map, a shop, or an event — so the player can
 // check "what do I have" without leaving whatever they're doing.
-export function FleetOverlay({ fleet, inventory, protocols, counterProtocol, onClose }: FleetOverlayProps) {
+export function FleetOverlay({ fleet, inventory, commanderId, protocols, counterProtocol, onClose }: FleetOverlayProps) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
@@ -101,7 +108,7 @@ export function FleetOverlay({ fleet, inventory, protocols, counterProtocol, onC
           {/* Credits live in the persistent HUD bar — no per-screen copy. */}
         </div>
 
-        {fleetBody(fleet, inventory, protocols, counterProtocol)}
+        {fleetBody(fleet, inventory, commanderId, protocols, counterProtocol)}
 
         <button type="button" className="continue-button" onClick={onClose}>
           Close
@@ -120,6 +127,7 @@ export function FleetOverlay({ fleet, inventory, protocols, counterProtocol, onC
 export function FleetScreen({
   fleet,
   inventory,
+  commanderId,
   protocols,
   counterProtocol,
   onClose,
@@ -134,7 +142,7 @@ export function FleetScreen({
           </button>
         )}
       </div>
-      {fleetBody(fleet, inventory, protocols, counterProtocol)}
+      {fleetBody(fleet, inventory, commanderId, protocols, counterProtocol)}
     </div>
   );
 }

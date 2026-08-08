@@ -1407,12 +1407,14 @@ describe('telegraphs — incomingFirePreview (iteration 19)', () => {
     return roll && roll.kind === 'roll' ? roll.targetIndex : null;
   }
 
-  it('matches the actual first-die target: plain greedy picks the lowest-HP player ship', () => {
+  it('matches the actual first-die target: a sniper-class enemy greedily picks the lowest-HP player ship', () => {
+    // 2026-08-08: enemy targeting is random by default now — targetsLowestHp
+    // is the opt-out this test actually needs to exercise the greedy path.
     const fleet = [
       { stats: blankStats({ hp: 8 }), initialDamage: 0 },
       { stats: blankStats({ hp: 3 }), initialDamage: 0 },
     ];
-    const foe = enemy({}, { initiative: 3, hp: 20, cannons: [{ diceCount: 2, damage: 1 }] });
+    const foe = enemy({}, { initiative: 3, hp: 20, cannons: [{ diceCount: 2, damage: 1 }], targetsLowestHp: true });
     let state = initCombat(fleet, foe, 1);
     state = advanceRound(state); // missile no-op → next round is cannon
     const preview = incomingFirePreview(state);
@@ -1426,12 +1428,18 @@ describe('telegraphs — incomingFirePreview (iteration 19)', () => {
   });
 
   it('matches the actual first-die target under taunt and under an armed evade', () => {
+    // 2026-08-08: targetsLowestHp here keeps this test's own subject (taunt
+    // and evade narrowing the candidate pool) deterministic and separate
+    // from the now-random default — the taunt case only ever has 1
+    // candidate anyway (so it wouldn't be affected either way), but the
+    // evade case has 2 both before and after arming, which random targeting
+    // would make flaky-by-design rather than actually testing evade.
     // Taunt: the 10-HP taunter draws fire off the 2-HP ship.
     const tauntFleet = [
       { stats: blankStats({ hp: 2 }), initialDamage: 0 },
       { stats: blankStats({ hp: 10, taunt: true }), initialDamage: 0 },
     ];
-    const foe = enemy({}, { initiative: 3, hp: 20, cannons: [{ diceCount: 1, damage: 1 }] });
+    const foe = enemy({}, { initiative: 3, hp: 20, cannons: [{ diceCount: 1, damage: 1 }], targetsLowestHp: true });
     let state = initCombat(tauntFleet, foe, 1);
     state = advanceRound(state);
     expect(incomingFirePreview(state).entries[0].targetIndex).toBe(1);
@@ -1449,6 +1457,30 @@ describe('telegraphs — incomingFirePreview (iteration 19)', () => {
     evadeState = useActive(evadeState, 0, 0);
     expect(incomingFirePreview(evadeState).entries[0].targetIndex).toBe(1); // shifted
     expect(firstEnemyRollTarget(advanceRound(evadeState), 0)).toBe(1);
+  });
+
+  it('random (default, non-sniper) enemy targeting still keeps the preview honest, and is not always greedy-lowest-HP', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 8 }), initialDamage: 0 },
+      { stats: blankStats({ hp: 3 }), initialDamage: 0 },
+    ];
+    // No targetsLowestHp — this is the new default path.
+    const foe = enemy({}, { initiative: 3, hp: 20, cannons: [{ diceCount: 1, damage: 1 }] });
+    const seenTargets = new Set<number>();
+    for (let seed = 1; seed <= 20; seed++) {
+      let state = initCombat(fleet, foe, seed);
+      state = advanceRound(state); // missile no-op → next round is cannon
+      const preview = incomingFirePreview(state);
+      const played = advanceRound(state);
+      // The core promise (this whole describe block) still holds under
+      // randomness: the preview is a pure function of state the round
+      // hasn't touched yet, so it always agrees with what actually fires.
+      expect(firstEnemyRollTarget(played, 0)).toBe(preview.entries[0].targetIndex);
+      seenTargets.add(preview.entries[0].targetIndex);
+    }
+    // Across 20 seeds, both ships got targeted at least once — proof this
+    // isn't secretly still deterministic-greedy under the hood.
+    expect(seenTargets.size).toBe(2);
   });
 
   it('previews missiles at round 0 and cannons afterward, with per-phase weapon sets', () => {

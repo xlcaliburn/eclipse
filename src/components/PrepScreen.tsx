@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { deriveFleetStats, fleetHasOnlyMissiles, fleetHasWeapon } from '../game/ship';
 import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, getNode } from '../game/map';
-import { hasLineOfRetreat } from '../game/reducer';
 import type { RunAction } from '../game/reducer';
 import type { RunState } from '../game/types';
 import { EnemyPanel } from './EnemyPanel';
@@ -30,7 +29,6 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
 
   const canEngage = fleetHasWeapon(fleetStats);
   const missileOnlyWarning = fleetHasOnlyMissiles(fleetStats);
-  const retreatable = hasLineOfRetreat(state);
   // 15.1: state it plainly — the same fog rule that lets the starchart show
   // the glyph already means the player is standing on the node, so there's
   // nothing left to hide here.
@@ -77,10 +75,6 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
             {CARGO_LABEL[cargo]} — {CARGO_DESCRIPTION[cargo]}
           </p>
         )}
-        <p className={retreatable ? 'hint' : 'warning'}>
-          Line of retreat: <strong>{retreatable ? 'yes' : 'no'}</strong>
-          {!retreatable && ' — you must finish this fight once it starts.'}
-        </p>
         <button
           type="button"
           className="engage-button"

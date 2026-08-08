@@ -15,6 +15,7 @@ import {
   applyEscalations,
   applyVeterancy,
   combatEnemyPool,
+  convoyEscort,
   eliteEnemyForColumn,
   getBoss,
   getFinalBoss,
@@ -44,11 +45,10 @@ import {
   effectiveSlots,
   equippedWeaponCount,
   fleetHasWeapon,
+  FUSABLE_PARTS,
   fusionCost,
-  hasWeapon,
   playerShipLabel,
 } from './ship';
-import type { FusionStat } from './ship';
 import { getUpgrade, randomUpgradeIds } from './upgrades';
 import type { UpgradeId } from './upgrades';
 import { emptyRunStats } from './daily';
@@ -57,9 +57,6 @@ import type { CombatEvent, EnemyDef, PartId, PlayerShipState, Rarity, RewardSumm
 
 export type RunAction =
   | { type: 'CHOOSE_COMMANDER'; commanderId: CommanderId }
-  | { type: 'SETUP_ADD_PART'; partId: PartId }
-  | { type: 'SETUP_REMOVE_PART'; partId: PartId }
-  | { type: 'SETUP_CONFIRM' }
   // `col` (iteration 32): omitted means the normal next column
   // (position.col + 1, same as every pre-32 call site keeps meaning);
   // present means a warp-lane shortcut target — two columns can be
@@ -104,12 +101,14 @@ export type RunAction =
   // Iteration 33 (2026-08-07): the shipyard's one purchasable slotless
   // upgrade this visit — shop phase + shopKind === 'shipyard' only.
   | { type: 'BUY_UPGRADE'; shipIndex: number }
-  // Iteration 31 (the Foundry): fuse a permanent, slotless base-stat point
-  // into a hull for an escalating credit cost — shipyard only, same as
-  // BUY_UPGRADE. See ship.ts's fusionCost.
-  | { type: 'FUSE_STAT'; shipIndex: number; stat: FusionStat }
+  // Iteration 31 (the Foundry): fuse a permanent, slotless base-stat
+  // bonus into a hull — shipyard only, same as BUY_UPGRADE. 2026-08-07:
+  // now consumes an OWNED stat-ladder part from inventory (see
+  // ship.ts's FUSABLE_PARTS) on top of the escalating credit cost (see
+  // fusionCost) — `stat`/amount are both derived from `partId`, not
+  // passed separately.
+  | { type: 'FUSE_STAT'; shipIndex: number; partId: PartId }
   | { type: 'USE_ACTIVE'; shipIndex: number; abilityIndex: number }
-  | { type: 'REROLL' }
   | { type: 'LEAVE_SHOP' }
   | { type: 'LEAVE_REPAIR' }
   | { type: 'EVENT_CHOOSE'; choiceIndex: number; shipIndex?: number; partId?: PartId }
@@ -132,16 +131,6 @@ export const SHOP_OFFER_COUNT = 8;
 // How many columns beyond the current vision high-water mark a long-range
 // sweep reveals.
 const SECTOR_SCAN_DEPTH = 2;
-
-// The starting cruiser is fitted out from a fixed credit budget rather than
-// a free pick of parts — sized to match the original reference loadout
-// (2x ion cannon + electron computer + hull plating, all tier-1 parts at
-// 3 credits each = 12).
-export const SETUP_BUDGET = 12;
-
-// Only the basic tier-1 parts are available at the setup screen — anything
-// fancier has to be earned via the run's real trade stations.
-export const SETUP_ALLOWED_PARTS: PartId[] = ['ion', 'hull1', 'shield1', 'comp1'];
 
 // A purchased ship arrives pre-fitted with a small stat loadout — never an
 // identity part. Iteration 36: hulls stopped bundling a specific part
@@ -180,10 +169,6 @@ export const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   'ew-cutter': [],
   'disruptor-cutter': [],
 };
-
-function setupSpent(equipped: PartId[]): number {
-  return equipped.reduce((sum, id) => sum + getPart(id).cost, 0);
-}
 
 // Iteration 20 (commodity runs): buy low at one shop, sell high at any
 // later one. The +5cr spread is the reward; the risk is the slot it ties up
@@ -232,6 +217,10 @@ export function mercenaryCost(commanderId: CommanderId | undefined): number {
   return commanderId === 'merchant' ? MERCHANT_MERCENARY_COST : BASE_MERCENARY_COST;
 }
 const MERCENARY_SHIP_NAME = 'Mercenary escort';
+// Exported so ShopScreen can preview what the hire actually arrives
+// fitted with (weapon + dice) — one source of truth, not a hardcoded
+// ['ion'] duplicated into the UI.
+export const MERCENARY_FIT: PartId[] = ['ion'];
 
 // Iteration 21 (the Admiral, wide): fleet cap 5 instead of the standard 4.
 // Iteration 28: two prismatic protocols change this further — Armada
@@ -571,23 +560,6 @@ function grantCommanderIntel(state: RunState, rng: RngFn): { state: RunState; te
   return grantIntel(state, rng);
 }
 
-// 2026-08-06: rerolls escalate within a shop visit instead of a flat
-// price — the Nth reroll this visit (1-indexed: the very first reroll is
-// N=1) costs N credits, so idle rerolling for a perfect offer has a real,
-// rising cost instead of being free money to burn. `rerollsUsedThisVisit`
-// is RunState.shopRerollCount (0 before any reroll this visit), reset
-// every time a shop is (re-)entered — see PICK_NODE's shop branch — so
-// the price resets on the next visit rather than punishing the whole run.
-// The Merchant still prices better than everyone else ("better prices
-// everywhere"): half of the escalating cost, rounded up, floored at 1cr —
-// their 1st-4th rerolls are noticeably cheaper, and the discount keeps
-// compounding as the price climbs rather than staying a flat -1cr forever.
-export function rerollCost(commanderId: CommanderId | undefined, rerollsUsedThisVisit: number): number {
-  const nextRerollNumber = rerollsUsedThisVisit + 1;
-  if (commanderId === 'merchant') return Math.max(1, Math.ceil(nextRerollNumber / 2));
-  return nextRerollNumber;
-}
-
 function removeOnce<T>(list: T[], item: T): T[] {
   const index = list.indexOf(item);
   if (index === -1) return list;
@@ -719,7 +691,10 @@ export function partCost(partId: PartId, commanderId: CommanderId | undefined, p
 // separate systems, not a bug.
 // Iteration 41: 8 slots — 3 weapon / 3 defense / 1 computer-drive / 1
 // active (was 2/2/1/1) — bumped alongside SHOP_OFFER_COUNT.
-function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: ProtocolId[]): PartId[] {
+// Exported for direct testing of the draw's uniqueness invariants across
+// many seeds — the old test drove this via repeated REROLL actions
+// (removed 2026-08-08), which is no longer available as a mechanism.
+export function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: ProtocolId[]): PartId[] {
   const taken = new Set<PartId>();
   const offers = [
     drawRarityWeighted(WEAPON_POOL, taken, rng) as PartId,
@@ -754,18 +729,26 @@ function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?: Proto
 // not a "can't afford it yet", so hiding it reads truer than a greyed-out
 // card a player can't do anything about all act.
 // Iteration 33 (2026-08-07): `kind` now also drives count and Dreadnought
-// eligibility — a store shows 2 (second-hand, no capital ships regardless
-// of act), a shipyard shows 4 (pristine, Dreadnought eligible once act 2
-// makes it eligible at all — the two gates AND together).
+// eligibility — a store shows 2, a shipyard shows more (Dreadnought
+// eligible once act 2 makes it eligible at all — the two gates AND
+// together).
 // Iteration 36 (rarity): each offer slot rolls a rarity tier same as a part
 // slot does — the Dreadnought-eligibility filter above already excludes it
 // from `pool` in an act-1 store, so a legendary roll there simply falls
 // back to the next tier down (the Cruiser, epic) rather than ever leaking
 // a capital ship early.
+// 2026-08-08: the store's old pitch was "second-hand" (cheaper, always-
+// common bonus, no separate rarity story) — now that hulls carry real
+// rarity tiers, that's expressed directly instead: a store simply never
+// stocks an epic or legendary hull, full stop, rather than stocking one at
+// a fake "common" bonus level. Shipyard count 4 -> 5, both to read as the
+// clearly bigger selection and to make room now that a store visit can
+// never be the place you find the roster's top tier.
 function drawFrameOffers(rng: RngFn, act: 1 | 2, kind: 'store' | 'shipyard'): Exclude<FrameId, 'cruiser'>[] {
   const dreadnoughtEligible = act === 2 && kind === 'shipyard';
-  const pool = PURCHASABLE_FRAME_IDS.filter((id) => dreadnoughtEligible || id !== 'dreadnought').map(getFrame);
-  const count = kind === 'shipyard' ? 4 : 2;
+  let pool = PURCHASABLE_FRAME_IDS.filter((id) => dreadnoughtEligible || id !== 'dreadnought').map(getFrame);
+  if (kind === 'store') pool = pool.filter((f) => f.rarity !== 'epic' && f.rarity !== 'legendary');
+  const count = kind === 'shipyard' ? 5 : 2;
   const taken = new Set<FrameId>();
   const offers: Exclude<FrameId, 'cruiser'>[] = [];
   for (let i = 0; i < count && taken.size < pool.length; i++) {
@@ -827,13 +810,18 @@ function repairSummaryText(totalRepaired: number, shipCount: number): string {
 // repair-yard overhaul) replaces the old one rather than stacking. The old
 // one is simply gone (destroyed), same as any upgrade lost with its ship.
 //
-// Iteration 21 (the Warlord, tall): the Flagship alone may hold 2. A third
-// pick still replaces rather than being refused outright — same "oldest
-// simply gone" rule as the base case, just with room for one more before it
-// kicks in. `slice(-cap)` keeps only the most recent `cap` entries either
-// way, so this one function covers both caps without a separate branch.
-function upgradeCapFor(ship: PlayerShipState, commanderId: CommanderId | undefined): number {
-  return commanderId === 'warlord' && ship.frameId === 'cruiser' ? 2 : 1;
+// Iteration 21 (the Warlord, tall): the Flagship alone may hold more than
+// the standard 1. 2026-08-08: 2 -> 3 — the Warlord was reading as just a
+// worse Engineer (a discount and a free random upgrade, nothing that
+// actually built toward "one hull carrying what used to be spread across a
+// fleet"). A fourth pick still replaces rather than being refused outright
+// — same "oldest simply gone" rule as the base case, just with room for
+// more before it kicks in. `slice(-cap)` keeps only the most recent `cap`
+// entries either way, so this one function covers every cap without a
+// separate branch. Exported so FleetPanel/FleetOverlay can show exactly
+// how many augment slots are still open, not just the ones already filled.
+export function upgradeCapFor(ship: PlayerShipState, commanderId: CommanderId | undefined): number {
+  return commanderId === 'warlord' && ship.frameId === 'cruiser' ? 3 : 1;
 }
 function withUpgrade(
   ship: PlayerShipState,
@@ -933,42 +921,19 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           ? fleet.map((s, i) => (i === 0 ? withUpgrade(s, randomUpgradeIds(1, rng)[0], action.commanderId) : s))
           : fleet;
 
+      // 2026-08-07: the setup phase (a customize-your-fit screen between
+      // commander pick and map) is gone — the Flagship's fit is always the
+      // fixed STARTING_LOADOUT (always includes a weapon), so the old
+      // hasWeapon gate SETUP_CONFIRM used to enforce was already
+      // unreachable in practice. Straight to the map now.
       return {
         ...state,
-        phase: 'setup',
+        phase: 'map',
         commanderId: action.commanderId,
         fleet: finalFleet,
         shipsCommissioned: action.commanderId === 'admiral' ? commissioned + 1 : state.shipsCommissioned,
         rngCounter: nextCounter(),
       };
-    }
-
-    case 'SETUP_ADD_PART': {
-      if (state.phase !== 'setup') return state;
-      if (!SETUP_ALLOWED_PARTS.includes(action.partId)) return state;
-      const ship = state.fleet[0];
-      if (!ship) return state;
-      const cost = getPart(action.partId).cost;
-      if (setupSpent(ship.equipped) + cost > SETUP_BUDGET) return state;
-      const fleet = [{ ...ship, equipped: [...ship.equipped, action.partId] }];
-      return { ...state, fleet };
-    }
-
-    case 'SETUP_REMOVE_PART': {
-      if (state.phase !== 'setup') return state;
-      const ship = state.fleet[0];
-      if (!ship || !ship.equipped.includes(action.partId)) return state;
-      const fleet = [{ ...ship, equipped: removeOnce(ship.equipped, action.partId) }];
-      return { ...state, fleet };
-    }
-
-    case 'SETUP_CONFIRM': {
-      if (state.phase !== 'setup') return state;
-      const ship = state.fleet[0];
-      if (!ship) return state;
-      const stats = deriveStats(ship.frameId, ship.equipped);
-      if (!hasWeapon(stats)) return state;
-      return { ...state, phase: 'map' };
     }
 
     case 'PICK_NODE': {
@@ -1048,7 +1013,10 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const globalCol = globalColumn(state.act, node.col);
       if (node.type === 'combat') {
         const rawEnemy = pickFromPool(combatEnemyPool(state.act, node.col), rng);
-        const enemy = withCounterProtocol(applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations), state);
+        const scaledEnemy = applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations);
+        // A convoy's +4cr premium (map.ts's CARGO_DESCRIPTION) is danger
+        // money, not free — see convoyEscort's own comment.
+        const enemy = withCounterProtocol(node.cargo === 'convoy' ? convoyEscort(scaledEnemy) : scaledEnemy, state);
         return {
           ...base,
           phase: 'prep',
@@ -1113,14 +1081,25 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // draws one upgrade offer instead; a store draws parts as before
         // and never touches shopUpgradeOffer.
         const shopKind: 'store' | 'shipyard' = node.type === 'shipyard' ? 'shipyard' : 'store';
+        const shopFrameOffers = drawFrameOffers(rng, state.act, shopKind);
+        // 2026-08-07: pre-roll each shipyard offer's rarity bonus at DRAW
+        // time, not purchase time — so the card can show the actual
+        // upgrade(s) a purchase will grant, not just a count, with no
+        // chance of the preview drifting from what BUY_SHIP later grants.
+        // A store's hulls are always common (no bonus) — nothing to
+        // pre-roll there.
+        const shopFrameBonusPreview: Partial<Record<FrameId, { hp: number; upgrades: UpgradeId[] }>> | undefined =
+          shopKind === 'shipyard'
+            ? Object.fromEntries(shopFrameOffers.map((id) => [id, hullRarityBonus(getFrame(id).rarity, rng)]))
+            : undefined;
         return {
           ...base,
           phase: 'shop',
           shopKind,
           shopOffers: shopKind === 'shipyard' ? [] : drawShopOffers(rng, state.commanderId, state.protocols),
           shopUpgradeOffer: shopKind === 'shipyard' ? randomUpgradeIds(1, rng)[0] : undefined,
-          shopFrameOffers: drawFrameOffers(rng, state.act, shopKind),
-          shopRerollCount: undefined, // fresh visit — reroll pricing starts back at 1cr
+          shopFrameOffers,
+          shopFrameBonusPreview,
           heat,
           rngCounter: nextCounter(),
         };
@@ -1173,7 +1152,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // silently invisible to the one gate that actually allows an EQUIP.
       // The UI showed the slot as available and let the player click it;
       // this then rejected the action with no feedback.
-      if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades, state.protocols)) return state;
+      if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades, state.protocols, state.commanderId)) return state;
       if (!state.inventory.includes(action.partId)) return state;
       const part = getPart(action.partId);
       const maxWeapons = getFrame(ship.frameId).maxWeapons;
@@ -1805,11 +1784,23 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // Iteration 39: a store's hulls are always treated as common tier
       // (no rarity bonus, no arrival damage either any more); a shipyard's
       // arrive pristine AND fused/upgraded to match the frame's real
-      // rarity — see hullRarityBonus above.
-      const { rng, nextCounter } = runRng(state);
-      const bonus = hullRarityBonus(state.shopKind === 'shipyard' ? frame.rarity : 'common', rng);
+      // rarity — see hullRarityBonus above. 2026-08-07: the bonus is
+      // normally pre-rolled at PICK_NODE time (shopFrameBonusPreview), so
+      // what ShopScreen showed before purchase is exactly what's granted
+      // here, no fresh rng draw needed. Falls back to rolling fresh (the
+      // pre-39 behavior) when the preview is absent — a state that
+      // reached BUY_SHIP without going through PICK_NODE's normal draw
+      // (an old save, or a hand-built fixture in a test).
+      let bonus = state.shopFrameBonusPreview?.[action.frameId];
+      let rngCounter = state.rngCounter;
+      if (!bonus) {
+        const { rng, nextCounter } = runRng(state);
+        bonus = hullRarityBonus(state.shopKind === 'shipyard' ? frame.rarity : 'common', rng);
+        rngCounter = nextCounter();
+      }
       return {
         ...state,
+        rngCounter,
         credits: state.credits - cost,
         fleet: [
           ...state.fleet,
@@ -1825,7 +1816,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           },
         ],
         shipsCommissioned: commissioned + 1,
-        rngCounter: nextCounter(),
         // 2026-08-06: one buy consumes that offer, same as BUY_PART splicing
         // shopOffers — each frame type is unique within a visit's draw
         // (drawFrameOffers), so filtering it out by id is equivalent to
@@ -1920,7 +1910,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           ...state.fleet,
           {
             frameId: 'interceptor',
-            equipped: ['ion'],
+            equipped: [...MERCENARY_FIT],
             damage: 0,
             upgrades: [],
             name: MERCENARY_SHIP_NAME,
@@ -1974,36 +1964,30 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // upgrade bay. No rng, no rngCounter touch — pure arithmetic, same as
       // every other shop purchase. Mercenaries excluded — a one-fight
       // rental takes no permanent investment, same rule as BUY_UPGRADE.
+      // 2026-08-07: also consumes an owned stat-ladder part from
+      // inventory — the part determines which stat and how much (see
+      // ship.ts's FUSABLE_PARTS); the escalating credit cost is on top,
+      // not a replacement for it.
       if (state.phase !== 'shop' || state.shopKind !== 'shipyard') return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship || ship.mercenary) return state;
-      const cost = fusionCost(action.stat, ship);
+      if (!state.inventory.includes(action.partId)) return state;
+      const fusable = FUSABLE_PARTS[action.partId];
+      if (!fusable) return state; // not a fusable stat-ladder part
+      const cost = fusionCost(fusable.stat, ship, fusable.amount);
       if (state.credits < cost) return state;
       const fleet = state.fleet.map((s, i) =>
-        i === action.shipIndex ? { ...s, fusions: { ...s.fusions, [action.stat]: (s.fusions?.[action.stat] ?? 0) + 1 } } : s,
+        i === action.shipIndex
+          ? { ...s, fusions: { ...s.fusions, [fusable.stat]: (s.fusions?.[fusable.stat] ?? 0) + fusable.amount } }
+          : s,
       );
-      return { ...state, fleet, credits: state.credits - cost };
+      return { ...state, fleet, credits: state.credits - cost, inventory: removeOnce(state.inventory, action.partId) };
     }
 
     case 'USE_ACTIVE': {
       if (state.phase !== 'combat' || !state.combat) return state;
       const combat = useActive(state.combat, action.shipIndex, action.abilityIndex);
       return { ...state, combat };
-    }
-
-    case 'REROLL': {
-      if (state.phase !== 'shop') return state;
-      const rerollsUsed = state.shopRerollCount ?? 0;
-      const cost = rerollCost(state.commanderId, rerollsUsed);
-      if (state.credits < cost) return state;
-      const { rng, nextCounter } = runRng(state);
-      return {
-        ...state,
-        credits: state.credits - cost,
-        shopOffers: drawShopOffers(rng, state.commanderId, state.protocols),
-        shopRerollCount: rerollsUsed + 1,
-        rngCounter: nextCounter(),
-      };
     }
 
     case 'LEAVE_SHOP': {
@@ -2013,7 +1997,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         phase: 'map',
         shopOffers: undefined,
         shopFrameOffers: undefined,
-        shopRerollCount: undefined,
+        shopFrameBonusPreview: undefined,
         shopKind: undefined,
         shopUpgradeOffer: undefined,
         currentEnemy: undefined,

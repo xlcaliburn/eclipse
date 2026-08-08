@@ -297,7 +297,6 @@ describe('save / load roundtrip (iteration 9.2)', () => {
   it('a run saved mid-fight, continued via the reducer, produces hand/log/actives identical to the unsaved path', () => {
     let state = initialRunState();
     state = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: state.commanderChoices[0] });
-    state = runReducer(state, { type: 'SETUP_CONFIRM' });
     state = runReducer(state, { type: 'PICK_NODE', row: 0 }); // the act-1 opener
     state = runReducer(state, { type: 'ENGAGE' });
 

@@ -241,23 +241,61 @@ export function totalFusions(ship: PlayerShipState): number {
 // +12cr over base regardless of which stat it's spent on, so spreading
 // fusions across stats is priced the same as stacking one.
 export type FusionStat = 'hp' | 'computer' | 'shield' | 'initiative';
-const FUSION_STAT_BASE: Record<FusionStat, number> = {
+// Exported so ShopScreen can show the base price table even before a part
+// and ship are picked (2026-08-08) — the escalating step (FUSION_STEP)
+// isn't shown there since it depends on a specific ship's prior fusions.
+export const FUSION_STAT_BASE: Record<FusionStat, number> = {
   hp: 6,
   initiative: 7,
   shield: 8,
   computer: 10,
 };
 const FUSION_STEP = 4;
-export function fusionCost(stat: FusionStat, ship: PlayerShipState): number {
-  return FUSION_STAT_BASE[stat] + FUSION_STEP * totalFusions(ship);
+// `amount` (2026-08-07): a single fuse can now grant more than +1 (fusing
+// an owned +2/+3 stat item, not just +1) — priced as `amount` separate
+// fusions back to back, each paying the escalating rate at its own point
+// in the sequence, so fusing a +3 part costs exactly what three +1
+// fusions in a row would have. Preserves the existing "spreading vs.
+// stacking is priced the same" invariant above at any amount.
+export function fusionCost(stat: FusionStat, ship: PlayerShipState, amount = 1): number {
+  const base = FUSION_STAT_BASE[stat];
+  const priorTotal = totalFusions(ship);
+  let cost = 0;
+  for (let i = 0; i < amount; i++) {
+    cost += base + FUSION_STEP * (priorTotal + i);
+  }
+  return cost;
 }
+
+// 2026-08-07 (Foundry rework): fusing now consumes an OWNED part instead
+// of being a pure credit purchase — "fuse the item you own," not a
+// straight upgrade. Only the stat-item ladder qualifies (iteration 36's
+// +1/+2/+3 hull/computer/shield/initiative parts) — each maps 1:1 onto a
+// FusionStat and an amount, reusing the part's own stat value rather than
+// inventing a separate conversion formula. The credit cost above still
+// applies on top (see fusionCost) — owning the part is an additional
+// cost, not a replacement for the escalating price.
+export const FUSABLE_PARTS: Partial<Record<PartId, { stat: FusionStat; amount: number }>> = {
+  hull1: { stat: 'hp', amount: 1 },
+  hull2: { stat: 'hp', amount: 2 },
+  hull3: { stat: 'hp', amount: 3 },
+  comp1: { stat: 'computer', amount: 1 },
+  comp2: { stat: 'computer', amount: 2 },
+  comp3: { stat: 'computer', amount: 3 },
+  shield1: { stat: 'shield', amount: 1 },
+  shield2: { stat: 'shield', amount: 2 },
+  shield3: { stat: 'shield', amount: 3 },
+  init1: { stat: 'initiative', amount: 1 },
+  init2: { stat: 'initiative', amount: 2 },
+  init3: { stat: 'initiative', amount: 3 },
+};
 
 // A short "Fused: +2 HP · +1 COMP" line for FleetPanel/FleetOverlay — same
 // visual weight as the upgrade badges next to it. The stats themselves
 // already read correctly via deriveStats; this just explains WHY the
 // numbers beat the parts list. Null (not rendered) when nothing's fused.
-const FUSION_STAT_ABBR: Record<FusionStat, string> = { hp: 'HP', computer: 'COMP', shield: 'PLT', initiative: 'INIT' };
-const FUSION_STAT_ORDER: FusionStat[] = ['hp', 'computer', 'shield', 'initiative'];
+export const FUSION_STAT_ABBR: Record<FusionStat, string> = { hp: 'HP', computer: 'COMP', shield: 'PLT', initiative: 'INIT' };
+export const FUSION_STAT_ORDER: FusionStat[] = ['hp', 'computer', 'shield', 'initiative'];
 export function fusionSummary(fusions: PlayerShipState['fusions']): string | null {
   if (!fusions) return null;
   const parts = FUSION_STAT_ORDER.filter((stat) => fusions[stat]).map((stat) => `+${fusions[stat]} ${FUSION_STAT_ABBR[stat]}`);
@@ -271,11 +309,22 @@ export function fusionSummary(fusions: PlayerShipState['fusions']): string | nul
 // Dreadnought-plus-bay). Iteration 28: Lone flagship adds a further +2,
 // Flagship (cruiser frame) only — its whole point is one hull carrying
 // what used to be spread across a fleet.
-export function effectiveSlots(frameId: FrameId, upgrades: UpgradeId[], protocols?: ProtocolId[]): number {
+// 2026-08-08 (Warlord rework): +1 further slot, Flagship only, for the
+// Warlord specifically — their whole doctrine is one hull built up past
+// what a single ship should carry, so it needed a build-space bonus of its
+// own alongside the bigger augment cap below, not just a discount and a
+// free starting upgrade.
+export function effectiveSlots(
+  frameId: FrameId,
+  upgrades: UpgradeId[],
+  protocols?: ProtocolId[],
+  commanderId?: CommanderId,
+): number {
   const frame = getFrame(frameId);
   const bayCount = upgrades.filter((u) => u === 'bay').length;
   const lonelyFlagshipBonus = frameId === 'cruiser' && hasProtocol(protocols, 'lone-flagship') ? 2 : 0;
-  return frame.slots + bayCount + lonelyFlagshipBonus;
+  const warlordBonus = frameId === 'cruiser' && commanderId === 'warlord' ? 1 : 0;
+  return frame.slots + bayCount + lonelyFlagshipBonus + warlordBonus;
 }
 
 export function equippedWeaponCount(equippedPartIds: PartId[]): number {

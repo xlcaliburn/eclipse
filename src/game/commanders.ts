@@ -12,6 +12,11 @@ export interface Commander {
   id: CommanderId;
   name: string;
   description: string;
+  // 2026-08-08: the flavor description alone left players guessing at the
+  // actual numbers behind it — these are the same mechanical effects,
+  // spelled out plainly, point by point. Shown on the commander-select
+  // screen alongside the prose above, not instead of it.
+  bullets: string[];
 }
 
 export const COMMANDERS: Record<CommanderId, Commander> = {
@@ -19,26 +24,52 @@ export const COMMANDERS: Record<CommanderId, Commander> = {
     id: 'merchant',
     name: 'The Merchant',
     description: 'Money is the doctrine — better prices everywhere, and a fleet that can simply buy its way through.',
+    bullets: [
+      'Commodity lots cost 3cr instead of 4cr',
+      'Mercenary hires cost 3cr instead of 5cr',
+      '+1 credit on every fight won',
+    ],
   },
   engineer: {
     id: 'engineer',
     name: 'The Engineer',
     description: 'The fleet quietly repairs past where it should stop — damage that should be fatal barely slows it down.',
+    bullets: [
+      '+1 extra heal on every surviving ship after a win, stacking with Regenerative plating',
+      "Healing past a ship's damage banks the excess as temporary HP instead of wasting it",
+    ],
   },
   warlord: {
     id: 'warlord',
     name: 'The Warlord',
     description: 'Everything rides on one hull, built up past what a single ship should carry.',
+    bullets: [
+      'The Flagship can carry 3 augments instead of 1',
+      'The Flagship gets +1 extra item slot',
+      'Starts with one random augment already fitted to the Flagship',
+      'The Dreadnought costs 5cr less',
+    ],
   },
   spymaster: {
     id: 'spymaster',
     name: 'The Spymaster',
     description: 'Sees further than anyone, and every wreck along the way is free money nobody notices.',
+    bullets: [
+      'Sees 2 columns ahead on the map instead of 1',
+      'A free piece of intel after every fight won',
+      'Salvage-claim events cost no heat',
+    ],
   },
   admiral: {
     id: 'admiral',
     name: 'The Admiral',
     description: 'Starts wide with an extra hull already in formation — more ships, cheaper ships, and veterans who only get sharper.',
+    bullets: [
+      'Fleet cap 5 instead of 4',
+      'Starts with a free, ion-fitted Interceptor — the fleet begins at 2 ships',
+      'Every hull costs 25% less',
+      'Any ship with 3+ kills gains +1 initiative',
+    ],
   },
 };
 

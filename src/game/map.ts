@@ -53,7 +53,7 @@ export const CARGO_LABEL: Record<CargoTag, string> = {
 
 export const CARGO_DESCRIPTION: Record<CargoTag, string> = {
   patrol: 'Standard payout.',
-  convoy: 'Pays +4 credits on top of the normal reward.',
+  convoy: 'A hardened escort rides with this shipment — tougher fight, better pay.',
   wreck: 'Pays 2 credits less (never below 1), but drops a salvaged part.',
   command: 'Pays a reaction card on top of the normal reward (+4 credits instead if your hand is full).',
 };

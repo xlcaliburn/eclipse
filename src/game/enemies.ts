@@ -99,18 +99,28 @@ export const GAUNTLET: EnemyDef[] = [
       shield: 0,
       cannons: [{ diceCount: 1, damage: 2 }],
       missiles: [],
+      // 2026-08-08: the one enemy class that keeps greedy lowest-HP
+      // targeting once enemy fire went random by default — a sniper picking
+      // targets at random would waste its whole reason to exist (high
+      // computer, built to finish off whatever's already hurt).
+      targetsLowestHp: true,
     }),
   },
   {
     id: 'missile-swarm',
     name: 'Missile swarm',
     blurb: 'Win initiative, kill before launch.',
+    // 2026-08-08: gained a cannon each — an elite (or veteran-scaled) swarm
+    // used to be all missile, one alpha-strike volley and then dead weight
+    // for every round after (missiles fire once, in the opening volley
+    // only). A plain ion-tier cannon each means a surviving swarm ship
+    // keeps threatening every round instead of just soaking hits.
     groups: solo('swarm', 3, {
       initiative: 2,
       hp: 1,
       computer: 0,
       shield: 0,
-      cannons: [],
+      cannons: [{ diceCount: 1, damage: 1 }],
       missiles: [{ diceCount: 2, damage: 1 }],
     }),
   },
@@ -121,14 +131,36 @@ export const GAUNTLET: EnemyDef[] = [
     // stat wall with nothing to focus fire onto. Softened to 1/1 and given
     // a pair of missile frigates (the exact roster enemy's own stats) as
     // escorts, so a screen exists to punch through instead.
-    blurb: 'Its defenses are lighter than they look — the two frigates screening it are the real threat.',
+    //
+    // Nerfed again 2026-08-07 (playtest report: "the guardian with 3
+    // frigate fight is an elite fight with almost 30 points of HP, this is
+    // definitely way too overpowered"). This formation stacks every HP
+    // lever in the game at once by late act 1: eliteVariant (+2/ship),
+    // veterancyBonus at col 8-9 (+2/ship), the 'hardened' escalation
+    // (+1/ship, landed by col 2), and 'squadrons' reinforcing the escort
+    // group (2 frigates -> 3, exactly the "3 frigate" the report
+    // describes — group 0, the guardian itself, is exempt as the
+    // formation's centerpiece). Worst case (elite + veteran + hardened +
+    // squadrons, all real by late act 1) totalled exactly 30 HP across 4
+    // ships before this pass:
+    //   guardian:  4 + 2 + 2 + 1 = 9
+    //   3 frigates: (2 + 2 + 2 + 1) x 3 = 21
+    //   total: 30
+    // Fix: guardian hp 4 -> 3, frigate hp 2 -> 1, frigate BASE count 2 -> 1
+    // (squadrons still guarantees a real pair — "a lone ship gains a
+    // wingman rather than being skipped" — so the worst case still reaches
+    // 2 frigates, just never 3). Same worst-case stack now:
+    //   guardian:  3 + 2 + 2 + 1 = 8
+    //   2 frigates: (1 + 2 + 2 + 1) x 2 = 12
+    //   total: 20 (-10, exactly the requested cut)
+    blurb: 'Its defenses are lighter than they look — the frigate screening it is the real threat.',
     groups: [
       {
         label: 'guardian',
         count: 1,
         stats: {
           initiative: 2,
-          hp: 4,
+          hp: 3,
           computer: 1,
           shield: 1,
           cannons: [{ diceCount: 3, damage: 1 }],
@@ -136,14 +168,18 @@ export const GAUNTLET: EnemyDef[] = [
         },
       },
       {
-        // Same stats as the standalone Missile frigate enemy (id
-        // 'missile-frigate') — an escort should be recognizably that ship,
-        // not a bespoke reskin.
+        // No longer "the exact roster enemy's own stats" as the standalone
+        // Missile frigate (hp 2) — deliberately diverged 2026-08-07 (see
+        // the nerf note above) since this formation's own stacking made it
+        // untenable at its old numbers even though the standalone enemy is
+        // fine. count 1 (not 2): 'squadrons' still reinforces to a pair
+        // when it lands, this just removes the always-a-pair floor that
+        // used to become a trio under 'squadrons'.
         label: 'frigate',
-        count: 2,
+        count: 1,
         stats: {
           initiative: 1,
-          hp: 2,
+          hp: 1,
           computer: 1,
           shield: 0,
           cannons: [{ diceCount: 1, damage: 1 }],
@@ -359,7 +395,11 @@ const ESCORTED_SNIPER: EnemyDef = {
   name: 'Escorted sniper',
   blurb: 'Greedy targeting shoots the screens while the sniper shoots you.',
   groups: [
-    { label: 'sniper', count: 1, stats: { initiative: 2, hp: 2, computer: 3, shield: 0, cannons: [{ diceCount: 1, damage: 2 }], missiles: [] } },
+    {
+      label: 'sniper',
+      count: 1,
+      stats: { initiative: 2, hp: 2, computer: 3, shield: 0, cannons: [{ diceCount: 1, damage: 2 }], missiles: [], targetsLowestHp: true },
+    },
     { label: 'screen', count: 2, stats: { initiative: 1, hp: 1, computer: 0, shield: 0, cannons: [{ diceCount: 1, damage: 1 }], missiles: [] } },
   ],
 };
@@ -381,6 +421,7 @@ const SNIPER_PAIR: EnemyDef = {
     shield: 0,
     cannons: [{ diceCount: 1, damage: 2 }],
     missiles: [],
+    targetsLowestHp: true,
   }),
 };
 
@@ -425,6 +466,17 @@ export function eliteVariant(enemy: EnemyDef, hpBonus = 2): EnemyDef {
     id: `${enemy.id}-elite`,
     name: `${enemy.name} (elite)`,
     groups: enemy.groups.map((g) => ({ ...g, stats: { ...g.stats, hp: g.stats.hp + hpBonus } })),
+  };
+}
+
+// 2026-08-08: a convoy fight (CargoTag 'convoy', map.ts) pays +4 credits —
+// danger money now, not a free bonus. +1 HP per ship, same shape as one
+// veterancy step (see veterancyBonus below), reflecting a shipment that
+// travels with a slightly hardened escort.
+export function convoyEscort(enemy: EnemyDef): EnemyDef {
+  return {
+    ...enemy,
+    groups: enemy.groups.map((g) => ({ ...g, stats: { ...g.stats, hp: g.stats.hp + 1 } })),
   };
 }
 

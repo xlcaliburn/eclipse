@@ -31,31 +31,34 @@ describe('describeRoll (iteration 29 — roll legibility)', () => {
     expect(text).not.toContain('needs 7');
   });
 
-  it('calls out nullification in plain English on a miss when computer <= shield', () => {
+  it('on a miss when computer <= shield, the clamped "(needs 6+)" note is the whole story — no extra sentence', () => {
     // The exact shape of the original bug report: a computer-boosting
     // active fired correctly, but the defender's piloting fully absorbed
-    // it, so nothing but a natural 6 could ever land.
+    // it, so nothing but a natural 6 could ever land. "(needs 6+)" already
+    // says that; no separate paragraph needed.
     const text = describeRoll(roll({ raw: 3, computer: 2, shield: 2, hit: false, damage: 0 }), 'ISV Test', 'Raider');
-    expect(text).toBe(
-      "ISV Test rolls 3 — misses Raider. Raider's piloting nullifies the computer bonus — only a natural 6 gets through.",
-    );
+    expect(text).toBe('ISV Test rolls 3 (needs 6+) — misses Raider.');
   });
 
-  it('calls out nullification differently on a hit (must have been a natural 6)', () => {
+  it('calls out a natural 6 that hit despite the formula itself saying miss', () => {
     const text = describeRoll(roll({ raw: 6, computer: 1, shield: 3, hit: true, damage: 2 }), 'ISV Test', 'Raider');
     expect(text).toBe(
-      "ISV Test rolls 6 — hits Raider for 2 damage. Raider's piloting nullifies the computer bonus, but a natural 6 always hits regardless.",
+      "ISV Test rolls 6 — hits Raider for 2 damage. Raider's piloting would have stopped anything but a natural 6.",
     );
   });
 
-  it('treats computer exactly equal to shield as nullified (the boundary case)', () => {
+  it('treats computer exactly equal to shield as needing a 6 (the boundary case), no extra callout', () => {
     const text = describeRoll(roll({ raw: 4, computer: 3, shield: 3, hit: false, damage: 0 }), 'ISV Test', 'Raider');
-    expect(text).toContain("nullifies the computer bonus");
+    expect(text).toBe('ISV Test rolls 4 (needs 6+) — misses Raider.');
   });
 
-  it('does not call nullification when computer is exactly one point above shield', () => {
+  it('a natural 6 that the formula would also call a hit gets no extra callout', () => {
+    const text = describeRoll(roll({ raw: 6, computer: 4, shield: 0, hit: true, damage: 2 }), 'ISV Test', 'Raider');
+    expect(text).toBe('ISV Test rolls 6 — hits Raider for 2 damage.');
+  });
+
+  it('shows a plain threshold note when computer is one point above shield', () => {
     const text = describeRoll(roll({ raw: 4, computer: 3, shield: 2, hit: false, damage: 0 }), 'ISV Test', 'Raider');
-    expect(text).not.toContain('nullifies');
-    expect(text).toContain('needs 5+'); // 6 - 3 + 2 = 5
+    expect(text).toBe('ISV Test rolls 4 (needs 5+) — misses Raider.'); // 6 - 3 + 2 = 5
   });
 });

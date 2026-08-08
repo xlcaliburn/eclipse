@@ -136,6 +136,12 @@ export interface ShipStats {
   // Part ids (in equip order) of every active part this ship carries — each
   // entry is one independently-triggerable, once-per-combat ability.
   actives?: PartId[];
+  // 2026-08-08: enemy-only. Enemy dice target randomly among legal
+  // defenders by default (see combatEngine.ts's fireShip) — a sniper-class
+  // ship is the deliberate exception, keeping the old greedy lowest-
+  // remaining-HP behavior its high computer is built around. Never set on
+  // a player part; player fire is governed by TargetingStance instead.
+  targetsLowestHp?: boolean;
 }
 
 // Iteration 9: an enemy is a composition of one or more sub-groups, each
@@ -291,7 +297,6 @@ export interface CombatResult {
 
 export type Phase =
   | 'commander'
-  | 'setup'
   | 'map'
   | 'prep'
   | 'combat'
@@ -304,6 +309,10 @@ export type Phase =
   | 'flagship-recovery'
   | 'victory'
   | 'defeat';
+// 2026-08-07: the 'setup' phase (a customize-your-flagship screen between
+// commander pick and map) was removed — CHOOSE_COMMANDER now lands
+// straight on 'map'. See CommanderSelectScreen for the starting-ship
+// preview that replaced it.
 
 // A bonus payout conditional on winning the fight an ambush choice leads
 // into — the reward pipeline can't know the outcome at EVENT_CHOOSE time, so
@@ -371,12 +380,13 @@ export interface RunState {
   pendingReward?: RewardSummary;
   shopOffers?: PartId[]; // parts currently for sale — a shipyard visit sets this to [] (no parts, still "present")
   shopFrameOffers?: Exclude<FrameId, 'cruiser'>[]; // ships currently for sale — a random subset, drawn per visit
-  // 2026-08-06: rerolls escalate within a single shop visit (1cr, 2cr,
-  // 3cr, ...) instead of a flat price — this counts how many have already
-  // been used THIS visit. Reset to undefined every time a shop is entered
-  // (PICK_NODE), so the price resets on the next visit rather than
-  // punishing the whole run. Absent/0 means "no rerolls used yet."
-  shopRerollCount?: number;
+  // 2026-08-07: each shipyard offer's rarity bonus (fuse HP + upgrade
+  // ids), pre-rolled the same moment as shopFrameOffers rather than at
+  // purchase time — so ShopScreen can show the ACTUAL upgrade(s) a
+  // purchase will grant, not just a count, with no chance the preview
+  // drifts from what BUY_SHIP later applies. Absent for a store visit
+  // (always common, no bonus — nothing to preview).
+  shopFrameBonusPreview?: Partial<Record<FrameId, { hp: number; upgrades: UpgradeId[] }>>;
   // Iteration 33 (2026-08-07): which trade-station flavor this shop visit
   // is — set in PICK_NODE from the node's type ('shop' -> 'store',
   // 'shipyard' -> 'shipyard'), cleared on LEAVE_SHOP. Absent means a save

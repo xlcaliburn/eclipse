@@ -2,7 +2,10 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { globalColumn, hasLineOfRetreat, initialRunState, runReducer } from './game/reducer';
 import { clearRun, loadDailyRecord, loadRun, saveDailyRecord, saveRun } from './game/persistence';
 import { dailySeed, dailyShareText } from './game/daily';
+import { getFrame } from './game/frames';
+import { getPart } from './game/parts';
 import { playerShipLabel } from './game/ship';
+import { getUpgrade } from './game/upgrades';
 import './styles.css';
 import { CombatScreen } from './components/CombatScreen';
 import { CommanderSelectScreen } from './components/CommanderSelectScreen';
@@ -17,12 +20,13 @@ import { PrepScreen } from './components/PrepScreen';
 import { ProtocolDraftScreen } from './components/ProtocolDraftScreen';
 import { RepairScreen } from './components/RepairScreen';
 import { RewardScreen } from './components/RewardScreen';
-import { ShipSetupScreen } from './components/ShipSetupScreen';
 import { ShopScreen } from './components/ShopScreen';
 import { Starfield } from './components/Starfield';
 import { HudBar } from './components/HudBar';
 import { SettingsOverlay, SettingsScreen } from './components/SettingsScreen';
 import { TabBar } from './components/TabBar';
+import { Toast } from './components/Toast';
+import type { ToastMessage } from './components/Toast';
 import { TutorialOverlay } from './components/TutorialOverlay';
 import type { Surface } from './components/TabBar';
 import { useIsCompact } from './components/useIsCompact';
@@ -86,6 +90,19 @@ function App() {
   // whatever's currently rendered is simpler than routing it through the
   // surface state machine.
   const [tutorialOpen, setTutorialOpen] = useState(false);
+
+  // 2026-08-08: purchase/install feedback — "Bought X", "Installed Y onto
+  // Z". Local view state, same reasoning as `surface` above: a toast is
+  // presentation, not something a save/reload or a determinism test should
+  // ever need to reason about. `toastIdRef` (not just the text) keys the
+  // Toast component's dismiss timer, so firing the exact same message twice
+  // in a row (two Ion cannon buys back to back) still resets the animation.
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const toastIdRef = useRef(0);
+  function showToast(text: string) {
+    toastIdRef.current += 1;
+    setToast({ id: toastIdRef.current, text });
+  }
 
   // Autosave after every reducer action, once the landing screen (if any)
   // has been resolved — never while it's still deciding, so a "New run"
@@ -195,7 +212,7 @@ function App() {
     );
   }
 
-  const showHud = state.phase !== 'commander' && state.phase !== 'setup';
+  const showHud = state.phase !== 'commander';
   // Iteration 27: the Settings "Run seed" readout hides itself during the
   // daily — today's seed is the same for every player attempting it today
   // (daily.ts's dailySeed), so showing it here would let a player look it
@@ -284,16 +301,8 @@ function App() {
           {state.phase === 'commander' && (
             <CommanderSelectScreen
               choices={state.commanderChoices}
+              startingEquipped={state.fleet[0]?.equipped ?? []}
               onChoose={(commanderId) => dispatch({ type: 'CHOOSE_COMMANDER', commanderId })}
-            />
-          )}
-
-          {state.phase === 'setup' && (
-            <ShipSetupScreen
-              equipped={state.fleet[0]?.equipped ?? []}
-              onAddPart={(partId) => dispatch({ type: 'SETUP_ADD_PART', partId })}
-              onRemovePart={(partId) => dispatch({ type: 'SETUP_REMOVE_PART', partId })}
-              onConfirm={() => dispatch({ type: 'SETUP_CONFIRM' })}
             />
           )}
 
@@ -346,6 +355,7 @@ function App() {
               credits={state.credits}
               offers={state.shopOffers}
               frameOffers={state.shopFrameOffers}
+              frameBonusPreview={state.shopFrameBonusPreview}
               kind={state.shopKind}
               upgradeOffer={state.shopUpgradeOffer}
               fleet={state.fleet}
@@ -353,19 +363,38 @@ function App() {
               commanderId={state.commanderId}
               protocols={state.protocols}
               counterProtocol={state.counterProtocol}
-              rerollsUsed={state.shopRerollCount}
               commodityLotSellable={commodityLotSellable}
-              onBuyPart={(offerIndex) => dispatch({ type: 'BUY_PART', offerIndex })}
+              onBuyPart={(offerIndex) => {
+                showToast(`Bought ${getPart(state.shopOffers![offerIndex]).name}.`);
+                dispatch({ type: 'BUY_PART', offerIndex });
+              }}
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}
-              onBuyShip={(frameId) => dispatch({ type: 'BUY_SHIP', frameId })}
+              onBuyShip={(frameId) => {
+                showToast(`${getFrame(frameId).name} added to the fleet.`);
+                dispatch({ type: 'BUY_SHIP', frameId });
+              }}
               onScuttle={(shipIndex) => dispatch({ type: 'SCUTTLE_SHIP', shipIndex })}
-              onBuyCommodityLot={() => dispatch({ type: 'BUY_COMMODITY_LOT' })}
+              onBuyCommodityLot={() => {
+                showToast('Commodity lot bought.');
+                dispatch({ type: 'BUY_COMMODITY_LOT' });
+              }}
               onSellCommodityLot={() => dispatch({ type: 'SELL_COMMODITY_LOT' })}
-              onBuyMercenary={() => dispatch({ type: 'BUY_MERCENARY' })}
-              onBuyRepair={(shipIndex) => dispatch({ type: 'BUY_REPAIR', shipIndex })}
-              onBuyUpgrade={(shipIndex) => dispatch({ type: 'BUY_UPGRADE', shipIndex })}
-              onFuseStat={(shipIndex, stat) => dispatch({ type: 'FUSE_STAT', shipIndex, stat })}
-              onReroll={() => dispatch({ type: 'REROLL' })}
+              onBuyMercenary={() => {
+                showToast('Mercenary escort hired.');
+                dispatch({ type: 'BUY_MERCENARY' });
+              }}
+              onBuyRepair={(shipIndex) => {
+                showToast(`Repaired ${playerShipLabel(state.fleet, shipIndex)}.`);
+                dispatch({ type: 'BUY_REPAIR', shipIndex });
+              }}
+              onBuyUpgrade={(shipIndex) => {
+                showToast(`Installed ${getUpgrade(state.shopUpgradeOffer!).name} onto ${playerShipLabel(state.fleet, shipIndex)}.`);
+                dispatch({ type: 'BUY_UPGRADE', shipIndex });
+              }}
+              onFuseStat={(shipIndex, partId) => {
+                showToast(`Fused ${getPart(partId).name} into ${playerShipLabel(state.fleet, shipIndex)}.`);
+                dispatch({ type: 'FUSE_STAT', shipIndex, partId });
+              }}
               onLeave={() => dispatch({ type: 'LEAVE_SHOP' })}
               onViewMap={() => setSurface('chart')}
               onEquip={(shipIndex, partId) => dispatch({ type: 'EQUIP', shipIndex, partId })}
@@ -443,6 +472,7 @@ function App() {
         <FleetScreen
           fleet={state.fleet}
           inventory={state.inventory}
+          commanderId={state.commanderId}
           protocols={state.protocols}
           counterProtocol={state.counterProtocol}
           onClose={() => setSurface('mission')}
@@ -454,6 +484,7 @@ function App() {
           fleet={state.fleet}
           inventory={state.inventory}
           credits={state.credits}
+          commanderId={state.commanderId}
           protocols={state.protocols}
           counterProtocol={state.counterProtocol}
           onClose={() => setSurface('mission')}
@@ -480,6 +511,7 @@ function App() {
     </div>
     {isCompact && showHud && <TabBar surface={surface} onSelect={setSurface} />}
     {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}
+    <Toast toast={toast} />
     </>
   );
 }

@@ -568,7 +568,6 @@ h1, h2, h3 {
 .blueprint-panel,
 .combat-screen,
 .shop-screen,
-.setup-screen,
 .reward-screen,
 .interlude-screen,
 .landing-screen,
@@ -820,6 +819,15 @@ h1, h2, h3 {
 .hp-pips__pip {
   width: 6px;
   height: 8px;
+  /* 2026-08-07: without these, a flex item's default flex-shrink: 1 and
+     min-width: auto let the browser shrink pips unevenly whenever a row's
+     content doesn't quite fit its container — the CSS comment above says
+     "fixed-size pips," but nothing was actually enforcing that. Different
+     ship cards can offer pips different amounts of room (a cramped combat
+     theater layout especially), so this showed up as pips rendering at
+     inconsistent sizes ship to ship, not just row to row. */
+  flex-shrink: 0;
+  flex-grow: 0;
   border-radius: 1px;
   background: var(--border);
 }
@@ -1370,10 +1378,41 @@ h1, h2, h3 {
   line-height: 1.45;
 }
 
+/* 2026-08-08: the point-form mechanical breakdown under the flavor prose —
+   left-aligned (everything else on the card is centered) since a bullet
+   list reads better ragged-left, and small/dim so it stays secondary to
+   the name and description above it. */
+.commander-card__bullets {
+  align-self: stretch;
+  margin: 4px 0 0;
+  padding-left: 16px;
+  text-align: left;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
 @media (max-width: 720px) {
   .commander-select-screen__choices {
     grid-template-columns: 1fr;
   }
+}
+
+/* 2026-08-07: the starting-ship preview that replaced the old setup
+   screen — same heading/stats-line rhythm as everywhere else the game
+   states a ship's build (setup-screen__stats used to own this look). */
+.commander-select-screen__starting-ship-heading {
+  margin: 24px 0 10px;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.commander-select-screen__starting-ship-stats {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin: 10px 0 0;
 }
 
 .combat-screen__actions {
@@ -2690,15 +2729,6 @@ h1, h2, h3 {
   color: var(--rarity-legendary);
 }
 
-/* Iteration 33: the general store's used-hull rack — a small badge above
-   the name, same visual weight as a part's type label. */
-.frame-card__badge {
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-
 .frame-card__desc {
   font-size: 12px;
   color: var(--text-dim);
@@ -2783,50 +2813,6 @@ h1, h2, h3 {
   text-align: left;
 }
 
-/* Ship setup screen */
-.setup-screen {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 24px;
-}
-
-.setup-screen__stats {
-  font-size: 14px;
-  color: var(--text-dim);
-  margin: 0 0 16px;
-}
-
-.setup-screen__budget {
-  display: inline-block;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 14px;
-  font-weight: 600;
-  font-size: 14px;
-  margin-bottom: 16px;
-}
-
-/* Quiet secondary path off the setup screen's default view — a plain text
-   link under the primary "Start the Journey" button, deliberately smaller
-   and unstyled next to it. */
-.setup-screen__customize-link {
-  display: block;
-  margin: 10px auto 0;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 12px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.setup-screen__customize-link:hover {
-  color: var(--text);
-}
-
 /* Upgrade / escalation badges */
 .ship-card__upgrades {
   display: flex;
@@ -2844,6 +2830,16 @@ h1, h2, h3 {
   padding: 1px 6px;
   font-size: 11px;
   font-weight: 600;
+}
+
+/* 2026-08-08: an open augment slot, same badge shape as a filled one so the
+   two read as one row — dashed and dim instead of solid and lit, matching
+   .slot--empty's "outline, not filled" language for item slots. */
+.upgrade-badge--empty {
+  background: none;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-dim);
+  font-weight: 400;
 }
 
 .enemy-panel__escalations {
@@ -3341,4 +3337,45 @@ h1, h2, h3 {
 
 .enemy-panel__volley strong {
   color: var(--text);
+}
+
+/* 2026-08-08: purchase/install feedback toast, fixed at the bottom center,
+   above everything (including modals), self-dismissing. Shares the panel
+   chrome's accent glow so it reads as the game confirming something, not a
+   generic browser alert. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 50;
+  max-width: min(90vw, 420px);
+  padding: 10px 18px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 0 16px var(--accent-glow);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+  animation: toast-in-out 2.6s ease forwards;
+}
+
+@keyframes toast-in-out {
+  0% { opacity: 0; transform: translate(-50%, 8px); }
+  10% { opacity: 1; transform: translate(-50%, 0); }
+  85% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+:root[data-motion='reduced'] .toast {
+  animation: none;
 }

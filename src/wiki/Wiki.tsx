@@ -368,8 +368,9 @@ export function Wiki() {
           <p className="wiki-note">
             Slotless and permanent, attached to one ship. Lost only if that ship is destroyed. Elites, the act-1
             boss, and a shipyard hull purchase (+1 max HP and 1 random upgrade per rarity level above common —
-            rare = 1, epic = 2, legendary = 3) all draw from the same list below, without duplicates. A
-            second-hand (store) hull purchase is always treated as common — cheaper, but no upgrade bonus.
+            rare = 1, epic = 2, legendary = 3) all draw from the same list below, without duplicates. A store hull
+            purchase is always treated as common — cheaper, but no upgrade bonus (and never epic or legendary —
+            the shipyard is the only place to buy the roster's top tier).
           </p>
           <TableWrap>
             <table className="wiki-table">

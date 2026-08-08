@@ -25,7 +25,6 @@ describe('full-run determinism (iteration 9.1)', () => {
     let [a, b] = freshIdenticalPair();
     const actions: RunAction[] = [
       { type: 'CHOOSE_COMMANDER', commanderId: a.commanderChoices[0] },
-      { type: 'SETUP_CONFIRM' },
       { type: 'PICK_NODE', row: 0 }, // the act-1 opener — always row 0, no map-shape assumptions needed
     ];
     for (const action of actions) {
@@ -50,7 +49,6 @@ describe('full-run determinism (iteration 9.1)', () => {
   it('reloading before ENGAGE cannot reroll the fight — the combat seed is fixed at PICK_NODE, not ENGAGE', () => {
     let [a] = freshIdenticalPair();
     a = runReducer(a, { type: 'CHOOSE_COMMANDER', commanderId: a.commanderChoices[0] });
-    a = runReducer(a, { type: 'SETUP_CONFIRM' });
     a = runReducer(a, { type: 'PICK_NODE', row: 0 });
     expect(a.currentCombatSeed).toBeDefined();
 
@@ -61,21 +59,6 @@ describe('full-run determinism (iteration 9.1)', () => {
     const engagedOnce = runReducer(reloaded, { type: 'ENGAGE' });
     const engagedAgain = runReducer(reloaded, { type: 'ENGAGE' });
     expect(engagedOnce.combat).toEqual(engagedAgain.combat);
-  });
-
-  it('shop stock and rerolls are identical after reload (same rngCounter → same draw)', () => {
-    const [a, b] = freshIdenticalPair();
-    const shopState = (base: RunState): RunState => ({ ...base, phase: 'shop' as const });
-    const rerolledA = runReducer(shopState(a), { type: 'REROLL' });
-    const rerolledB = runReducer(shopState(b), { type: 'REROLL' });
-    expect(rerolledA.shopOffers).toEqual(rerolledB.shopOffers);
-    expect(rerolledA.rngCounter).toBe(rerolledB.rngCounter);
-
-    // "Reload" — rehydrate and reroll again from the identical snapshot.
-    const reloaded: RunState = JSON.parse(JSON.stringify(rerolledA));
-    const rerolledAgain = runReducer(reloaded, { type: 'REROLL' });
-    const rerolledDirect = runReducer(rerolledA, { type: 'REROLL' });
-    expect(rerolledAgain.shopOffers).toEqual(rerolledDirect.shopOffers);
   });
 
   it('event resolution (including its own randomness) is identical after reload', () => {

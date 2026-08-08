@@ -1,4 +1,4 @@
-import { resumeRng, rollD6 } from './rng';
+import { mulberry32, resumeRng, rollD6 } from './rng';
 import type { RngFn } from './rng';
 import { resolveHit } from './resolver';
 import type { CombatEvent, EnemyDef, PartId, ShipStats, Side } from './types';
@@ -64,7 +64,9 @@ export interface CombatState {
   // Iteration 9.4: the player's fleet-wide targeting doctrine for this fight
   // — set once at initCombat (from RunState, persists between fights until
   // the player changes it on the prep screen), applies to every player die.
-  // Enemy targeting is always lowest-HP-first, untouched by this.
+  // 2026-08-08: enemy targeting is random by default (sniper-class ships
+  // are the exception, still greedy lowest-HP) — untouched by this either
+  // way, this doctrine has only ever been a player-side knob.
   targetingStance: TargetingStance;
   // Iteration 13: a manually-picked enemy ship (flattened index) that ALL
   // player dice fire at while it lives — clicked in the combat theater.
@@ -106,7 +108,17 @@ function isAlive(ship: CombatShip): boolean {
 // `taunt`/`cloak`, so both are no-ops when the defenders are an enemy group.
 // `ignoreTaunt` (iteration 42, Homing missile): skips the taunt-forcing
 // branch entirely — the cloak all-cloaked exception below still applies.
-function pickTarget(defenders: CombatShip[], preferHighest = false, ignoreTaunt = false): CombatShip | null {
+// `randomRng` (2026-08-08): when given, picks uniformly among the same
+// candidate pool instead of the greedy HP comparison below — the enemy's
+// default targeting now (see fireShip), with sniper-class ships (
+// stats.targetsLowestHp) the deliberate opt-out that still passes nothing
+// here and falls through to the greedy behavior.
+function pickTarget(
+  defenders: CombatShip[],
+  preferHighest = false,
+  ignoreTaunt = false,
+  randomRng?: RngFn,
+): CombatShip | null {
   const alive = defenders.filter(isAlive);
   if (alive.length === 0) return null;
 
@@ -119,6 +131,10 @@ function pickTarget(defenders: CombatShip[], preferHighest = false, ignoreTaunt 
     candidates = nonCloaked.length > 0 ? nonCloaked : alive;
   }
 
+  if (randomRng) {
+    return candidates[Math.floor(randomRng() * candidates.length)];
+  }
+
   let best: CombatShip | null = null;
   for (const ship of candidates) {
     if (best === null) {
@@ -129,6 +145,21 @@ function pickTarget(defenders: CombatShip[], preferHighest = false, ignoreTaunt 
     if (better) best = ship;
   }
   return best;
+}
+
+// 2026-08-08: a derived, independently-seeded generator for "which target
+// did this enemy ship randomly commit to this round" — NOT drawn from the
+// shared, resumable dice-roll rng (that would need the incoming-fire
+// preview, which runs ahead of the round and must never consume rng, to
+// somehow agree with what fireShip rolls later). Pure function of values
+// both already know (the fight's own seed, the round number, the shooter's
+// flattened index), so the preview and the real resolution always compute
+// the identical pick with no shared state at all. One draw only — that's
+// the ship's target for every die it fires this round (missile phase and
+// any bonus/Outspeed cannon activation share the same round number, so
+// they agree too), not re-rolled per die.
+function enemyTargetRng(seed: number, round: number, shipIndex: number): RngFn {
+  return mulberry32((seed ^ Math.imul(round + 1, 0x9e3779b1) ^ Math.imul(shipIndex + 1, 0x85ebca6b)) >>> 0);
 }
 
 // Emergency thrusters (evasive burn) make a ship untargetable for the round
@@ -270,6 +301,7 @@ function fireShip(
   targetingStance: TargetingStance,
   priorityTargetIndex: number | null | undefined,
   checkWinner: () => Side | null,
+  seed: number,
 ): Side | null {
   if (!isAlive(ship)) return null;
 
@@ -288,6 +320,13 @@ function fireShip(
   const attackerComputer =
     ship.stats.computer +
     (ship.side === 'player' ? roundModifiers.computerBonus : -roundModifiers.enemyComputerPenalty);
+
+  // 2026-08-08: this ship's committed random target for the round, if it
+  // has one — every die it fires this round uses the same draw (see
+  // enemyTargetRng's own comment). Hoisted here (constant across the whole
+  // activation) rather than recomputed per die.
+  const enemyRandomRng =
+    ship.side === 'enemy' && !ship.stats.targetsLowestHp ? enemyTargetRng(seed, round, ship.index) : undefined;
 
   for (const weapon of weapons) {
     const diceCount = weapon.diceCount;
@@ -311,8 +350,10 @@ function fireShip(
 
       // Iteration 13: a clicked priority target outranks everything for
       // player dice while it's alive and legal. Otherwise the siege
-      // cannon's per-die override wins, then the fleet doctrine (9.4) —
-      // enemy targeting is always lowest-HP-first, untouched by any of it.
+      // cannon's per-die override wins, then the fleet doctrine (9.4).
+      // 2026-08-08: enemy targeting is random by default now (enemyRandomRng
+      // above) — a sniper-class ship is the one exception, still greedy
+      // lowest-HP, untouched by any of this.
       const defenders = legalDefenders(opponentsOf(ship), roundModifiers);
       const priority =
         ship.side === 'player' && priorityTargetIndex != null
@@ -323,7 +364,9 @@ function fireShip(
       // Homing missile (iteration 42): ignores the player's priority click,
       // targeting stance, AND taunt — always the plain lowest-HP defender.
       // Cloak's all-cloaked exception still applies (pickTarget handles it).
-      const target = weapon.bypassTaunt ? pickTarget(defenders, false, true) : (priority ?? pickTarget(defenders, preferHighest));
+      const target = weapon.bypassTaunt
+        ? pickTarget(defenders, false, true)
+        : (priority ?? pickTarget(defenders, preferHighest, false, enemyRandomRng));
       if (!target) return checkWinner(); // no legal target — the barrage finds nothing
 
       // Piloting capacitors add bonus piloting only during the missile
@@ -724,6 +767,7 @@ export function advanceRound(state: CombatState): CombatState {
       state.targetingStance,
       state.priorityTargetIndex,
       checkWinner,
+      state.seed,
     );
     if (winner) break;
   }
@@ -751,6 +795,7 @@ export function advanceRound(state: CombatState): CombatState {
         state.targetingStance,
         state.priorityTargetIndex,
         checkWinner,
+        state.seed,
       );
       if (winner) break;
     }
@@ -787,6 +832,7 @@ export function advanceRound(state: CombatState): CombatState {
         state.targetingStance,
         state.priorityTargetIndex,
         checkWinner,
+        state.seed,
       );
       if (winner) break;
     }
@@ -836,14 +882,16 @@ export function outspeedingShipIndices(state: CombatState): { player: number[]; 
 }
 
 // --- Telegraphs (iteration 19) ---------------------------------------------
-// Enemy targeting is deterministic given board state, so next round's
-// OPENING fire is computable before the round is played. Each entry is one
-// enemy ship's first-die pick, made with the exact functions `fireShip`
-// uses (`legalDefenders` + `pickTarget`, against the LIVE roundModifiers —
-// so arming an evade visibly shifts the telegraph before the player
-// commits). Honest limitation for the UI copy: dice retarget
-// mid-activation after kills, so this is the opening picture, not a
-// contract. Pure and read-only: consumes no rng, mutates nothing.
+// Enemy targeting is deterministic given (seed, round, shooter) — a random
+// pick as of 2026-08-08, but computed the same pure way every time (see
+// enemyTargetRng), not drawn from the live dice-roll rng stream — so next
+// round's OPENING fire is still computable before the round is played.
+// Each entry is one enemy ship's first-die pick, made with the exact
+// functions `fireShip` uses (`legalDefenders` + `pickTarget`, against the
+// LIVE roundModifiers — so arming an evade visibly shifts the telegraph
+// before the player commits). Honest limitation for the UI copy: dice
+// retarget mid-activation after kills, so this is the opening picture, not
+// a contract. Pure and read-only: consumes no rng, mutates nothing.
 
 export interface IncomingFire {
   shooterIndex: number; // enemy-side flattened index
@@ -875,7 +923,12 @@ export function incomingFirePreview(state: CombatState): FirePreview {
     if (!isAlive(ship)) continue;
     const weapons = phase === 'missile' ? ship.stats.missiles : ship.stats.cannons;
     if (weapons.length === 0) continue;
-    const target = pickTarget(legalDefenders(state.playerShips, state.roundModifiers), !!weapons[0]?.targetHighest);
+    // 2026-08-08: mirrors fireShip's own enemyRandomRng exactly (same
+    // seed/round/shooter inputs) — this preview runs BEFORE the round it's
+    // previewing, so it can't share a live pick with the real resolution;
+    // computing the identical pure function is how the two agree anyway.
+    const randomRng = ship.stats.targetsLowestHp ? undefined : enemyTargetRng(state.seed, state.round, ship.index);
+    const target = pickTarget(legalDefenders(state.playerShips, state.roundModifiers), !!weapons[0]?.targetHighest, false, randomRng);
     if (!target) continue;
     const outspeed = outspeedingEnemies.has(ship.index);
     const multiplier = outspeed ? 2 : 1;

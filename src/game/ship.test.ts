@@ -217,6 +217,15 @@ describe('protocols — stat and build hooks', () => {
     expect(interceptorSlotsWith).toBe(interceptorSlotsBase);
   });
 
+  it('the Warlord gives the Flagship (cruiser frame) +1 slot, no other frame', () => {
+    const cruiserBase = effectiveSlots('cruiser', [], undefined, undefined);
+    const cruiserWithWarlord = effectiveSlots('cruiser', [], undefined, 'warlord');
+    expect(cruiserWithWarlord).toBe(cruiserBase + 1);
+    const interceptorBase = effectiveSlots('interceptor', [], undefined, undefined);
+    const interceptorWithWarlord = effectiveSlots('interceptor', [], undefined, 'warlord');
+    expect(interceptorWithWarlord).toBe(interceptorBase); // untouched — not the Flagship frame
+  });
+
   it('protocols with no relevant hook leave stats untouched', () => {
     const base = deriveStats('cruiser', ['ion']);
     const withUnrelated = deriveStats('cruiser', ['ion'], [], ['salvage-rigs', 'overspeed-protocols']);

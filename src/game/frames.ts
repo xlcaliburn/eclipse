@@ -45,7 +45,10 @@ export const FRAMES: Record<FrameId, Frame> = {
     name: 'Flagship',
     slots: 6,
     baseInitiative: 0,
-    baseHp: 3,
+    // 2026-08-08: 3 -> 4. Hull plating dropped out of STARTING_LOADOUT
+    // (parts.ts) — its +1 HP moved here instead, onto the frame's own base,
+    // so the starting Flagship's total HP is unchanged.
+    baseHp: 4,
     cost: 14,
     rarity: 'common', // never sold — the starting ship, rarity is unused but required
     blurb: 'Roomy workhorse. 6 slots, slow.',
