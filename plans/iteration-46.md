@@ -1,4 +1,4 @@
-# Iteration 46 — The 50/50 tuning pass (specced 2026-08-08)
+# Iteration 46 — The 30/30 tuning pass (specced 2026-08-08)
 
 > **Status: specced, not implemented.**
 > Requires iteration 45's engine (`npm run balance:full`, the headless
@@ -10,19 +10,24 @@
 
 User direction: "time to tackle the balancing. let's configure it so
 that act 1 should end at a 50% win rate, and act 2 should be 50% as
-well. what areas need the most tuning."
+well. what areas need the most tuning." Revised same session: "lets do
+floor targets at 30/30" — the 50/50 originally requested was meant for a
+skilled human, not the deliberately-suboptimal floor policy this engine
+measures; 30/30 for the floor implies a skilled human clears
+meaningfully more than that, which is the intended reading.
 
 ## The targets
 
-- **Act-1 clear: 50%** (agent, balanced floor policy, n=500 —
+- **Act-1 clear: 30%** (agent, balanced floor policy, n=500 —
   currently 5.6–12.6% depending on commander).
-- **Act-2 conditional clear (given act 1 cleared): 50%** (currently
+- **Act-2 conditional clear (given act 1 cleared): 30%** (currently
   literally 0% — no run in ~1,500+ act-2 samples has ever won).
-- Implied **full-run clear ≈ 25%**.
+- Implied **full-run clear ≈ 9%**.
 - Measurement instrument: `npm run balance:full`. The floor policy is
   deliberately "reasonable, not optimal," so a skilled human will land
-  ABOVE these numbers — 50% for the floor means the game reads as
-  beatable-but-demanding for a real player. (Decision point 1 confirms
+  ABOVE these numbers — 30% for the floor means the game reads as
+  beatable-but-demanding for a real player, with real room for skill to
+  matter. (Decision point 1 confirms
   this interpretation.)
 
 ## What the ledger probe found (2026-08-08, pre-implementation)
@@ -115,7 +120,7 @@ conclusions stand. 46.1 fixes the fixture ceiling anyway.
   attrition hypothesis (fleets reach the boss/act-2 poor and damaged)
   gets numbers, not vibes.
 
-### 46.2 Act 1 → 50% (current: ~6–13%)
+### 46.2 Act 1 → 30% (current: ~6–13%)
 
 In lever order, isolation-swept one at a time via the ledger + a
 500-seed `balance:full` after each:
@@ -136,11 +141,12 @@ In lever order, isolation-swept one at a time via the ledger + a
    lever 2 alone. Re-measure before touching.
 4. **Deliberately NOT touched**: c1–c4 (easy is supposed to be easy),
    Shield cruiser / Interceptor swarm / Plasma tank / Ancient guardian
-   (all in-band), boss stats (87–95% healthy-fleet is right for a
-   50%-clear curve once attrition is fixed — re-measure after levers
-   1–2 and only then consider).
+   (all in-band), boss stats (87–95% healthy-fleet is comfortably above
+   a 30%-clear curve's needs even before attrition is fixed — the
+   bosses were never the bottleneck; re-measure after levers 1–2 to
+   confirm rather than pre-emptively nerf them).
 
-### 46.3 Act 2 conditional → 50% (current: 0%)
+### 46.3 Act 2 conditional → 30% (current: 0%)
 
 1. **The cross-act scaling stack** — the big structural lever.
    Measured: act-1 escalations alone cost ~30pp at act-2 entry, before
@@ -155,7 +161,8 @@ In lever order, isolation-swept one at a time via the ledger + a
    and the counter-protocol already gives act 2 its own signature
    scaling identity.
 2. **The hard pool (c8–11), all four enemies** — re-tune from 0–5% to
-   a 35–60% band against the (46.1-fixed) late fixture, using the
+   a 25–50% band against the (46.1-fixed) late fixture (a real fight
+   feeding a 30% overall corridor, not the wall it is today), using the
    iteration-26/31 method: shield first (the hit-threshold lever),
    then computer, then dice; one stat at a time per enemy. Warden
    (comp 3 / shield 3 / hp 10) and Guardian pair (2× comp 2 shield 2)
@@ -165,12 +172,12 @@ In lever order, isolation-swept one at a time via the ledger + a
    lever 1, re-measure before stat edits. Flak fortress (38% at mid)
    likewise.
 4. **The final trio, LAST** — after 1–3 land, re-measure. The trio
-   must end HARDER than its approach (target ≈ 50% against the
-   then-current entry population, band 40–60%); with weaker average
+   must end HARDER than its approach (target ≈ 30% against the
+   then-current entry population, band 20–40%); with weaker average
    fleets now reaching them, observed rates drop naturally — only buff
    stats if they still sit above the band after the corridor is fixed.
 
-### 46.4 Re-anchor every gate to the 50/50 world
+### 46.4 Re-anchor every gate to the 30/30 world
 
 - `balance.ts` sanity bands re-derived: the failing GCDS/Hive-Mother/
   col-3-elite checks get bands consistent with the new curve (or their
@@ -181,15 +188,17 @@ In lever order, isolation-swept one at a time via the ledger + a
 - `scripts/sim/baseline.json` updated to the achieved rates (real
   numbers, reviewed in diff); the regression gate becomes live for the
   first time.
-- `runSim.ts` gains WARN-level band checks: act-1 clear 40–60%,
-  act-2 conditional 40–60%, full-run 15–35%.
+- `runSim.ts` gains WARN-level band checks: act-1 clear 20–40%,
+  act-2 conditional 20–40%, full-run 4–16% (≈ the product of the two,
+  same logic as the 9% implied target above).
 - PLAN.md standing notes + iteration-44/45 cross-references updated.
 
 ## Decision points (defaults chosen — flag if wrong)
 
-1. **50% is measured with the balanced floor agent.** Skilled humans
-   will clear more often. If the intent was "a skilled human clears
-   50%," the floor targets should be ~30/30 instead — say so.
+1. **RESOLVED — 30/30, not 50/50.** Confirmed same session: the
+   original 50/50 was meant for a skilled human, not the deliberately-
+   suboptimal floor agent this engine measures; 30/30 for the floor
+   leaves real room for a skilled human to clear noticeably more often.
 2. **Act-1 escalations retiring at the act boundary** (46.3 lever 1a)
    reverses iteration 8.4's explicit rule. It's the single biggest
    measured contributor to the act-2 wall and the recommendation, but
@@ -209,8 +218,8 @@ In lever order, isolation-swept one at a time via the ledger + a
 Per milestone: `tsc -b` clean, `vitest run` green (update seeded
 expectations alongside stat changes, never delete), `vite build` clean,
 `npm run balance` exit 0 (WARN/known-FAIL lines documented), and the
-headline: `npm run balance:full` showing act-1 ≈ 50%, act-2
-conditional ≈ 50% within the 40–60 bands. Every sweep's numbers
+headline: `npm run balance:full` showing act-1 ≈ 30%, act-2
+conditional ≈ 30% within the 20–40 bands. Every sweep's numbers
 recorded in this file's status notes. No browser passes.
 
 ## Milestones
@@ -218,8 +227,8 @@ recorded in this file's status notes. No browser passes.
 - **46.1** Ledger committed (+ sweep mode), buildFleet fusion ceiling
   fix, act-2-entry snapshot in AgentRunOutcome.
 - **46.2** Act-1 levers (sniper cliff, attrition rule, re-measures) →
-  act-1 clear 40–60%.
+  act-1 clear 20–40%.
 - **46.3** Act-2 levers (cross-act stack decision, hard-pool re-tune,
-  opening outliers, trio re-measure) → conditional 40–60%.
+  opening outliers, trio re-measure) → conditional 20–40%.
 - **46.4** Gates/bands/baseline re-anchored; all documented FAILs
   either fixed or re-justified against the new curve.
