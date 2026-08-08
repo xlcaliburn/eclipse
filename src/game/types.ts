@@ -318,6 +318,13 @@ export type Phase =
 export interface AmbushBonus {
   credits?: number;
   partId?: PartId;
+  // Iteration 49 (the debt broker / colony ship chains): a win-conditional
+  // side effect beyond credits/a part — applied wherever pendingAmbushBonus
+  // is consumed on a WON fight (reducer.ts's CONTINUE), same as credits/
+  // partId above. Nothing is applied on loss or withdraw (bonus forfeited,
+  // same existing rule). 'debt-cleared' clears RunState.loanOutstanding;
+  // 'colony-defended' sets RunState.colonyStage to 2.
+  chainEffect?: 'debt-cleared' | 'colony-defended';
 }
 
 export interface CurrentEventState {
@@ -406,6 +413,24 @@ export interface RunState {
   // events.ts's drawEvent). Reset to 0 only by the reliquary's sell-out
   // choice — every other decline just leaves the count where it was.
   relicFragments?: 0 | 1 | 2 | 3;
+  // Iteration 49.4 (the debt broker): set by 'debt-broker's "take the loan"
+  // choice (+8cr now). Optional-additive — absent/undefined means no loan,
+  // same as every pre-49 save. Cleared by 'debt-collectors' settling the
+  // debt outright, or by a WON fight against the collectors (see
+  // AmbushBonus.chainEffect: 'debt-cleared'). Left set by a declined fight
+  // or a withdraw — the collectors just come back on a later 50% roll (see
+  // events.ts's drawEvent).
+  loanOutstanding?: boolean;
+  // Iteration 49.5 (the colony ship): tracks the chain's three beats.
+  // Absent means the chain never started, or already finished/lapsed.
+  // 1 = escorted, the raiders beat is now live; 2 = the raiders were driven
+  // off (won), the arrival payoff is now live; the payoff choice clears it
+  // back to absent. Set to 1 by 'colony-ship's escort choice; set to 2 only
+  // by a WON fight against the raiders (AmbushBonus.chainEffect:
+  // 'colony-defended') — 'colony-raiders' itself clears this at CHOICE time
+  // regardless of option picked, so a withdraw or loss ends the chain (see
+  // events.ts's drawEvent/resolveEventChoice).
+  colonyStage?: 1 | 2;
   // Set by EVENT_CONTINUE when an event choice's ambush carries a
   // win-conditional bonus (see `AmbushBonus`); consumed and cleared by
   // CONTINUE once that combat resolves, win or lose.

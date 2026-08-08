@@ -10,6 +10,7 @@ import { MAX_HEAT } from './heat';
 import { bossColumn, globalColumn, laneColumns } from './map';
 import { getProtocol } from './protocols';
 import type { CargoTag, GameMap, MapPosition, NodeType } from './map';
+import type { EventId } from './events';
 import { CAPTURED_SCHEMATIC_PART_ID, getPart } from './parts';
 import { deriveStats, equippedWeaponCount } from './ship';
 import { getUpgrade } from './upgrades';
@@ -1480,7 +1481,7 @@ describe('ambush win bonus (14.2/14.3)', () => {
   it('EVENT_CONTINUE carries the resolved ambush bonus onto RunState.pendingAmbushBonus', () => {
     let state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'distress-beacon' } });
     state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 }); // drive the raiders off
-    expect(state.currentEvent?.ambushBonus?.credits).toBe(6);
+    expect(state.currentEvent?.ambushBonus?.credits).toBe(2); // 2026-08-08: retuned down from 6
 
     const result = runReducer(state, { type: 'EVENT_CONTINUE' });
     expect(result.phase).toBe('prep');
@@ -3637,5 +3638,208 @@ describe('iteration 32.3: the pursuit clock', () => {
     const result = runReducer(state, { type: 'PICK_NODE', row: 0 });
     expect(result.interceptionActive).toBe(true);
     expect(result.phase).toBe('prep');
+  });
+});
+
+// =========================================================================
+// Iteration 49: stage-gated event pool + two quest chains (debt broker,
+// colony ship). Exhaustive drawEvent-level stage-filtering/priority sweeps
+// live in events.test.ts; these are reducer-level integration checks —
+// the PICK_NODE call-site regression, and each chain's EVENT_CHOOSE/
+// CONTINUE wiring end to end.
+// =========================================================================
+
+describe('PICK_NODE — 49.1 regression: drawEvent uses the ENTERED node column', () => {
+  it('an event node at column 4 draws from the mid pool even though pre-move state.position.col is 3', () => {
+    const base = stateWithMap('combat');
+    const map = forceNodeType(base.map, 4, 0, 'event', base.act);
+    // Events that only ever appear in the 'early' stage — if the reducer
+    // mistakenly drew from pre-move state.position (col 3, still early),
+    // one of these could show up at this column-4 node.
+    const earlyOnly: EventId[] = ['customs-checkpoint', 'war-surplus-peddler', 'nav-buoy', 'debt-broker', 'colony-ship'];
+    for (let seed = 1; seed <= 100; seed++) {
+      const state: RunState = { ...base, map: { ...map, seed }, position: { col: 3, row: 0 }, rngCounter: 0 };
+      const result = runReducer(state, { type: 'PICK_NODE', row: 0 }); // defaults targetCol to position.col + 1 = 4
+      expect(result.currentEvent).toBeDefined();
+      expect(earlyOnly).not.toContain(result.currentEvent!.eventId);
+    }
+  });
+});
+
+describe('iteration 49.4: the debt broker chain', () => {
+  it('taking the loan sets loanOutstanding and grants 8 credits (EVENT_CHOOSE, end to end)', () => {
+    const state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'debt-broker' }, credits: 0 });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    expect(result.loanOutstanding).toBe(true);
+    expect(result.credits).toBe(8);
+  });
+
+  it('settling the debt clears loanOutstanding', () => {
+    const state = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'debt-collectors' },
+      loanOutstanding: true,
+      credits: 12,
+    });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 });
+    expect(result.loanOutstanding).toBeUndefined();
+    expect(result.credits).toBe(0);
+  });
+
+  it('cloaking away keeps the debt outstanding', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: ['cloak'], damage: 0, upgrades: [] }];
+    const state = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'debt-collectors' },
+      loanOutstanding: true,
+      fleet,
+    });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 2 });
+    expect(result.loanOutstanding).toBe(true);
+  });
+
+  it('EVENT_CONTINUE carries the debt-cleared chainEffect onto RunState.pendingAmbushBonus', () => {
+    let state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'debt-collectors' }, loanOutstanding: true });
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 }); // fight the enforcers
+    expect(state.currentEvent?.ambushBonus).toEqual({ chainEffect: 'debt-cleared' });
+
+    const result = runReducer(state, { type: 'EVENT_CONTINUE' });
+    expect(result.phase).toBe('prep');
+    expect(result.pendingAmbushBonus).toEqual({ chainEffect: 'debt-cleared' });
+  });
+
+  it('winning the enforcer fight clears the debt via chainEffect (a real ambush -> CONTINUE win, the ambush-bonus precedent)', () => {
+    const enemy = GAUNTLET[0];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      enemy,
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const base = stateWithMap('event');
+    const state: RunState = {
+      ...base,
+      map: forceNodeType(base.map, 1, 0, 'event', base.act),
+      phase: 'combat',
+      position: { col: 1, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      currentEnemy: enemy,
+      combat: wonCombat,
+      loanOutstanding: true,
+      pendingAmbushBonus: { chainEffect: 'debt-cleared' },
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('reward');
+    expect(result.loanOutstanding).toBeUndefined();
+    expect(result.pendingAmbushBonus).toBeUndefined();
+  });
+
+  it('losing the enforcer fight leaves the debt outstanding — no chainEffect applies on a loss', () => {
+    const enemy = GAUNTLET[0];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      enemy,
+      1,
+    );
+    const lostCombat = { ...combat, winner: 'enemy' as const };
+    const base = stateWithMap('event');
+    const state: RunState = {
+      ...base,
+      map: forceNodeType(base.map, 1, 0, 'event', base.act),
+      phase: 'combat',
+      position: { col: 1, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      currentEnemy: enemy,
+      combat: lostCombat,
+      loanOutstanding: true,
+      pendingAmbushBonus: { chainEffect: 'debt-cleared' },
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('defeat');
+    expect(result.loanOutstanding).toBe(true);
+  });
+});
+
+describe('iteration 49.5: the colony ship chain', () => {
+  it('escorting the convoy sets colonyStage to 1 (EVENT_CHOOSE, end to end)', () => {
+    const state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'colony-ship' } });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    expect(result.colonyStage).toBe(1);
+  });
+
+  it("letting the raiders happen clears colonyStage — the chain ends", () => {
+    const state = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'colony-raiders' },
+      colonyStage: 1,
+    });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 0 });
+    expect(result.colonyStage).toBeUndefined();
+  });
+
+  it('choosing to drive the raiders off clears colonyStage immediately, at choice time', () => {
+    const state = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'colony-raiders' },
+      colonyStage: 1,
+    });
+    const result = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    expect(result.colonyStage).toBeUndefined();
+    expect(result.currentEvent?.ambushBonus).toEqual({ chainEffect: 'colony-defended' });
+  });
+
+  it('winning the raider fight restores colonyStage to 2 via chainEffect (a real ambush -> CONTINUE win)', () => {
+    const enemy = GAUNTLET[0];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      enemy,
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const base = stateWithMap('event');
+    const state: RunState = {
+      ...base,
+      map: forceNodeType(base.map, 1, 0, 'event', base.act),
+      phase: 'combat',
+      position: { col: 1, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      currentEnemy: enemy,
+      combat: wonCombat,
+      colonyStage: undefined, // cleared at EVENT_CHOOSE time, per the fiction
+      pendingAmbushBonus: { chainEffect: 'colony-defended' },
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('reward');
+    expect(result.colonyStage).toBe(2);
+  });
+
+  it('withdrawing from the raider ambush forfeits the chainEffect — colonyStage stays cleared, chain dead', () => {
+    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
+    state = {
+      ...state,
+      phase: 'combat',
+      colonyStage: undefined, // already cleared at the colony-raiders choice
+      pendingAmbushBonus: { chainEffect: 'colony-defended' },
+      combat: { ...freshCombat(), round: 1 },
+    };
+    const result = runReducer(state, { type: 'WITHDRAW' });
+    expect(result.colonyStage).toBeUndefined();
+    expect(result.pendingAmbushBonus).toBeUndefined();
+  });
+
+  it('the founders\' gift and the cash settlement both clear colonyStage, only late-stage arrival reachable', () => {
+    const founders = runReducer(
+      stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'colony-arrival' }, colonyStage: 2, credits: 0 }),
+      { type: 'EVENT_CHOOSE', choiceIndex: 0 },
+    );
+    expect(founders.colonyStage).toBeUndefined();
+    expect(founders.credits).toBe(10);
+
+    const cash = runReducer(
+      stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'colony-arrival' }, colonyStage: 2, credits: 0 }),
+      { type: 'EVENT_CHOOSE', choiceIndex: 1 },
+    );
+    expect(cash.colonyStage).toBeUndefined();
+    expect(cash.credits).toBe(14);
   });
 });

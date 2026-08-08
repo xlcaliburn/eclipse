@@ -482,6 +482,7 @@ export function Wiki() {
               <thead>
                 <tr>
                   <th>Event</th>
+                  <th>Stage</th>
                   <th>Options</th>
                 </tr>
               </thead>
@@ -489,6 +490,7 @@ export function Wiki() {
                 {EVENTS.map((e) => (
                   <tr key={e.id}>
                     <td>{e.title}</td>
+                    <td>{e.stages.join(', ')}</td>
                     <td>
                       <ul className="wiki-options">
                         {e.options.map((o, i) => (

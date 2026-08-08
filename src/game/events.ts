@@ -11,7 +11,7 @@ import { addHeat } from './heat';
 import { actColumns, globalColumn } from './map';
 import type { MapPosition } from './map';
 import { applyRepairBanking, deriveFleetStats, deriveStats } from './ship';
-import { ANCIENT_ARTIFACT_PART_ID, getPart } from './parts';
+import { ANCIENT_ARTIFACT_PART_ID, getPart, isSalvageablePart, PARTS } from './parts';
 import { getFrame } from './frames';
 import type { FrameId } from './frames';
 import type { ProtocolId } from './protocols';
@@ -36,7 +36,29 @@ export type EventId =
   | 'salvage-claim'
   | 'relic-signal'
   | 'relic-vault'
-  | 'relic-core';
+  | 'relic-core'
+  // Iteration 49: three low-risk early events (49.3) —
+  | 'customs-checkpoint'
+  | 'war-surplus-peddler'
+  | 'nav-buoy'
+  // — and two quest chains (49.4/49.5).
+  | 'debt-broker'
+  | 'debt-collectors'
+  | 'colony-ship'
+  | 'colony-raiders'
+  | 'colony-arrival';
+
+// Iteration 49.1: which slice of the run an event node belongs to, keyed
+// off the entered node's GLOBAL column (act 1 as-is, act 2 offset — see
+// map.ts's globalColumn). Bands are deliberately kept in this one function
+// so the boundaries stay a single knob to retune: early = the first one-
+// or-two event slots (act-1 cols 1-3), mid = the rest of act 1 (cols 4-9),
+// late = all of act 2 (global 11+, since act 2 col 0 is already global 11).
+export type EventStage = 'early' | 'mid' | 'late';
+export function eventStage(act: 1 | 2, col: number): EventStage {
+  const g = globalColumn(act, col);
+  return g <= 3 ? 'early' : g <= 10 ? 'mid' : 'late';
+}
 
 // --- Requirement predicate library (14.1) -----------------------------
 // A small reusable set, deliberately limited to what the 14.2 content table
@@ -48,6 +70,7 @@ export type EventRequirement =
   | { kind: 'anyShipComputerAtLeast'; value: number }
   | { kind: 'framePresent'; frameId: FrameId }
   | { kind: 'inventoryAtLeast'; value: number }
+  | { kind: 'inventoryAtMost'; value: number }
   | { kind: 'creditsAtLeast'; value: number };
 
 export function meetsRequirement(req: EventRequirement, state: RunState): boolean {
@@ -65,6 +88,10 @@ export function meetsRequirement(req: EventRequirement, state: RunState): boolea
       return state.fleet.some((s) => s.frameId === req.frameId);
     case 'inventoryAtLeast':
       return state.inventory.length >= req.value;
+    // 49.2: the inverse of inventoryAtLeast — "nothing loose in the hold"
+    // (customs-checkpoint's "nothing to declare"), not spare capacity.
+    case 'inventoryAtMost':
+      return state.inventory.length <= req.value;
     case 'creditsAtLeast':
       return state.credits >= req.value;
     default:
@@ -101,6 +128,8 @@ export function describeRequirement(req: EventRequirement): string {
       return `requires ${req.value}+ credits`;
     case 'inventoryAtLeast':
       return `requires ${req.value}+ spare part${req.value === 1 ? '' : 's'}`;
+    case 'inventoryAtMost':
+      return `requires ${req.value} or fewer spare parts`;
     default:
       return '';
   }
@@ -127,6 +156,14 @@ export interface EventDef {
   title: string;
   flavor: string;
   options: EventOption[];
+  // 49.1: an explicit list (not min/max) so the table reads at a glance and
+  // can't be misread. For chain-continuation events that never enter the
+  // random pool (defector-pursuit / relic-vault / relic-core /
+  // debt-collectors / colony-raiders / colony-arrival) this is
+  // documentation only — the stages the chain can actually fire them in —
+  // since drawEvent's continuation checks bypass the stage-filtered pool
+  // entirely.
+  stages: EventStage[];
 }
 
 export const EVENTS: EventDef[] = [
@@ -134,6 +171,7 @@ export const EVENTS: EventDef[] = [
     id: 'derelict-cruiser',
     title: 'Derelict cruiser',
     flavor: 'A gutted hull drifts in the dark, systems long dead.',
+    stages: ['early', 'mid'], // small numbers; a dead node by act 2
     options: [
       { label: 'Salvage the hull (+4 credits)' },
       { label: 'Crack the reactor — pick a ship to board it; the housing looks ready to arc', chooseShip: true },
@@ -147,6 +185,7 @@ export const EVENTS: EventDef[] = [
     id: 'asteroid-field',
     title: 'Asteroid field',
     flavor: 'A dense field blocks the direct route.',
+    stages: ['early', 'mid'], // same
     options: [
       // 2026-08-07 bug fix: this had no requirement — every other
       // negative-credit option in this file gates on 'creditsAtLeast'
@@ -164,6 +203,7 @@ export const EVENTS: EventDef[] = [
     id: 'ancient-cache',
     title: 'Ancient cache',
     flavor: 'A sealed Ancient container, still humming with power.',
+    stages: ['mid', 'late'], // the risky path is an ELITE fight
     options: [
       { label: 'Leave it sealed' },
       // 2026-08-07: made explicit that this draws an ELITE-strength
@@ -180,6 +220,7 @@ export const EVENTS: EventDef[] = [
     id: 'abandoned-arsenal',
     title: 'Abandoned arsenal',
     flavor: 'Racks of unused ship parts line the walls, stripped from wrecks and never claimed.',
+    stages: ['early', 'mid'], // same
     options: [
       { label: 'Sell the scrap (+3 credits)' },
       { label: 'Take a crate — a part, sight unseen' },
@@ -189,6 +230,7 @@ export const EVENTS: EventDef[] = [
     id: 'intercepted-signal',
     title: 'Intercepted signal',
     flavor: 'Encrypted chatter about enemy fleet movements crosses your scanners.',
+    stages: ['mid', 'late'], // escalation reveals matter once the run has shape
     options: [
       { label: 'Sell the codes (+5 credits)' },
       { label: 'Decrypt it — reveal the next escalation' },
@@ -202,6 +244,7 @@ export const EVENTS: EventDef[] = [
     id: 'recon-probe',
     title: 'Recon probe',
     flavor: 'A dormant scout drone, still fuelled.',
+    stages: ['early', 'mid', 'late'], // map intel is good at any depth
     options: [
       { label: 'Strip it for parts (+4 credits)' },
       { label: "Launch it — chart the next column's enemies and node types" },
@@ -215,6 +258,7 @@ export const EVENTS: EventDef[] = [
     id: 'sabotage-raid',
     title: 'Shipyard raid',
     flavor: 'A crippled enemy shipyard, still guarded but weakly.',
+    stages: ['mid', 'late'], // escalation cancel + chip damage
     options: [
       { label: 'Move on (+3 credits)' },
       {
@@ -231,6 +275,7 @@ export const EVENTS: EventDef[] = [
     id: 'defector',
     title: 'Defector pilot',
     flavor: 'An enemy pilot signals for asylum, offering everything they know.',
+    stages: ['mid', 'late'], // the pursuit draws from HARD_POOL — lethal early
     options: [
       { label: 'Turn them in (+6 credits)' },
       { label: 'Take them aboard — reveal every escalation; their old wing will come looking' },
@@ -241,6 +286,10 @@ export const EVENTS: EventDef[] = [
     // "take them aboard" choice, one node later (RunState.pendingEventId).
     id: 'defector-pursuit',
     title: 'The pursuit',
+    // Continuation-only (RunState.pendingEventId), fired the very next
+    // event node after 'defector' — reachable only mid/late since
+    // 'defector' itself never draws early.
+    stages: ['mid', 'late'],
     flavor: 'Their old wing has tracked you down.',
     options: [
       { label: 'Stand and fight — a hunt squad drops out of warp' },
@@ -258,6 +307,16 @@ export const EVENTS: EventDef[] = [
     id: 'distress-beacon',
     title: 'Distress beacon',
     flavor: 'A weak signal repeats on an open channel — someone is under fire nearby.',
+    // 2026-08-08: re-tuned from a 6-credit ambush bonus after a playtest
+    // report — the fight itself draws from EASY_POOL (trivial risk), but
+    // winning it used to pay winReward(col) + 6cr + a free 5cr-tier part,
+    // landing within 2cr of a genuine ELITE's total payout (eliteReward(col)
+    // + 4cr bonus + a guaranteed part) for a fraction of the danger. +2cr
+    // keeps "fight for it" clearly better than the no-fight "lure it away"
+    // option (a flat +4cr with zero risk) once the part's value is counted,
+    // without pricing an easy fight at elite rates. See
+    // plans/iteration-50.md's reward-tier audit.
+    stages: ['early', 'mid', 'late'], // easy-pool fight, low-tier reward
     options: [
       { label: 'Ignore it' },
       { label: "Drive the raiders off — the beacon's owner is still fighting" },
@@ -271,6 +330,7 @@ export const EVENTS: EventDef[] = [
     id: 'repair-tender',
     title: 'Repair tender',
     flavor: 'A civilian tender offers field repairs, for a price.',
+    stages: ['mid', 'late'], // needs accumulated damage + credits
     options: [
       { label: 'Move on' },
       {
@@ -298,6 +358,7 @@ export const EVENTS: EventDef[] = [
     id: 'salvage-claim',
     title: 'Unclaimed wreck field',
     flavor: 'A debris field drifts unclaimed — real salvage, if you loiter long enough to strip it.',
+    stages: ['mid', 'late'], // heat economy is a mid-game lever
     options: [
       { label: 'Leave it — no sense lingering' },
       { label: 'Strip the field (+8 credits, +1 heat)' },
@@ -308,6 +369,7 @@ export const EVENTS: EventDef[] = [
     id: 'militia-requisition',
     title: 'Militia requisition',
     flavor: 'A local militia post is collecting spare ship parts for the front.',
+    stages: ['mid', 'late'], // needs spare inventory — the original complaint
     options: [
       { label: 'Refuse' },
       {
@@ -329,6 +391,7 @@ export const EVENTS: EventDef[] = [
     id: 'relic-signal',
     title: 'Ancient beacon',
     flavor: 'A repeating signal pulses from a dead hulk, far older than the war.',
+    stages: ['early', 'mid'], // the chain needs runway to finish; already excluded once taken
     options: [
       { label: 'Walk away — sell the coordinates (+4 credits)' },
       { label: 'Take the fragment — prying it loose lights up every scanner in the sector (+1 heat)' },
@@ -339,6 +402,9 @@ export const EVENTS: EventDef[] = [
     // continuation check once relicFragments === 1.
     id: 'relic-vault',
     title: 'The sealed vault',
+    // Continuation-only — no stage restriction on the relic chain's own
+    // roll, so this can fire at any stage the chain happens to be live at.
+    stages: ['early', 'mid', 'late'],
     flavor: 'The fragment in your hold resonates, pulling you toward a derelict vault sealed since before the war.',
     options: [
       { label: "Strip the vault's fittings instead (+5 credits)" },
@@ -357,6 +423,7 @@ export const EVENTS: EventDef[] = [
     // continuation check once relicFragments === 2.
     id: 'relic-core',
     title: 'The reliquary',
+    stages: ['early', 'mid', 'late'], // continuation-only, same as relic-vault
     flavor: "Two fragments hum in your hold as you close on a collector's automated reliquary — the final piece is close.",
     options: [
       { label: 'Sell your two fragments to the reliquary (+10 credits)' },
@@ -365,6 +432,117 @@ export const EVENTS: EventDef[] = [
         requirement: { kind: 'creditsAtLeast', value: 8 },
       },
       { label: 'Take it by force — the reliquary screams an alarm (+2 heat)' },
+    ],
+  },
+  // --- Iteration 49: three low-risk early events (49.3) -------------------
+  // Deliberately tiny — they teach a system or hand out pocket change, and
+  // age out of the pool after column 3 (stages: ['early']).
+  {
+    id: 'customs-checkpoint',
+    title: 'Customs picket',
+    flavor: 'A militia customs picket straddles the lane, waving traffic into an inspection queue.',
+    stages: ['early'],
+    options: [
+      { label: 'Pay the toll (-1 credit)', requirement: { kind: 'creditsAtLeast', value: 1 } },
+      { label: 'Slip past the picket (+1 heat)' },
+      {
+        // The inverse of militia-requisition's problem: a requirement the
+        // player actually MEETS early (an empty hold is the default state).
+        label: 'Nothing to declare — an empty hold is waved through',
+        requirement: { kind: 'inventoryAtMost', value: 0 },
+        reqText: 'requires an empty cargo hold',
+      },
+    ],
+  },
+  {
+    id: 'war-surplus-peddler',
+    title: 'War-surplus peddler',
+    flavor: 'A tramp freighter flags you down, hold full of surplus of dubious provenance.',
+    stages: ['early'],
+    options: [
+      { label: 'Move on' },
+      {
+        label: 'Buy a mystery crate (-2 credits)',
+        requirement: { kind: 'creditsAtLeast', value: 2 },
+      },
+      { label: 'Sell them your scrap (+2 credits)' },
+    ],
+  },
+  {
+    id: 'nav-buoy',
+    title: 'Old navigation buoy',
+    flavor: 'A pre-war navigation buoy still blinks its survey beacon on a dead frequency.',
+    stages: ['early'],
+    options: [
+      { label: 'Scrap it (+2 credits)' },
+      { label: "Pull its charts — reveal every node in the next column" },
+    ],
+  },
+  // --- Iteration 49.4: the debt broker (risk-inverted — money now, cost
+  // later) --------------------------------------------------------------
+  {
+    id: 'debt-broker',
+    title: 'The debt broker',
+    flavor: 'A licensed credit broker hails you — fleet expansion capital, generous terms, minimal paperwork.',
+    stages: ['early'],
+    options: [
+      { label: 'Decline politely' },
+      { label: 'Take the loan (+8 credits — repayment of 12, collected "whenever we find you")' },
+    ],
+  },
+  {
+    // Never drawn from the random pool — only reached via drawEvent's
+    // continuation check while loanOutstanding is set, mid/late only.
+    id: 'debt-collectors',
+    title: 'The collectors',
+    flavor: 'The broker\'s enforcers drop out of warp, ledger in hand — 12 credits, due now.',
+    stages: ['mid', 'late'],
+    options: [
+      {
+        label: 'Settle the debt (-12 credits)',
+        requirement: { kind: 'creditsAtLeast', value: 12 },
+      },
+      { label: 'Fight the enforcers' },
+      {
+        label: 'Cloaking field: slip away',
+        requirement: { kind: 'partEquipped', partId: 'cloak' },
+      },
+    ],
+  },
+  // --- Iteration 49.5: the colony ship (kindness compounds across three
+  // beats) ----------------------------------------------------------------
+  {
+    id: 'colony-ship',
+    title: 'The colony ship',
+    flavor: 'A slow colony convoy crawls across your scanners — holds full of settlers, engines older than the war.',
+    stages: ['early'],
+    options: [
+      { label: 'Sell them your survey charts (+3 credits)' },
+      { label: "Escort them through the debris belt — costs you nothing but time; they'll remember" },
+    ],
+  },
+  {
+    // Never drawn from the random pool — only reached via drawEvent's
+    // continuation check while colonyStage === 1, mid/late only.
+    id: 'colony-raiders',
+    title: "The convoy's distress call",
+    flavor: "The convoy's distress call cuts through — raiders are on them, and yours is the only gun in range.",
+    stages: ['mid', 'late'],
+    options: [
+      { label: "Let it happen — some fights aren't yours" },
+      { label: 'Drive the raiders off' },
+    ],
+  },
+  {
+    // Never drawn from the random pool — only reached via drawEvent's
+    // continuation check while colonyStage === 2, late only.
+    id: 'colony-arrival',
+    title: 'The colony makes orbit',
+    flavor: 'The colony ship makes orbit at last — and the whole settlement knows whose guns got them there.',
+    stages: ['late'],
+    options: [
+      { label: "The founders' gift (+10 credits and a part from their stores)" },
+      { label: 'Cash settlement (+14 credits)' },
     ],
   },
 ];
@@ -378,13 +556,19 @@ export function getEvent(id: EventId): EventDef {
   return EVENTS_BY_ID[id];
 }
 
-// The defector's pursuit is only ever reached via RunState.pendingEventId
-// (set by `defector`'s "take them aboard" choice); relic-vault/relic-core
-// are only ever reached via drawEvent's continuation check below — none
-// of the three ever enters the random pool a normal node draw picks from.
-const RANDOM_EVENTS: EventDef[] = EVENTS.filter(
-  (e) => e.id !== 'defector-pursuit' && e.id !== 'relic-vault' && e.id !== 'relic-core',
-);
+// The defector's pursuit, the relic chain's vault/core, and the two 49.x
+// chains' continuation stages are only ever reached via RunState.
+// pendingEventId or drawEvent's continuation checks below — none of them
+// ever enters the random pool a normal node draw picks from.
+const CONTINUATION_ONLY_IDS = new Set<EventId>([
+  'defector-pursuit',
+  'relic-vault',
+  'relic-core',
+  'debt-collectors',
+  'colony-raiders',
+  'colony-arrival',
+]);
+const RANDOM_EVENTS: EventDef[] = EVENTS.filter((e) => !CONTINUATION_ONLY_IDS.has(e.id));
 
 // Iteration 34 (the relic chain, 34.2): once the chain has started
 // (relicFragments 1 or 2) and isn't complete, every event-node draw first
@@ -400,16 +584,36 @@ const RANDOM_EVENTS: EventDef[] = EVENTS.filter(
 // a bare `excludeId`) is now the parameter because both fragment state and
 // lastEventId are needed here — see reducer.ts's PICK_NODE event branch,
 // the single call site.
-export function drawEvent(rng: RngFn, state: RunState): EventId {
+//
+// Iteration 49.1: `col` is the ENTERED node's act-local column (not
+// pre-move state.position — see reducer.ts's PICK_NODE, the one call
+// site) and drives both the stage-filtered pool below and the two new
+// chains' continuation checks. Priority order is relic -> debt -> colony,
+// FIRST ELIGIBLE CHAIN WINS the node's one continuation roll — an earlier
+// chain that's live (its condition holds) shadows a later one entirely
+// this node, whether or not its own roll actually hits. This keeps the
+// relic chain's own behavior byte-compatible (still just the one
+// unconditional `if` up front) while giving debt/colony their own turn
+// only when the relic chain isn't currently mid-flight. Pending chains
+// that get shadowed just wait for their next eligible event node.
+export function drawEvent(rng: RngFn, state: RunState, col: number): EventId {
+  const stage = eventStage(state.act, col);
   const fragments = state.relicFragments ?? 0;
   if (fragments === 1 || fragments === 2) {
     if (rng() < 0.5) return fragments === 1 ? 'relic-vault' : 'relic-core';
+  } else if (state.loanOutstanding && stage !== 'early') {
+    if (rng() < 0.5) return 'debt-collectors';
+  } else if (state.colonyStage === 1 && stage !== 'early') {
+    if (rng() < 0.5) return 'colony-raiders';
+  } else if (state.colonyStage === 2 && stage === 'late') {
+    if (rng() < 0.5) return 'colony-arrival';
   }
   const excluded = new Set<EventId>();
   if (state.lastEventId) excluded.add(state.lastEventId);
   if (fragments > 0) excluded.add('relic-signal');
-  const pool = RANDOM_EVENTS.filter((e) => !excluded.has(e.id));
-  const options = pool.length > 0 ? pool : RANDOM_EVENTS;
+  const stagePool = RANDOM_EVENTS.filter((e) => e.stages.includes(stage));
+  const pool = stagePool.filter((e) => !excluded.has(e.id));
+  const options = pool.length > 0 ? pool : stagePool.length > 0 ? stagePool : RANDOM_EVENTS;
   return options[Math.floor(rng() * options.length)].id;
 }
 
@@ -423,6 +627,14 @@ const FIVE_CREDIT_PARTS: PartId[] = ['plasma', 'missile', 'comp2', 'shield2', 'h
 // Epic, with one legendary mixed in — only ever drawn for a fight against
 // a genuine elite-strength enemy (eliteVariant), never a regular one.
 const ELITE_CACHE_PARTS: PartId[] = ['comp3', 'init3', 'shield3', 'hull3', 'shieldharmonic'];
+// 49.3 (war-surplus-peddler's mystery crate): capped at common so it can't
+// shortcut the shop economy — the commodity lot / Ancient artifact /
+// captured schematic specials are never in `PARTS` to begin with (see
+// isSalvageablePart's own note in parts.ts), so this filter already
+// excludes them without needing a hand-list.
+const COMMON_CRATE_PARTS: PartId[] = PARTS.filter((p) => p.rarity === 'common' && isSalvageablePart(p.id)).map(
+  (p) => p.id,
+);
 
 function clampCredits(credits: number): number {
   return Math.max(0, credits);
@@ -767,7 +979,7 @@ export function resolveEventChoice(
           state,
           outcomeText: `You peel off toward the beacon. Win, and its owner rewards you with credits and a ${getPart(partId).name}.`,
           ambushEnemy: easyRaidersForAmbush(state.act, rng),
-          ambushBonus: { credits: 6, partId },
+          ambushBonus: { credits: 2, partId },
         };
       }
       // choiceIndex 2: lure beacon — no fight.
@@ -906,6 +1118,135 @@ export function resolveEventChoice(
           inventory: [...state.inventory, ANCIENT_ARTIFACT_PART_ID],
         },
         outcomeText: 'You take the final fragment by force — the reliquary screams an alarm. The Ancient artifact is assembled.',
+      };
+    }
+
+    case 'customs-checkpoint': {
+      if (choiceIndex === 0) {
+        return pay(state, -1, 'You pay the toll and pass through.');
+      }
+      if (choiceIndex === 1) {
+        return {
+          state: { ...state, heat: addHeat(state.heat, 1) },
+          outcomeText: 'You slip past the picket — the extra attention costs a point of heat.',
+        };
+      }
+      // choiceIndex 2: nothing to declare — an empty hold is waved through.
+      return { state, outcomeText: 'Your hold is empty. The picket waves you through without a second look.' };
+    }
+
+    case 'war-surplus-peddler': {
+      if (choiceIndex === 0) {
+        return { state, outcomeText: 'You move on.' };
+      }
+      if (choiceIndex === 1) {
+        const partId = randomPart(rng, COMMON_CRATE_PARTS);
+        return {
+          state: {
+            ...state,
+            credits: clampCredits(state.credits - 2),
+            inventory: [...state.inventory, partId],
+          },
+          outcomeText: `You buy a mystery crate for 2 credits — inside, a ${getPart(partId).name}.`,
+        };
+      }
+      // choiceIndex 2: sell them your scrap.
+      return pay(state, 2, 'You sell them your scrap for 2 credits.');
+    }
+
+    case 'nav-buoy': {
+      if (choiceIndex === 0) {
+        return pay(state, 2, 'You scrap the buoy for 2 credits.');
+      }
+      // choiceIndex 1: pull its charts — reveal every node in the next column.
+      const nextCol = (state.position?.col ?? -1) + 1;
+      const revealedNodes = mergeRevealed(state.revealedNodes, columnPositions(state, nextCol));
+      return {
+        state: { ...state, revealedNodes },
+        outcomeText: 'You pull the buoy\'s charts — every node in the next column is now visible.',
+      };
+    }
+
+    case 'debt-broker': {
+      if (choiceIndex === 0) {
+        return { state, outcomeText: 'You decline politely.' };
+      }
+      // choiceIndex 1: take the loan.
+      return {
+        state: { ...state, credits: clampCredits(state.credits + 8), loanOutstanding: true },
+        outcomeText: 'You take the loan — 8 credits now, 12 owed "whenever we find you."',
+      };
+    }
+
+    case 'debt-collectors': {
+      if (choiceIndex === 0) {
+        return {
+          state: { ...state, credits: clampCredits(state.credits - 12), loanOutstanding: undefined },
+          outcomeText: 'You settle the debt in full for 12 credits. The ledger is clear.',
+        };
+      }
+      if (choiceIndex === 1) {
+        // 49.4: `loanOutstanding` stays set at choice time — cleared only
+        // via the ambush's win-conditional chainEffect (see AmbushBonus).
+        // A withdraw or loss leaves the debt live; the collectors return
+        // on a later 50% roll — deliberate, the loan's teeth.
+        return {
+          state,
+          outcomeText: 'You turn to fight the enforcers. Win, and the debt is cleared for good.',
+          ambushEnemy: huntSquadForAmbush(state.act, rng),
+          ambushBonus: { chainEffect: 'debt-cleared' },
+        };
+      }
+      // choiceIndex 2: cloaking field — slip away, debt stays outstanding.
+      return { state, outcomeText: 'Your cloak flickers online and the collectors sweep past. They will be back.' };
+    }
+
+    case 'colony-ship': {
+      if (choiceIndex === 0) {
+        return pay(state, 3, 'You sell them your survey charts for 3 credits.');
+      }
+      // choiceIndex 1: escort them through the debris belt.
+      return {
+        state: { ...state, colonyStage: 1 },
+        outcomeText: "You escort the convoy clear of the debris belt — it costs nothing, but they'll remember.",
+      };
+    }
+
+    case 'colony-raiders': {
+      if (choiceIndex === 0) {
+        return {
+          state: { ...state, colonyStage: undefined },
+          outcomeText: "You let it happen — some fights aren't yours. The convoy is on its own.",
+        };
+      }
+      // choiceIndex 1: drive the raiders off. `colonyStage` clears at
+      // choice time (a withdraw means the convoy scattered, chain dead)
+      // and is only restored to 2 via the ambush's chainEffect on a win.
+      return {
+        state: { ...state, colonyStage: undefined },
+        outcomeText: 'You peel off to drive the raiders from the convoy. Win, and the colonists remember your name.',
+        ambushEnemy: easyRaidersForAmbush(state.act, rng),
+        ambushBonus: { chainEffect: 'colony-defended' },
+      };
+    }
+
+    case 'colony-arrival': {
+      if (choiceIndex === 0) {
+        const partId = randomPart(rng, FIVE_CREDIT_PARTS);
+        return {
+          state: {
+            ...state,
+            credits: state.credits + 10,
+            inventory: [...state.inventory, partId],
+            colonyStage: undefined,
+          },
+          outcomeText: `The founders gift you 10 credits and a ${getPart(partId).name} from their stores.`,
+        };
+      }
+      // choiceIndex 1: cash settlement.
+      return {
+        state: { ...state, credits: state.credits + 14, colonyStage: undefined },
+        outcomeText: 'The settlement wires over a 14-credit cash payment.',
       };
     }
 

@@ -241,6 +241,16 @@ export function eliteReward(col: number, act: 1 | 2 = 1): number {
   return act === 2 ? base + ACT2_REWARD_BONUS : base;
 }
 
+// Iteration 50 (the reward-tier guardrail): pulled out of the CONTINUE
+// case's inline ternary and exported so rewardTiers.ts's manifest can
+// measure these bonuses off the real constant instead of a hand-copied
+// number — the same "one source of truth" discipline BASE_COMMAND_POINTS
+// follows for the prep screen (iteration 48). A copied literal drifting
+// from this value is exactly how distress-beacon's own payout drifted
+// from design intent in the first place (see plans/iteration-50.md).
+export const ELITE_KILL_BONUS = 4;
+export const COMMAND_CARGO_BONUS = 8;
+
 function bossEnemyForAct(map: GameMap, act: 1 | 2): EnemyDef {
   return act === 1 ? getBoss(map.act1BossId) : getFinalBoss(map.act2BossId);
 }
@@ -893,7 +903,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // 14.3: the defector's "take them aboard" choice schedules the pursuit
       // as the very next event node instead of rolling the pool — a one-off
       // forced follow-up, consumed here and then cleared.
-      const eventId: EventId = state.pendingEventId ?? drawEvent(rng, state);
+      // 49.1: drawEvent's stage gating needs the ENTERED node's column
+      // (`node.col`, the destination), not the pre-move `state.position` —
+      // an event node at column 4 must draw from the mid pool even though
+      // pre-move state.position.col is 3. See reducer.test.ts's regression
+      // test pinning this.
+      const eventId: EventId = state.pendingEventId ?? drawEvent(rng, state, node.col);
       return {
         ...base,
         phase: 'event',
@@ -1046,6 +1061,18 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // now. Consumed (and cleared) regardless of which branch below pays
       // out, so it can never leak into an unrelated later fight.
       const ambushBonus = state.pendingAmbushBonus;
+      // 49.4/49.5: the debt/colony chains' win-conditional side effect
+      // beyond credits/a part (see AmbushBonus.chainEffect) — applied only
+      // here, on an actual WIN, same "consumed regardless of outcome"
+      // discipline as ambushBonus itself. Never reached on a boss fight
+      // (an event ambush is always a plain 'combat' enemy), so only this
+      // non-boss win branch needs it.
+      const chainEffectPatch: Partial<RunState> =
+        ambushBonus?.chainEffect === 'debt-cleared'
+          ? { loanOutstanding: undefined }
+          : ambushBonus?.chainEffect === 'colony-defended'
+            ? { colonyStage: 2 }
+            : {};
 
       const startingInventory = ambushBonus?.partId ? [...state.inventory, ambushBonus.partId] : [...state.inventory];
       // Iteration 28 (Ghost fleet protocol): a ship that would be destroyed
@@ -1144,7 +1171,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // Now that cards are gone, both just pay flat credits — command stays
       // above elite's old fallback value so it doesn't collapse into being
       // mechanically identical to convoy's flat +4cr despite being rarer.
-      const eliteOrCommandBonus = isElite ? 4 : cargoTag === 'command' ? 8 : 0;
+      const eliteOrCommandBonus = isElite ? ELITE_KILL_BONUS : cargoTag === 'command' ? COMMAND_CARGO_BONUS : 0;
 
       // Iteration 41: tracked separately from `inventory` purely so the
       // reward screen has something to point at — these parts arrive with
@@ -1234,6 +1261,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
       return withFlagshipRecoveryGate(state.fleet, {
         ...intelDraw.state,
+        ...chainEffectPatch,
         phase: 'reward',
         fleet: healedFleet,
         inventory,

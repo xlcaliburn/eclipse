@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { actColumns, generateMap } from './map';
 import { mulberry32 } from './rng';
 import type { RngFn } from './rng';
-import { describeRequirement, drawEvent, EVENTS, meetsRequirement, nextUnrevealedIndex, reqTextFor, resolveEventChoice } from './events';
+import { describeRequirement, drawEvent, eventStage, EVENTS, meetsRequirement, nextUnrevealedIndex, reqTextFor, resolveEventChoice } from './events';
+import type { EventId } from './events';
 import { ANCIENT_ARTIFACT_PART_ID, getPart } from './parts';
 import type { RunState } from './types';
 
@@ -367,10 +368,13 @@ describe('resolveEventChoice — distress-beacon', () => {
     expect(ambushEnemy).toBeUndefined();
   });
 
-  it('option 1: driving the raiders off sets an easy-pool ambush and a 6-credit-plus-part win bonus', () => {
+  it('option 1: driving the raiders off sets an easy-pool ambush and a 2-credit-plus-part win bonus', () => {
+    // 2026-08-08: was 6cr — retuned down (see the event def's own comment)
+    // after a playtest report flagged an easy-pool fight paying near
+    // elite-tier once the bonus part's value was counted.
     const { ambushEnemy, ambushBonus } = resolveEventChoice('distress-beacon', 1, baseState(), fixedRng([0.1, 0.1]));
     expect(ambushEnemy).toBeDefined();
-    expect(ambushBonus?.credits).toBe(6);
+    expect(ambushBonus?.credits).toBe(2);
     expect(ambushBonus?.partId).toBeDefined();
   });
 
@@ -608,7 +612,7 @@ describe('drawEvent — the relic chain continuation check (iteration 34.2)', ()
     let sawSignal = false;
     for (let i = 0; i < 50 && !sawSignal; i++) {
       const rng = fixedRng([i / 50]);
-      if (drawEvent(rng, s0) === 'relic-signal') sawSignal = true;
+      if (drawEvent(rng, s0, 1) === 'relic-signal') sawSignal = true;
     }
     expect(sawSignal).toBe(true);
   });
@@ -616,20 +620,20 @@ describe('drawEvent — the relic chain continuation check (iteration 34.2)', ()
   it('with relicFragments 1, a continuation roll < 0.5 always returns relic-vault, never a normal pool event', () => {
     const s0 = baseState({ relicFragments: 1 });
     for (const roll of [0, 0.1, 0.49]) {
-      expect(drawEvent(fixedRng([roll]), s0)).toBe('relic-vault');
+      expect(drawEvent(fixedRng([roll]), s0, 1)).toBe('relic-vault');
     }
   });
 
   it('with relicFragments 2, a continuation roll < 0.5 always returns relic-core', () => {
     const s0 = baseState({ relicFragments: 2 });
     for (const roll of [0, 0.1, 0.49]) {
-      expect(drawEvent(fixedRng([roll]), s0)).toBe('relic-core');
+      expect(drawEvent(fixedRng([roll]), s0, 1)).toBe('relic-core');
     }
   });
 
   it('a continuation roll >= 0.5 falls through to the normal pool draw instead, excluding relic-signal once the chain has started', () => {
     const s0 = baseState({ relicFragments: 1, lastEventId: undefined });
-    const result = drawEvent(fixedRng([0.5, 0]), s0); // fails continuation, then draws index 0 of the filtered pool
+    const result = drawEvent(fixedRng([0.5, 0]), s0, 1); // fails continuation, then draws index 0 of the filtered pool
     expect(result).not.toBe('relic-signal');
     expect(result).not.toBe('relic-vault');
     expect(result).not.toBe('relic-core');
@@ -639,7 +643,7 @@ describe('drawEvent — the relic chain continuation check (iteration 34.2)', ()
     const s0 = baseState({ relicFragments: 3 });
     // A single rng value proves no continuation check consumed a draw
     // first — if it had, this would throw (fixedRng exhausted).
-    const result = drawEvent(fixedRng([0]), s0);
+    const result = drawEvent(fixedRng([0]), s0, 1);
     expect(result).not.toBe('relic-vault');
     expect(result).not.toBe('relic-core');
   });
@@ -648,7 +652,7 @@ describe('drawEvent — the relic chain continuation check (iteration 34.2)', ()
     const s0 = baseState({ relicFragments: 1 });
     for (let i = 0; i < 30; i++) {
       // roll >= 0.5 to skip the continuation check and hit the normal pool
-      const result = drawEvent(fixedRng([0.9, i / 30]), s0);
+      const result = drawEvent(fixedRng([0.9, i / 30]), s0, 1);
       expect(result).not.toBe('relic-signal');
     }
   });
@@ -769,6 +773,305 @@ describe('resolveEventChoice — every EVENTS entry resolves (47.5r)', () => {
         const result = resolveEventChoice(event.id, choiceIndex, state, mulberry32(choiceIndex + 1), selection);
         expect(result.outcomeText, `${event.id}[${choiceIndex}]`).toBeTruthy();
       });
+    }
+  });
+});
+
+// =========================================================================
+// Iteration 49: stage-gated event pool + inventoryAtMost + 3 new events +
+// 2 quest chains (debt broker, colony ship).
+// =========================================================================
+
+describe('eventStage — boundary cases (49.1/49.7.1)', () => {
+  it('act 1: global column 3 is early, 4 is mid (the early/mid boundary)', () => {
+    expect(eventStage(1, 3)).toBe('early');
+    expect(eventStage(1, 4)).toBe('mid');
+  });
+
+  it('act 1: global column 10 is mid, 11 is late (the mid/late boundary)', () => {
+    expect(eventStage(1, 10)).toBe('mid');
+    expect(eventStage(1, 11)).toBe('late');
+  });
+
+  it('act 2 column 0 is already global 11 — late from the very first node', () => {
+    expect(eventStage(2, 0)).toBe('late');
+  });
+});
+
+describe('inventoryAtMost (49.2)', () => {
+  it('met at 0 spares, unmet with 1', () => {
+    const req = { kind: 'inventoryAtMost', value: 0 } as const;
+    expect(meetsRequirement(req, baseState({ inventory: [] }))).toBe(true);
+    expect(meetsRequirement(req, baseState({ inventory: ['ion'] }))).toBe(false);
+  });
+
+  it('describeRequirement text', () => {
+    expect(describeRequirement({ kind: 'inventoryAtMost', value: 0 })).toBe('requires 0 or fewer spare parts');
+    expect(describeRequirement({ kind: 'inventoryAtMost', value: 2 })).toBe('requires 2 or fewer spare parts');
+  });
+});
+
+describe('drawEvent — stage filtering (49.1/49.7.2)', () => {
+  const midOrLateOnly: EventId[] = [
+    'intercepted-signal',
+    'sabotage-raid',
+    'defector',
+    'repair-tender',
+    'salvage-claim',
+    'militia-requisition',
+    'ancient-cache',
+  ];
+  const earlyOnly: EventId[] = ['customs-checkpoint', 'war-surplus-peddler', 'nav-buoy', 'debt-broker', 'colony-ship'];
+
+  it('an early column never yields a mid/late-only event, across many seeds', () => {
+    const s0 = baseState({ relicFragments: 0 });
+    for (let seed = 1; seed <= 200; seed++) {
+      const drawn = drawEvent(mulberry32(seed), s0, 1); // act-1 col 1 -> global 1 -> early
+      expect(midOrLateOnly).not.toContain(drawn);
+    }
+  });
+
+  it('a late column never yields an early-only event, across many seeds', () => {
+    const s0 = baseState({ act: 2, position: { col: 0, row: 0 }, relicFragments: 0 });
+    for (let seed = 1; seed <= 200; seed++) {
+      const drawn = drawEvent(mulberry32(seed), s0, 0); // act-2 col 0 -> global 11 -> late
+      expect(earlyOnly).not.toContain(drawn);
+    }
+  });
+
+  it('the three new early events and debt-broker/colony-ship are all reachable from an early draw', () => {
+    const s0 = baseState({ relicFragments: 0 });
+    const seen = new Set<EventId>();
+    for (let seed = 1; seed <= 500; seed++) {
+      seen.add(drawEvent(mulberry32(seed), s0, 1));
+    }
+    for (const id of earlyOnly) expect(seen.has(id)).toBe(true);
+  });
+});
+
+describe('resolveEventChoice — customs-checkpoint (49.3/49.7.5)', () => {
+  it('option 0: pay the toll costs 1 credit', () => {
+    const { state } = resolveEventChoice('customs-checkpoint', 0, baseState({ credits: 5 }), fixedRng([]));
+    expect(state.credits).toBe(4);
+  });
+
+  it('option 1: slip past costs 1 heat, no credit change', () => {
+    const s0 = baseState({ heat: 0 });
+    const { state } = resolveEventChoice('customs-checkpoint', 1, s0, fixedRng([]));
+    expect(state.heat).toBe(1);
+    expect(state.credits).toBe(s0.credits);
+  });
+
+  it('option 2: nothing to declare changes nothing', () => {
+    const s0 = baseState({ inventory: [] });
+    const { state } = resolveEventChoice('customs-checkpoint', 2, s0, fixedRng([]));
+    expect(state).toEqual(s0);
+  });
+});
+
+describe('resolveEventChoice — war-surplus-peddler (49.3/49.7.5)', () => {
+  it('option 0: move on changes nothing', () => {
+    const s0 = baseState();
+    const { state } = resolveEventChoice('war-surplus-peddler', 0, s0, fixedRng([]));
+    expect(state).toEqual(s0);
+  });
+
+  it('option 1: buying a crate costs 2 credits and grants a common-tier part', () => {
+    const s0 = baseState({ credits: 5, inventory: [] });
+    const { state } = resolveEventChoice('war-surplus-peddler', 1, s0, fixedRng([0.1]));
+    expect(state.credits).toBe(3);
+    expect(state.inventory).toHaveLength(1);
+    expect(getPart(state.inventory[0]).rarity).toBe('common');
+  });
+
+  it('option 2: selling scrap grants 2 credits', () => {
+    const { state } = resolveEventChoice('war-surplus-peddler', 2, baseState({ credits: 0 }), fixedRng([]));
+    expect(state.credits).toBe(2);
+  });
+});
+
+describe('resolveEventChoice — nav-buoy (49.3/49.7.5)', () => {
+  it('option 0: scrapping it grants 2 credits', () => {
+    const { state } = resolveEventChoice('nav-buoy', 0, baseState({ credits: 0 }), fixedRng([]));
+    expect(state.credits).toBe(2);
+  });
+
+  it("option 1: pulling its charts reveals every node in the next column", () => {
+    const s0 = baseState({ position: { col: 1, row: 0 } });
+    const { state, outcomeText } = resolveEventChoice('nav-buoy', 1, s0, fixedRng([]));
+    const expectedPositions = actColumns(s0.map, s0.act)[2];
+    for (const node of expectedPositions) {
+      expect(state.revealedNodes).toContainEqual({ col: node.col, row: node.row });
+    }
+    expect(outcomeText.length).toBeGreaterThan(0);
+  });
+});
+
+// --- Iteration 49.4: the debt broker chain ------------------------------
+
+describe('resolveEventChoice — debt-broker (49.4/49.7.6)', () => {
+  it('option 0: declining changes nothing', () => {
+    const s0 = baseState();
+    const { state } = resolveEventChoice('debt-broker', 0, s0, fixedRng([]));
+    expect(state).toEqual(s0);
+  });
+
+  it('option 1: taking the loan grants 8 credits and sets loanOutstanding', () => {
+    const s0 = baseState({ credits: 0 });
+    const { state } = resolveEventChoice('debt-broker', 1, s0, fixedRng([]));
+    expect(state.credits).toBe(8);
+    expect(state.loanOutstanding).toBe(true);
+  });
+});
+
+describe('resolveEventChoice — debt-collectors (49.4/49.7.6)', () => {
+  it('option 0: settling pays 12 credits (clamped) and clears the loan', () => {
+    const s0 = baseState({ credits: 12, loanOutstanding: true });
+    const { state } = resolveEventChoice('debt-collectors', 0, s0, fixedRng([]));
+    expect(state.credits).toBe(0);
+    expect(state.loanOutstanding).toBeUndefined();
+  });
+
+  it('option 1: fighting sets a hard-pool ambush with the debt-cleared chainEffect; loanOutstanding stays set at choice time', () => {
+    const s0 = baseState({ loanOutstanding: true });
+    const { state, ambushEnemy, ambushBonus } = resolveEventChoice('debt-collectors', 1, s0, fixedRng([0.1]));
+    expect(ambushEnemy).toBeDefined();
+    expect(ambushBonus).toEqual({ chainEffect: 'debt-cleared' });
+    expect(state.loanOutstanding).toBe(true); // unchanged at choice time — see 49.4's note
+  });
+
+  it('option 2 (Cloaking field): slips away, debt stays outstanding', () => {
+    const s0 = baseState({
+      loanOutstanding: true,
+      fleet: [{ frameId: 'cruiser', equipped: ['cloak'], damage: 0, upgrades: [] }],
+    });
+    const { state, ambushEnemy } = resolveEventChoice('debt-collectors', 2, s0, fixedRng([]));
+    expect(ambushEnemy).toBeUndefined();
+    expect(state.loanOutstanding).toBe(true);
+  });
+});
+
+describe('drawEvent — the debt chain continuation check (49.4/49.7.6)', () => {
+  it('never fires debt-collectors at an early column even with loanOutstanding', () => {
+    const s0 = baseState({ loanOutstanding: true });
+    for (let seed = 1; seed <= 100; seed++) {
+      expect(drawEvent(mulberry32(seed), s0, 1)).not.toBe('debt-collectors');
+    }
+  });
+
+  it('sometimes fires debt-collectors mid+, across seeds', () => {
+    const s0 = baseState({ loanOutstanding: true });
+    let saw = false;
+    for (let seed = 1; seed <= 100 && !saw; seed++) {
+      if (drawEvent(mulberry32(seed), s0, 4) === 'debt-collectors') saw = true;
+    }
+    expect(saw).toBe(true);
+  });
+
+  it('never rolls the debt continuation check without loanOutstanding', () => {
+    const s0 = baseState({ loanOutstanding: undefined });
+    for (let seed = 1; seed <= 60; seed++) {
+      expect(drawEvent(mulberry32(seed), s0, 4)).not.toBe('debt-collectors');
+    }
+  });
+
+  it('the relic chain shadows the debt chain when both are live (priority: relic -> debt -> colony)', () => {
+    const s0 = baseState({ loanOutstanding: true, relicFragments: 1 });
+    for (const roll of [0, 0.1, 0.49]) {
+      expect(drawEvent(fixedRng([roll]), s0, 4)).toBe('relic-vault');
+    }
+  });
+});
+
+// --- Iteration 49.5: the colony ship chain ------------------------------
+
+describe('resolveEventChoice — colony-ship (49.5/49.7.7)', () => {
+  it('option 0: selling charts grants 3 credits; no chain started', () => {
+    const { state } = resolveEventChoice('colony-ship', 0, baseState({ credits: 0 }), fixedRng([]));
+    expect(state.credits).toBe(3);
+    expect(state.colonyStage).toBeUndefined();
+  });
+
+  it('option 1: escorting sets colonyStage to 1, no credit change', () => {
+    const s0 = baseState();
+    const { state } = resolveEventChoice('colony-ship', 1, s0, fixedRng([]));
+    expect(state.colonyStage).toBe(1);
+    expect(state.credits).toBe(s0.credits);
+  });
+});
+
+describe('resolveEventChoice — colony-raiders (49.5/49.7.7)', () => {
+  it("option 0: letting it happen clears colonyStage, chain ends, no ambush", () => {
+    const s0 = baseState({ colonyStage: 1 });
+    const { state, ambushEnemy } = resolveEventChoice('colony-raiders', 0, s0, fixedRng([]));
+    expect(state.colonyStage).toBeUndefined();
+    expect(ambushEnemy).toBeUndefined();
+  });
+
+  it('option 1: driving raiders off clears colonyStage at choice time and sets an easy-pool ambush with the colony-defended chainEffect', () => {
+    const s0 = baseState({ colonyStage: 1 });
+    const { state, ambushEnemy, ambushBonus } = resolveEventChoice('colony-raiders', 1, s0, fixedRng([0.1]));
+    expect(state.colonyStage).toBeUndefined(); // cleared at choice time — restored only on a win
+    expect(ambushEnemy).toBeDefined();
+    expect(ambushBonus).toEqual({ chainEffect: 'colony-defended' });
+  });
+});
+
+describe('resolveEventChoice — colony-arrival (49.5/49.7.7)', () => {
+  it("option 0: the founders' gift grants 10 credits and a rare-tier-capped part, clears colonyStage", () => {
+    const s0 = baseState({ credits: 0, colonyStage: 2 });
+    const { state } = resolveEventChoice('colony-arrival', 0, s0, fixedRng([0.1]));
+    expect(state.credits).toBe(10);
+    expect(state.inventory).toHaveLength(1);
+    expect(getPart(state.inventory[0]).rarity).toBe('rare');
+    expect(state.colonyStage).toBeUndefined();
+  });
+
+  it('option 1: cash settlement grants 14 credits, clears colonyStage', () => {
+    const s0 = baseState({ credits: 0, colonyStage: 2 });
+    const { state } = resolveEventChoice('colony-arrival', 1, s0, fixedRng([]));
+    expect(state.credits).toBe(14);
+    expect(state.colonyStage).toBeUndefined();
+  });
+});
+
+describe('drawEvent — the colony chain continuation check (49.5/49.7.7)', () => {
+  it('never fires colony-raiders at an early column even with colonyStage 1', () => {
+    const s0 = baseState({ colonyStage: 1 });
+    for (let seed = 1; seed <= 100; seed++) {
+      expect(drawEvent(mulberry32(seed), s0, 1)).not.toBe('colony-raiders');
+    }
+  });
+
+  it('sometimes fires colony-raiders mid+, across seeds', () => {
+    const s0 = baseState({ colonyStage: 1 });
+    let saw = false;
+    for (let seed = 1; seed <= 100 && !saw; seed++) {
+      if (drawEvent(mulberry32(seed), s0, 4) === 'colony-raiders') saw = true;
+    }
+    expect(saw).toBe(true);
+  });
+
+  it('colony-arrival never fires mid, even with colonyStage 2 (late-only)', () => {
+    const s0 = baseState({ colonyStage: 2 });
+    for (let seed = 1; seed <= 100; seed++) {
+      expect(drawEvent(mulberry32(seed), s0, 4)).not.toBe('colony-arrival');
+    }
+  });
+
+  it('sometimes fires colony-arrival late, across seeds', () => {
+    const s0 = baseState({ act: 2, position: { col: 0, row: 0 }, colonyStage: 2 });
+    let saw = false;
+    for (let seed = 1; seed <= 100 && !saw; seed++) {
+      if (drawEvent(mulberry32(seed), s0, 0) === 'colony-arrival') saw = true;
+    }
+    expect(saw).toBe(true);
+  });
+
+  it('the debt chain shadows the colony chain when both are live (priority: relic -> debt -> colony)', () => {
+    const s0 = baseState({ loanOutstanding: true, colonyStage: 1 });
+    for (const roll of [0, 0.1, 0.49]) {
+      expect(drawEvent(fixedRng([roll]), s0, 4)).toBe('debt-collectors');
     }
   });
 });
