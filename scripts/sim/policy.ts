@@ -28,10 +28,6 @@ export interface PolicyConfig {
   // "retreat once we're worse off than half the enemy's remaining
   // strength," matching a real player's "this is going badly" read.
   withdrawHpRatio: number;
-  // Whether this archetype holds stat-ladder parts unequipped for a later
-  // Foundry fuse (shipyard-only) instead of always equipping on sight —
-  // the Foundry only has anything to consume if something was held back.
-  hoardsForFoundry: boolean;
   // Route-choice node-type score deltas, layered on the shared floor
   // (ported from the old actRun.ts chooseNode) — same table shape as that
   // function's commander bias switch, generalized to archetype.
@@ -59,7 +55,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     fleetCap: 3,
     repairThreshold: 0.4,
     withdrawHpRatio: 0.4,
-    hoardsForFoundry: false,
     routeBias: {},
   },
   'tank-taunt': {
@@ -69,7 +64,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     fleetCap: 2,
     repairThreshold: 0.5,
     withdrawHpRatio: 0.3, // a tank absorbs more before bailing
-    hoardsForFoundry: false,
     routeBias: { repair: 15 },
   },
   'alpha-missile': {
@@ -79,7 +73,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     fleetCap: 3,
     repairThreshold: 0.4,
     withdrawHpRatio: 0.4,
-    hoardsForFoundry: false,
     routeBias: {},
   },
   outspeed: {
@@ -89,7 +82,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     fleetCap: 3,
     repairThreshold: 0.4,
     withdrawHpRatio: 0.4,
-    hoardsForFoundry: false,
     routeBias: {},
   },
   wide: {
@@ -99,18 +91,24 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     fleetCap: 4,
     repairThreshold: 0.35,
     withdrawHpRatio: 0.4,
-    hoardsForFoundry: false,
     routeBias: { shop: 15, shipyard: 15 }, // wide needs more shop visits to fill more hulls
   },
   tall: {
-    label: 'Tall (Flagship + Foundry)',
+    // 2026-08-08: was "Tall (Flagship + Foundry)" — the Foundry (a
+    // permanent stat-fuse purchase, shipyard-only) was removed from the
+    // game entirely; this archetype's identity is now just "one hull,
+    // everything into it," same doctrine minus that one purchase option.
+    label: 'Tall (Flagship, single hull)',
     partPriority: ['plasma', 'comp2', 'hull2', 'shield1', 'plasma', 'comp3', 'antimatter', 'init3', 'hull3', 'shield2'],
     framePriority: [], // never buys an escort — everything into the Flagship
     fleetCap: 1,
     repairThreshold: 0.4,
     withdrawHpRatio: 0.45, // one hull lost is the whole run — bail earlier
-    hoardsForFoundry: true,
-    routeBias: { shipyard: 20 }, // the Foundry lives there
+    // 2026-08-08: was `{ shipyard: 20 }` ("the Foundry lives there") — with
+    // the Foundry gone and this archetype never buying a hull
+    // (framePriority: []), a shipyard visit has nothing for it (shipyards
+    // sell no parts) — no reason to prioritize one over a store any more.
+    routeBias: {},
   },
 };
 

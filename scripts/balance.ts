@@ -95,20 +95,29 @@ const FLEETS: { name: string; fleet: PlayerShipState[] }[] = [
   {
     // Iteration 31-M3: what "strong fleet" (~66cr, near-perfect act-1 play)
     // actually looks like by the time it's standing in front of a final
-    // boss — protocols and the Foundry both exist by then. Same shape as
-    // "strong fleet" plus +1 computer and +1 HP fused into the Flagship
-    // (6cr for the HP fusion, 10cr for the computer fusion as the ship's
-    // 2nd purchase — fusionCost's per-ship escalation — +20cr on top of
-    // strong fleet's ~66cr, so ~86cr all-in). The gold protocol pick
-    // (twin-linked mounts, one extra die on each ship's first weapon) is
-    // free — a draft, not a purchase — and is folded in only where this
-    // fixture is measured with `protocols` passed explicitly (this table's
-    // own forecastWinRate grid below doesn't thread protocols through, so
-    // twin-linked's die doesn't show up there — see the final-boss section
-    // near the bottom of this file for the protocol-aware measurement).
+    // boss — protocols exist by then, and a run that's cleared several
+    // elites plus the act-1 boss's interlude has picked up permanent
+    // slotless upgrades along the way. Same shape as "strong fleet" plus 2
+    // upgrades on the Flagship.
+    // 2026-08-08: was `fusions: { computer: 1, hp: 1 }` (the Foundry, a
+    // shipyard-purchasable stat fuse) — the Foundry was removed from the
+    // game entirely, and there is no longer any mechanism to buy extra
+    // stats onto an existing ship, so this fixture no longer represents
+    // "strong fleet + spent surplus credits." Replaced with the closest
+    // real equivalent this fleet would actually have by act 2: 2
+    // elite/boss-earned upgrades (`reactor` = +1 computer, an exact match
+    // for the old fusion; `spine` = +2 HP, the closest available HP
+    // upgrade — there's no +1-HP upgrade, only +2 — see upgrades.ts).
+    // The gold protocol pick (twin-linked mounts, one extra die on each
+    // ship's first weapon) is free — a draft, not a purchase — and is
+    // folded in only where this fixture is measured with `protocols`
+    // passed explicitly (this table's own forecastWinRate grid below
+    // doesn't thread protocols through, so twin-linked's die doesn't show
+    // up there — see the final-boss section near the bottom of this file
+    // for the protocol-aware measurement).
     name: 'act-2 endgame fleet',
     fleet: [
-      { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'init3', 'shield1'], damage: 0, upgrades: [], fusions: { computer: 1, hp: 1 } },
+      { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'init3', 'shield1'], damage: 0, upgrades: ['reactor', 'spine'] },
       { frameId: 'interceptor', equipped: ['plasma', 'comp2', 'hull1'], damage: 0, upgrades: [] },
       { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0, upgrades: [] },
     ],
@@ -337,14 +346,14 @@ for (const id of FINAL_BOSS_IDS) {
   console.log(`  ${pad(getFinalBoss(id).name, 18)}${result.winRate}%`);
 }
 
-// Floor check (plan step 4): the pre-fusion, pre-protocol "strong fleet"
+// Floor check (plan step 4): the pre-upgrade, pre-protocol "strong fleet"
 // must still beat each boss at a visible, non-wall rate with NO counter
 // applied — the trio getting harder for the maxed-out endgame must not
 // also wall off a merely-solid finish (col10-solid's exact lesson, one
 // act later).
 const finalBossFloor: Record<FinalBossId, number> = { titan: 0, empress: 0, citadel: 0 };
 const finalBossFloorInterval: Partial<Record<FinalBossId, WilsonInterval>> = {};
-console.log('\nFloor check — strong fleet (pre-fusion, no counter) vs the trio:');
+console.log('\nFloor check — strong fleet (pre-upgrade, no counter) vs the trio:');
 for (const id of FINAL_BOSS_IDS) {
   const result = simulateFleet(STRONG_FLEET, getFinalBoss(id), SIMS);
   finalBossFloor[id] = result.winRate;
@@ -500,14 +509,14 @@ const checks: CheckResult[] = [
     // documented for itself: raising difficulty enough to satisfy the
     // endgame-fleet band (this file's own check above, and the number
     // actually tied to this iteration's act-2 target) pushes the
-    // pre-fusion floor fleet below 9% for Titan and Citadel too now —
+    // pre-upgrade floor fleet below 9% for Titan and Citadel too now —
     // see enemies.ts's TITAN/VOID_CITADEL comments for the full
     // isolation sweep. Left as documented, known-marginal FAILs (same
     // treatment as Hive Mother's pre-existing one below) rather than
     // silently loosened or dropped.
     const knownMarginal = id === 'titan' || id === 'citadel';
     return {
-      label: `strong fleet (pre-fusion, no counter) still beats ${getFinalBoss(id).name} >= 9% (not a wall)${knownMarginal ? ' — KNOWN MARGINAL (band-vs-floor tension), see enemies.ts' : ''}`,
+      label: `strong fleet (pre-upgrade, no counter) still beats ${getFinalBoss(id).name} >= 9% (not a wall)${knownMarginal ? ' — KNOWN MARGINAL (band-vs-floor tension), see enemies.ts' : ''}`,
       verdict: floorGate(finalBossFloorInterval[id]!, 9),
     };
   }),

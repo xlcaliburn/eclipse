@@ -28,12 +28,11 @@ import {
   partCost,
   REPAIR_COST_PER_HP,
   runReducer,
-  SHIPYARD_UPGRADE_COST,
   winReward,
 } from '../../src/game/reducer';
 import type { RunAction } from '../../src/game/reducer';
 import { mulberry32 } from '../../src/game/rng';
-import { deriveStats, effectiveSlots, FUSABLE_PARTS, fusionCost } from '../../src/game/ship';
+import { deriveStats, effectiveSlots } from '../../src/game/ship';
 import type { PartId, PlayerShipState, RunState } from '../../src/game/types';
 import type { PolicyConfig } from './policy';
 import { COMMANDER_ROUTE_BIAS, DEFAULT_PROTOCOL_INDEX } from './policy';
@@ -53,6 +52,13 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   ADVANCE_ROUND: true,
   AUTO_RESOLVE: true,
   SET_PRIORITY_TARGET: true,
+  // Iteration 48 (fleet orders): a purely optional player choice — never
+  // dispatched by the floor agent, same as it's never issued by
+  // AUTO_RESOLVE/runToEnd in the real engine. Every commander's simulated
+  // clear rate is measured with 0 orders ever spent, by design (see
+  // plans/iteration-48.md's "Determinism, auto-resolve, and the balance
+  // floor" section) — accounted for here, not dispatched anywhere below.
+  ISSUE_ORDER: true,
   CONTINUE: true,
   WITHDRAW: true,
   PICK_UPGRADE: true,
@@ -69,8 +75,6 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   SELL_COMMODITY_LOT: true,
   BUY_MERCENARY: true,
   BUY_REPAIR: true,
-  BUY_UPGRADE: true,
-  FUSE_STAT: true,
   USE_ACTIVE: true,
   LEAVE_SHOP: true,
   LEAVE_REPAIR: true,
@@ -121,7 +125,7 @@ function damageRatio(state: RunState): number {
   let hp = 0;
   let damage = 0;
   for (const ship of state.fleet) {
-    hp += deriveStats(ship.frameId, ship.equipped, ship.upgrades, state.protocols, ship.fusions).hp;
+    hp += deriveStats(ship.frameId, ship.equipped, ship.upgrades, state.protocols).hp;
     damage += ship.damage;
   }
   return hp > 0 ? damage / hp : 0;
@@ -205,13 +209,11 @@ function buyAndEquipFromOffers(state: RunState, config: PolicyConfig, commanderI
       if (offerIndex === -1) break; // not currently in stock — try the next priority item
       const cost = partCost(wantId, commanderId, s.protocols);
       const fittingShip = s.fleet.findIndex((sh) => canFit(sh, wantId, s.protocols, commanderId));
-      const fusable = FUSABLE_PARTS[wantId];
-      // Buy even with nowhere to equip it, IF this archetype hoards
-      // stat-ladder parts for a later Foundry fuse — that's the whole
-      // point of hoarding. Everyone else skips an unfittable item rather
-      // than let credits rot in inventory forever.
-      const worthBuyingUnfitted = config.hoardsForFoundry && !!fusable;
-      if (fittingShip === -1 && !worthBuyingUnfitted) break;
+      // Skip an unfittable item rather than let credits rot in inventory
+      // forever — 2026-08-08: used to buy anyway if this archetype hoarded
+      // stat-ladder parts for a later Foundry fuse (shipyard-only); the
+      // Foundry is gone, so nothing hoards any more.
+      if (fittingShip === -1) break;
       if (cost > s.credits) break; // can't afford this tier right now — move to the next priority item
       s = dispatch(s, { type: 'BUY_PART', offerIndex }, tracker);
       if (fittingShip !== -1) {
@@ -288,42 +290,14 @@ function buyMercenary(state: RunState, config: PolicyConfig, commanderId: Comman
   return dispatch(state, { type: 'BUY_MERCENARY' }, tracker);
 }
 
-function fuseForFoundry(state: RunState, tracker: { count: number; rejected: string | null }): RunState {
-  let s = state;
-  let progressed = true;
-  while (progressed) {
-    progressed = false;
-    for (let shipIndex = 0; shipIndex < s.fleet.length; shipIndex++) {
-      const ship = s.fleet[shipIndex];
-      if (ship.mercenary) continue;
-      for (const partId of s.inventory) {
-        const fusable = FUSABLE_PARTS[partId];
-        if (!fusable) continue;
-        const cost = fusionCost(fusable.stat, ship, fusable.amount);
-        if (cost > s.credits) continue;
-        s = dispatch(s, { type: 'FUSE_STAT', shipIndex, partId }, tracker);
-        progressed = true;
-        break;
-      }
-      if (progressed) break;
-    }
-  }
-  return s;
-}
-
-function buyShipyardUpgrade(state: RunState, tracker: { count: number; rejected: string | null }): RunState {
-  if (!state.shopUpgradeOffer || SHIPYARD_UPGRADE_COST > state.credits) return state;
-  const shipIndex = state.fleet.findIndex((s) => !s.mercenary);
-  if (shipIndex === -1) return state;
-  return dispatch(state, { type: 'BUY_UPGRADE', shipIndex }, tracker);
-}
-
+// 2026-08-08: `fuseForFoundry`/`buyShipyardUpgrade` removed — the Foundry
+// (permanent stat fuses) and the shipyard's separate purchasable upgrade
+// were both removed from the game entirely. A shipyard visit now only
+// means a (better-odds) hull purchase — see `buyHull` below — and repairs.
 function runShop(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
   let s = sellCommodityLots(state, tracker);
   if (s.shopKind === 'shipyard') {
     s = buyHull(s, config, commanderId, tracker);
-    if (config.hoardsForFoundry) s = fuseForFoundry(s, tracker);
-    s = buyShipyardUpgrade(s, tracker);
     s = buyRepairs(s, config, tracker);
   } else {
     s = buyAndEquipFromOffers(s, config, commanderId, tracker);
