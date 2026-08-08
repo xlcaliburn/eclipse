@@ -1,6 +1,8 @@
 import { mulberry32, resumeRng, rollD6 } from './rng';
 import type { RngFn } from './rng';
-import { resolveHit } from './resolver';
+import { resolveHit } from './hitRule';
+import { hasProtocol } from './protocols';
+import type { ProtocolId } from './protocols';
 import type { CombatEvent, EnemyDef, PartId, ShipStats, Side } from './types';
 
 const MAX_CANNON_ROUNDS = 30;
@@ -47,10 +49,10 @@ export interface RoundModifiers {
 
 // A plain, serializable snapshot of an in-progress (or finished) fight. The
 // resumable engine (initCombat/advanceRound/runToEnd) is the single source
-// of truth for iteration 3's stepped, card-aware combat. This is separate
-// from resolver.ts's original one-shot `resolveCombat`, which is left
-// untouched so the iteration 1/2 resolver test suite keeps passing verbatim
-// against fresh (zero-damage, card-free) fleets.
+// of truth for combat — the original one-shot `resolveCombat` from
+// iteration 1/2 (then living in resolver.ts) was deleted in 47.2b once it
+// had zero production callers left; only `resolveHit`, the shared hit-math
+// primitive both engines called, survives (now in hitRule.ts).
 export type TargetingStance = 'weakest' | 'strongest';
 
 export interface CombatState {
@@ -238,6 +240,19 @@ function fastestAliveInitiative(ships: CombatShip[], initiativeBonus: number): n
 // same check, so the two can never drift apart.
 export function qualifiesForOutspeed(shipInitiative: number, opponentFastestInitiative: number, gap = OUTSPEED_GAP): boolean {
   return shipInitiative - opponentFastestInitiative >= gap;
+}
+
+// Iteration 28 (Overspeed protocols): the player-side Outspeed gap drops by
+// 1 with the protocol drafted. 47.3h: this was independently re-derived in
+// FleetPanel.tsx and EnemyPanel.tsx, each commenting that initCombat below
+// (`protocolFlags?.overspeedProtocols ? OUTSPEED_GAP - 1 : OUTSPEED_GAP`) was
+// "the only other place this is computed" — which was already false of the
+// OTHER UI copy by the time either comment was written. One function now;
+// initCombat's own inline version stays (it takes a resolved boolean flag,
+// not a protocol list, at the point it runs) but is definitionally the same
+// rule.
+export function playerOutspeedGap(protocols?: ProtocolId[]): number {
+  return hasProtocol(protocols, 'overspeed-protocols') ? OUTSPEED_GAP - 1 : OUTSPEED_GAP;
 }
 
 // Every surviving ship (either side) whose effective initiative beats the

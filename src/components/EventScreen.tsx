@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { getEvent, meetsRequirement } from '../game/events';
 import { getPart } from '../game/parts';
-import { playerShipLabel } from '../game/ship';
 import type { PartId, RunState } from '../game/types';
 import { PartCard } from './PartCard';
-import { FrameSilhouette } from './ShipSilhouette';
+import { ShipPickRow } from './ShipPickRow';
 
 interface EventScreenProps {
   state: RunState;
@@ -54,19 +53,7 @@ export function EventScreen({ state, onChoose, onContinue, onViewMap, onViewFlee
               return (
                 <div key={i} className="event-screen__option event-screen__picker">
                   <p className="hint">Pick a ship:</p>
-                  <div className="reward-screen__ship-picks">
-                    {state.fleet.map((ship, shipIndex) => (
-                      <button
-                        key={shipIndex}
-                        type="button"
-                        className="shop-button"
-                        onClick={() => onChoose(i, shipIndex)}
-                      >
-                        <FrameSilhouette frameId={ship.frameId} size={24} />
-                        {playerShipLabel(state.fleet, shipIndex)}
-                      </button>
-                    ))}
-                  </div>
+                  <ShipPickRow fleet={state.fleet} onPick={(shipIndex) => onChoose(i, shipIndex)} />
                   <button type="button" className="shop-button" onClick={() => setPickingIndex(null)}>
                     Back
                   </button>
@@ -78,7 +65,7 @@ export function EventScreen({ state, onChoose, onContinue, onViewMap, onViewFlee
               return (
                 <div key={i} className="event-screen__option event-screen__picker">
                   <p className="hint">Pick a part:</p>
-                  <div className="reward-screen__ship-picks">
+                  <div className="ship-picks">
                     {state.inventory.map((partId, partIndex) => (
                       <PartCard
                         key={`${partId}-${partIndex}`}

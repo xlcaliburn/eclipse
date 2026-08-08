@@ -3,7 +3,7 @@ import { getPart } from '../game/parts';
 import type { CommanderId } from '../game/commanders';
 import { getCommander } from '../game/commanders';
 import type { PartId } from '../game/types';
-import { deriveStats } from '../game/ship';
+import { deriveStats, formatStatLine } from '../game/ship';
 import { CommanderCrest } from './CommanderCrest';
 import { PartCard } from './PartCard';
 
@@ -53,9 +53,7 @@ export function CommanderSelectScreen({ choices, startingEquipped, onChoose }: C
           <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
         ))}
       </div>
-      <div className="commander-select-screen__starting-ship-stats">
-        HP {stats.hp} · Init {stats.initiative} · Comp {stats.computer} · Piloting {stats.shield}
-      </div>
+      <div className="commander-select-screen__starting-ship-stats">{formatStatLine(stats)}</div>
     </div>
   );
 }

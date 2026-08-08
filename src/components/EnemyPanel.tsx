@@ -1,7 +1,15 @@
-import { incomingFirePreview, initCombat, openingTargetIndex, OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
+import {
+  incomingFirePreview,
+  initCombat,
+  openingTargetIndex,
+  OUTSPEED_GAP,
+  playerOutspeedGap,
+  qualifiesForOutspeed,
+} from '../game/combatEngine';
 import type { FirePreview } from '../game/combatEngine';
 import type { CommanderId } from '../game/commanders';
 import { getCounterProtocol } from '../game/counterProtocols';
+import { fastestInitiative } from '../game/enemies';
 import { getEnemyLore } from '../game/enemyLore';
 import { getEscalation } from '../game/escalations';
 import { hasProtocol } from '../game/protocols';
@@ -41,33 +49,25 @@ function groupStartIndices(groups: EnemyGroup[]): number[] {
   return starts;
 }
 
-// Each point of computer (or shield-piercing) is worth exactly one die face
-// against a given shield value — see the hit formula
-// `roll + computer - shield >= 6`. This finds the best any-single-ship value
-// in the fleet, since only one ship needs to land hits to matter for a kill.
-function bestEffectiveComputer(fleetStats: ShipStats[]): number {
+// Each point of computer is worth exactly one die face against a given
+// shield value — see the hit formula `roll + computer - shield >= 6`. This
+// finds the best any-single-ship value in the fleet, since only one ship
+// needs to land hits to matter for a kill.
+//
+// 47.2g: used to be two functions (this one plus shieldPierce added in),
+// with a "pierce is carrying the fleet" recommendation branch below reading
+// the difference between them. Ship-level `shieldPierce` (types.ts) is a
+// documented dormant hook — no part, upgrade, or protocol has ever set it
+// nonzero — so the two functions were always identical and the
+// recommendation branch could never actually render. Collapsed to one;
+// the engine field itself stays (cheap to keep, and the hook is
+// deliberate), only the unreachable UI consumer is gone.
+function bestComputerInFleet(fleetStats: ShipStats[]): number {
   return fleetStats.reduce((best, s) => Math.max(best, s.computer + (s.shieldPierce ?? 0)), 0);
-}
-
-// Iteration 8 (8.6): the highest raw computer in the fleet, ignoring
-// shield-pierce — used to tell whether pierce is actually carrying the
-// fleet's answer to a high-shield wall (like the Void Citadel's shield 5),
-// so the readout can recommend it explicitly instead of just reporting a
-// combined number that quietly hides the dependency.
-function bestRawComputer(fleetStats: ShipStats[]): number {
-  return fleetStats.reduce((best, s) => Math.max(best, s.computer), 0);
 }
 
 function highestShield(groups: EnemyGroup[]): number {
   return groups.reduce((best, g) => Math.max(best, g.stats.shield), 0);
-}
-
-// Iteration 17: the fastest ship in an enemy composition, in raw initiative
-// — the "fastest surviving opposing ship" the Outspeed rule compares
-// against. Static/pre-fight, so this is every group's base stat with no
-// round-modifier bonuses (those only exist mid-combat).
-function fastestInitiative(groups: EnemyGroup[]): number {
-  return groups.reduce((best, g) => Math.max(best, g.stats.initiative), -Infinity);
 }
 
 // Replaces the old plain-name header: states what's actually in the fight
@@ -84,25 +84,19 @@ function compositionSummary(enemy: EnemyDef): string {
 export function EnemyPanel({ enemy, fleetStats, fleet, commanderId, protocols }: EnemyPanelProps) {
   const enemyShield = highestShield(enemy.groups);
   const requiredComputer = enemyShield + 1;
-  const bestComputer = fleetStats ? bestEffectiveComputer(fleetStats) : undefined;
-  const rawComputer = fleetStats ? bestRawComputer(fleetStats) : undefined;
+  const bestComputer = fleetStats ? bestComputerInFleet(fleetStats) : undefined;
   const short = bestComputer !== undefined && bestComputer < requiredComputer;
-  // Raw computer alone doesn't clear the bar — shield pierce is the other
-  // tool that does (optics upgrade, the Gauss lance's per-die pierce).
-  const pierceRecommended = rawComputer !== undefined && rawComputer < requiredComputer;
 
   // Iteration 17 ("Outspeed"): both directions, right next to the
   // computer/shield readout above — the enemy panel is where the player
   // decides whether to buy drives, so this is where the number belongs.
   const enemyFastest = fastestInitiative(enemy.groups);
-  // Overspeed protocols (iteration 28): the player's own gap, mirrors
-  // combatEngine.ts's initCombat — the only other place this is computed.
-  const playerOutspeedGap = hasProtocol(protocols, 'overspeed-protocols') ? OUTSPEED_GAP - 1 : OUTSPEED_GAP;
-  const outspeedThreshold = enemyFastest + playerOutspeedGap;
+  const outspeedGap = playerOutspeedGap(protocols);
+  const outspeedThreshold = enemyFastest + outspeedGap;
   const qualifyingPlayerShips =
     fleetStats && fleet
       ? fleetStats
-          .map((s, i) => (qualifiesForOutspeed(s.initiative, enemyFastest, playerOutspeedGap) ? playerShipLabel(fleet, i) : null))
+          .map((s, i) => (qualifiesForOutspeed(s.initiative, enemyFastest, outspeedGap) ? playerShipLabel(fleet, i) : null))
           .filter((label): label is string => label !== null)
       : [];
   const playerFastest = fleetStats ? fleetStats.reduce((best, s) => Math.max(best, s.initiative), -Infinity) : undefined;
@@ -200,8 +194,8 @@ export function EnemyPanel({ enemy, fleetStats, fleet, commanderId, protocols }:
 
       {enemyShield > 0 && (
         <p className={short ? 'warning' : 'hint'}>
-          Piloting {enemyShield} — needs computer <strong>{requiredComputer}+</strong>
-          {pierceRecommended ? ' — or a part that ignores piloting' : ''} to hit on anything but a natural 6.
+          Piloting {enemyShield} — needs computer <strong>{requiredComputer}+</strong> to hit on anything but a
+          natural 6.
           {bestComputer !== undefined && ` Your best ship: computer ${bestComputer}.`}
         </p>
       )}

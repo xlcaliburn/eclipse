@@ -31,7 +31,6 @@ import type { FrameId } from './frames';
 import { addHeat, MAX_HEAT } from './heat';
 import { actColumns, bossColumn, generateMap, getNode, globalColumn, laneColumns, maxRows, reachableNodes } from './map';
 import type { CargoTag, GameMap, MapPosition } from './map';
-export { globalColumn } from './map';
 import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, getPart, PARTS, STARTING_LOADOUT } from './parts';
 import { drawProtocolOffers, hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
@@ -262,8 +261,8 @@ const ARMADA_MANDATE_FRAME_MULTIPLIER = 0.5;
 // Iteration 33 (2026-08-07): the general store's hull rack is second-hand —
 // stacks on top of any commander/protocol discount already applied, same
 // "layer on top, floor at the end" discipline as armada-mandate above.
-// `shopKind` is optional so every existing call site (actRun.ts, tests that
-// don't care about store vs. shipyard) keeps compiling unchanged.
+// `shopKind` is optional so call sites that don't care about store vs.
+// shipyard (several reducer.test.ts cases) keep compiling unchanged.
 const SECOND_HAND_MULTIPLIER = 0.75;
 export function frameCost(
   baseCost: number,

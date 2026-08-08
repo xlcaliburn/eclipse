@@ -1,17 +1,10 @@
 import { useState } from 'react';
 import { getPart } from '../game/parts';
-import { playerShipLabel } from '../game/ship';
 import type { PlayerShipState, RewardSummary } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
-import { FrameSilhouette } from './ShipSilhouette';
-
-function shipUpgradeNote(ship: PlayerShipState): string | null {
-  if (ship.upgrades.length === 0) return null;
-  // Addendum A.4: at most 1 permanent upgrade per ship — a second pick
-  // replaces (destroys) the first, so say so before the click confirms it.
-  return `replaces ${getUpgrade(ship.upgrades[0]).name}`;
-}
+import { ShipPickRow } from './ShipPickRow';
+import { shipUpgradeNote } from '../game/ship';
 
 interface RewardScreenProps {
   reward: RewardSummary;
@@ -70,24 +63,12 @@ export function RewardScreen({ reward, fleet, onPickUpgrade, onLeave }: RewardSc
           {selectedUpgrade && (
             <>
               <p className="hint">Attach to which ship?</p>
-              <div className="reward-screen__ship-picks">
-                {fleet.map((ship, i) => {
-                  const note = shipUpgradeNote(ship);
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      className="shop-button"
-                      onClick={() => onPickUpgrade(selectedUpgrade, i)}
-                      title={note ?? undefined}
-                    >
-                      <FrameSilhouette frameId={ship.frameId} size={24} />
-                      {playerShipLabel(fleet, i)}
-                      {note && <span className="hint"> ({note})</span>}
-                    </button>
-                  );
-                })}
-              </div>
+              <ShipPickRow
+                fleet={fleet}
+                onPick={(i) => onPickUpgrade(selectedUpgrade, i)}
+                noteFor={shipUpgradeNote}
+                titleFor={(ship) => shipUpgradeNote(ship) ?? undefined}
+              />
             </>
           )}
         </div>

@@ -5,15 +5,7 @@ import { WeaponDiceRow } from './Die';
 // Iteration 13: ONE stat presentation for every ship everywhere — fleet
 // panel, enemy panel, combat cards. HP as pips, the three combat stats in
 // a fixed order with fixed labels, weapons as dice.
-export function StatBar({
-  stats,
-  damage = 0,
-  showWeapons = true,
-}: {
-  stats: ShipStats;
-  damage?: number;
-  showWeapons?: boolean;
-}) {
+export function StatBar({ stats, damage = 0 }: { stats: ShipStats; damage?: number }) {
   const hp = Math.max(0, stats.hp - damage);
   return (
     <div className="stat-bar">
@@ -29,7 +21,7 @@ export function StatBar({
           <abbr>PLT</abbr> {stats.shield}
         </span>
       </div>
-      {showWeapons && <WeaponDiceRow stats={stats} />}
+      <WeaponDiceRow stats={stats} />
     </div>
   );
 }

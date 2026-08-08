@@ -18,13 +18,14 @@ import {
   SHIPYARD_UPGRADE_COST,
   STARTING_FIT,
 } from '../game/reducer';
-import { FUSABLE_PARTS, FUSION_STAT_ABBR, FUSION_STAT_BASE, FUSION_STAT_ORDER, fusionCost, playerShipLabel } from '../game/ship';
+import { FUSABLE_PARTS, FUSION_STAT_ABBR, FUSION_STAT_BASE, FUSION_STAT_ORDER, fusionCost } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
-import { WeaponDie } from './Die';
+import { FitChips } from './FitChips';
 import { FleetPanel } from './FleetPanel';
 import { PartCard } from './PartCard';
+import { ShipPickRow } from './ShipPickRow';
 import { FrameSilhouette } from './ShipSilhouette';
 
 // Iteration 31 (the Foundry): fuse it into the hull — permanent, no slot.
@@ -223,17 +224,7 @@ export function ShopScreen({
               {/* 2026-08-08: show the weapon it actually arrives fitted with —
                   same "always show the weapon with its dice" rule the frame
                   cards' starting-fit preview already follows. */}
-              <div className="frame-card__fit">
-                {MERCENARY_FIT.map((partId, i) => {
-                  const part = getPart(partId);
-                  return (
-                    <span key={`${partId}-${i}`} className="frame-card__fit-item" title={part.description}>
-                      {part.weapon && <WeaponDie damage={part.weapon.damage} kind={part.weapon.kind} size={16} />}
-                      {part.name}
-                    </span>
-                  );
-                })}
-              </div>
+              <FitChips partIds={MERCENARY_FIT} />
               <button type="button" className="shop-button" onClick={onBuyMercenary} disabled={credits < mercCost}>
                 Hire ({mercCost} cr)
               </button>
@@ -298,19 +289,7 @@ export function ShopScreen({
                   )}
                 </span>
                 <span className="frame-card__desc">{frame.blurb}</span>
-                {startingFit.length > 0 && (
-                  <div className="frame-card__fit">
-                    {startingFit.map((partId, i) => {
-                      const part = getPart(partId);
-                      return (
-                        <span key={`${partId}-${i}`} className="frame-card__fit-item" title={part.description}>
-                          {part.weapon && <WeaponDie damage={part.weapon.damage} kind={part.weapon.kind} size={16} />}
-                          {part.name}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
+                {startingFit.length > 0 && <FitChips partIds={startingFit} />}
                 {preview && preview.hp > 0 && (
                   <span className="frame-card__bonus">
                     Arrives fused +{preview.hp} HP with {preview.upgrades.map((id) => getUpgrade(id).name).join(', ')}.
@@ -337,24 +316,14 @@ export function ShopScreen({
                 <span className="card-tile__name">{getUpgrade(upgradeOffer).name}</span>
                 <span className="card-tile__desc">{getUpgrade(upgradeOffer).description}</span>
                 <span className="card-tile__desc">Slotless and permanent — pick which ship carries it.</span>
-                <div className="reward-screen__ship-picks">
-                  {fleet.map((ship, i) => {
-                    const merc = ship.mercenary;
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        className="shop-button"
-                        onClick={() => onBuyUpgrade(i)}
-                        disabled={credits < SHIPYARD_UPGRADE_COST || merc}
-                        title={merc ? "A mercenary won't carry a permanent upgrade past its one fight." : undefined}
-                      >
-                        <FrameSilhouette frameId={ship.frameId} size={24} />
-                        {playerShipLabel(fleet, i)}
-                      </button>
-                    );
-                  })}
-                </div>
+                <ShipPickRow
+                  fleet={fleet}
+                  onPick={onBuyUpgrade}
+                  disabledFor={(ship) => credits < SHIPYARD_UPGRADE_COST || !!ship.mercenary}
+                  titleFor={(ship) =>
+                    ship.mercenary ? "A mercenary won't carry a permanent upgrade past its one fight." : undefined
+                  }
+                />
                 <span className="frame-card__cost">{SHIPYARD_UPGRADE_COST} cr</span>
               </div>
             </div>
@@ -413,26 +382,21 @@ export function ShopScreen({
           {selectedFusionPart && fusableInInventory.includes(selectedFusionPart) && (
             <>
               <p className="hint">Fuse into which ship?</p>
-              <div className="reward-screen__ship-picks">
-                {fleet.map((ship, i) => {
+              <ShipPickRow
+                fleet={fleet}
+                onPick={(i) => onFuseStat(i, selectedFusionPart)}
+                noteFor={(ship) => {
                   const fusable = FUSABLE_PARTS[selectedFusionPart]!;
-                  const cost = fusionCost(fusable.stat, ship, fusable.amount);
-                  const merc = ship.mercenary;
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      className="shop-button"
-                      onClick={() => onFuseStat(i, selectedFusionPart)}
-                      disabled={credits < cost || merc}
-                      title={merc ? "A mercenary won't carry a permanent fusion past its one fight." : undefined}
-                    >
-                      <FrameSilhouette frameId={ship.frameId} size={24} />
-                      {playerShipLabel(fleet, i)} ({cost} cr)
-                    </button>
-                  );
-                })}
-              </div>
+                  return `${fusionCost(fusable.stat, ship, fusable.amount)} cr`;
+                }}
+                disabledFor={(ship) => {
+                  const fusable = FUSABLE_PARTS[selectedFusionPart]!;
+                  return credits < fusionCost(fusable.stat, ship, fusable.amount) || !!ship.mercenary;
+                }}
+                titleFor={(ship) =>
+                  ship.mercenary ? "A mercenary won't carry a permanent fusion past its one fight." : undefined
+                }
+              />
             </>
           )}
         </>

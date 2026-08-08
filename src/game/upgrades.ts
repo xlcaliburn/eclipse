@@ -44,17 +44,20 @@ export function getUpgrade(id: UpgradeId): Upgrade {
 // one draw. Bug report: "giving me multiple of the same options" — a
 // screenshot of 3x "Regenerative plating" in one pick. Mirrors
 // escalations.ts's drawEscalationSchedule (splice from a copy of the pool).
-// `count` is always <= pool.length in practice; the recycle-on-empty guard
-// just keeps this correct rather than throwing if that assumption ever
-// breaks. `pool` defaults to every upgrade — iteration 39 briefly split
-// this into an elite-exclusive pool (ELITE_UPGRADE_POOL) vs. a
-// hull-purchase-bonus pool (HULL_BONUS_UPGRADE_POOL), but both constants
+// `count` is always <= UPGRADES.length in practice; the recycle-on-empty
+// guard just keeps this correct rather than throwing if that assumption
+// ever breaks. Draws from every upgrade, unconditionally — iteration 39
+// briefly split this into an elite-exclusive pool (ELITE_UPGRADE_POOL) vs.
+// a hull-purchase-bonus pool (HULL_BONUS_UPGRADE_POOL), but both constants
 // are gone as of 2026-08-07: the only two ids that made the elite pool
 // exclusive ('optics', 'salvage') were removed outright, so every call
 // site (elite reward, boss interlude, hull-purchase bonus, shipyard
 // offer, repair-yard overhaul, the Warlord's starting pick) is back to
-// drawing from the same unrestricted list.
-export function randomUpgradeIds(count: number, rng: () => number, pool: UpgradeId[] = UPGRADES.map((u) => u.id)): UpgradeId[] {
+// drawing from the same unrestricted list. The `pool` parameter this
+// function used to take for that split was dropped in 47.2h — every
+// remaining call site passed the same default anyway.
+export function randomUpgradeIds(count: number, rng: () => number): UpgradeId[] {
+  const pool = UPGRADES.map((u) => u.id);
   const source = [...pool];
   const picks: UpgradeId[] = [];
   for (let i = 0; i < count; i++) {

@@ -55,12 +55,18 @@ export function WeaponDie({
   );
 }
 
+// 47.2g: `targetHighest` dropped from this tooltip — verified unreachable
+// (no part in parts.ts or enemy in enemies.ts ever sets it; only
+// combatEngine.test.ts's synthetic fixtures do). `selfDamageOnNatOne`
+// stays — the Rift cult enemy (enemies.ts) sets it live, and this
+// function renders both player and enemy stats through the same
+// WeaponDiceRow/StatBar path.
 function diceFor(weapons: WeaponStats[], kind: 'cannon' | 'missile'): { damage: number; kind: 'cannon' | 'missile'; title: string }[] {
   return weapons.flatMap((w) =>
     Array.from({ length: w.diceCount }, () => ({
       damage: w.damage,
       kind,
-      title: `${w.diceCount}× ${kind} (${w.damage} dmg${w.shieldPierce ? `, ignores ${w.shieldPierce} piloting` : ''}${w.aoeDamage ? ', hits every ship' : ''}${w.targetHighest ? ', targets strongest' : ''}${w.selfDamageOnNatOne ? ', backfires on a natural 1' : ''})`,
+      title: `${w.diceCount}× ${kind} (${w.damage} dmg${w.shieldPierce ? `, ignores ${w.shieldPierce} piloting` : ''}${w.aoeDamage ? ', hits every ship' : ''}${w.selfDamageOnNatOne ? ', backfires on a natural 1' : ''})`,
     })),
   );
 }

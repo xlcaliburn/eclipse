@@ -7,7 +7,7 @@ import { GAUNTLET, OPENER } from './enemies';
 import { getFrame, PURCHASABLE_FRAME_IDS } from './frames';
 import type { FrameId } from './frames';
 import { MAX_HEAT } from './heat';
-import { bossColumn, laneColumns } from './map';
+import { bossColumn, globalColumn, laneColumns } from './map';
 import { getProtocol } from './protocols';
 import type { CargoTag, GameMap, MapPosition, NodeType } from './map';
 import { CAPTURED_SCHEMATIC_PART_ID, getPart } from './parts';
@@ -19,7 +19,6 @@ import {
   eliteReward,
   fleetCap,
   frameCost,
-  globalColumn,
   hasLineOfRetreat,
   initialRunState,
   partCost,

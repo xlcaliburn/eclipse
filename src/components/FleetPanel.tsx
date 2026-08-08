@@ -1,17 +1,16 @@
 import type { CommanderId } from '../game/commanders';
-import { OUTSPEED_GAP, qualifiesForOutspeed } from '../game/combatEngine';
+import { playerOutspeedGap, qualifiesForOutspeed } from '../game/combatEngine';
 import type { CounterProtocolId } from '../game/counterProtocols';
 import { getFrame } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
-import { hasProtocol } from '../game/protocols';
 import type { ProtocolId } from '../game/protocols';
 import { REPAIR_COST_PER_HP, upgradeCapFor } from '../game/reducer';
 import { deriveFleetStats, effectiveSlots, fusionSummary, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
-import { getUpgrade } from '../game/upgrades';
 import { PartCard } from './PartCard';
 import { CounterProtocolRow, ProtocolRow } from './SettingsScreen';
 import { StatBar } from './StatBar';
+import { UpgradeBadgeRow } from './UpgradeBadgeRow';
 import { FrameSilhouette } from './ShipSilhouette';
 
 interface FleetPanelProps {
@@ -23,7 +22,6 @@ interface FleetPanelProps {
   onUnequip: (shipIndex: number, partId: PartId) => void;
   onSellPart?: (partId: PartId) => void; // shop only — sells an unequipped inventory part for floor(cost/2)
   onScuttle?: (shipIndex: number) => void; // shop only — decommissions a non-Flagship ship (iteration 8)
-  onPartHover?: (partId: PartId | null) => void; // prep only — feeds the forecast delta preview (iteration 12.3)
   // Iteration 17: the CURRENT enemy's fastest raw initiative, so each ship
   // card can show a static "would outspeed them" badge before the fight
   // starts. Undefined in contexts with no committed enemy (the shop) — no
@@ -54,8 +52,6 @@ interface FleetPanelProps {
   onBuyRepair?: (shipIndex: number) => void; // shop only — pay to fully heal a ship's damage
 }
 
-export { playerShipLabel };
-
 export function FleetPanel({
   fleet,
   inventory,
@@ -65,7 +61,6 @@ export function FleetPanel({
   onUnequip,
   onSellPart,
   onScuttle,
-  onPartHover,
   outspeedFastestEnemyInitiative,
   collapsibleParts,
   commanderId,
@@ -81,10 +76,7 @@ export function FleetPanel({
 
   const instructions =
     'Click a ship to select it, click inventory parts to equip them to it, and click an equipped part to remove it.';
-  // Overspeed protocols (iteration 28): the player-side Outspeed gap drops
-  // 4 -> 3 — mirrors combatEngine.ts's initCombat, the only other place
-  // this number gets computed.
-  const outspeedGap = hasProtocol(protocols, 'overspeed-protocols') ? OUTSPEED_GAP - 1 : OUTSPEED_GAP;
+  const outspeedGap = playerOutspeedGap(protocols);
 
   return (
     <section className="blueprint-panel">
@@ -174,23 +166,11 @@ export function FleetPanel({
                 fitted — an open augment slot (dashed, dim) is exactly the
                 info a Warlord player needs to see at a glance, now that
                 the Flagship can hold 3. */}
-            <div className="ship-card__upgrades">
-              {ship.upgrades.map((upgradeId, i) => (
-                <span key={`${upgradeId}-${i}`} className="upgrade-badge" title={getUpgrade(upgradeId).description}>
-                  {getUpgrade(upgradeId).name}
-                </span>
-              ))}
-              {Array.from({ length: Math.max(0, upgradeCapFor(ship, commanderId) - ship.upgrades.length) }).map((_, i) => (
-                <span key={`empty-augment-${i}`} className="upgrade-badge upgrade-badge--empty" title="Open augment slot">
-                  Open augment slot
-                </span>
-              ))}
-              {fusionSummary(ship.fusions) && (
-                <span className="upgrade-badge" title="Iteration 31: permanent, slotless — fused at the Foundry">
-                  Fused: {fusionSummary(ship.fusions)}
-                </span>
-              )}
-            </div>
+            <UpgradeBadgeRow
+              upgrades={ship.upgrades}
+              emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
+              fusionText={fusionSummary(ship.fusions)}
+            />
             {(() => {
               const grid = (
                 <div className="slot-grid">
@@ -247,12 +227,7 @@ export function FleetPanel({
     return (
         <div className="inventory-grid">
           {inventory.map((partId, i) => (
-            <div
-              key={`${partId}-${i}`}
-              className="inventory-item"
-              onMouseEnter={onPartHover ? () => onPartHover(partId) : undefined}
-              onMouseLeave={onPartHover ? () => onPartHover(null) : undefined}
-            >
+            <div key={`${partId}-${i}`} className="inventory-item">
               <PartCard
                 part={getPart(partId)}
                 onClick={selectedHasRoom ? () => onEquip(selectedShipIndex, partId) : undefined}

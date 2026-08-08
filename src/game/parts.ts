@@ -173,10 +173,11 @@ export const PARTS: Part[] = [
     cost: 12,
     weapon: { kind: 'cannon', diceCount: 1, damage: 4 },
   },
-  // 2026-08-08: Rift cannon pulled from the shop pool "for now" — parked in
-  // plans/parking-lot.md rather than deleted outright. The shared
-  // self-damage-on-nat-1 mechanic (selfDamageOnNatOne) stays live in
-  // combatEngine.ts/resolver.ts — the enemy Rift cult still uses it.
+  // 2026-08-08: the player-facing Rift cannon part was removed from the
+  // shop pool "for now" — parked in plans/parking-lot.md rather than
+  // deleted outright. The shared self-damage-on-nat-1 mechanic
+  // (selfDamageOnNatOne, read in combatEngine.ts) stays live regardless —
+  // the enemy Rift cult (see enemies.ts) still sets it on itself.
   {
     id: 'flak',
     name: 'Flak battery',

@@ -1,5 +1,6 @@
 import {
   applyCounterProtocol,
+  byId,
   eliteEnemyForColumn,
   eliteVariant,
   FINAL_BOSS_IDS,
@@ -11,7 +12,6 @@ import {
 import type { FinalBossId } from '../src/game/enemies';
 import { COUNTER_PROTOCOLS, getCounterProtocol } from '../src/game/counterProtocols';
 import type { CounterProtocolId } from '../src/game/counterProtocols';
-import { forecastWinRate } from '../src/game/forecast';
 import { STARTING_LOADOUT } from '../src/game/parts';
 import type { ProtocolId } from '../src/game/protocols';
 import type { EnemyDef, PlayerShipState } from '../src/game/types';
@@ -123,13 +123,27 @@ function pad(s: string, width: number): string {
   return s.length >= width ? s : s + ' '.repeat(width - s.length);
 }
 
-function findEnemy(id: string): EnemyDef {
-  const found = GAUNTLET.find((e) => e.id === id);
-  if (!found) throw new Error(`Unknown enemy id: ${id}`);
-  return found;
+// Iteration 45.1/47.1.2: the one shared combat loop (scripts/sim/combat.ts)
+// wrapped to keep this file's own plain-percent return shape (every call
+// site already compares it with >=/<= against a whole number) while
+// exposing the underlying Wilson interval for the sanity-check gates at
+// the bottom of this file to read directly. Used to be `forecastWinRate`
+// from src/game/forecast.ts — that module was deleted in 47.1.2 (its memo
+// cache key ignored `upgrades`/`fusions`, so this table's "act-2 endgame
+// fleet" column was silently a cache hit on "strong fleet"'s numbers; it
+// also had zero production callers left, only this script and its own
+// test — so the fix was deleting it, not patching the cache key).
+function simulateFleet(
+  fleet: PlayerShipState[],
+  enemy: EnemyDef,
+  sims: number,
+  protocols?: ProtocolId[],
+): { winRate: number; avgRounds: number; interval: WilsonInterval } {
+  const result = sharedSimulateFleet(fleet, enemy, sims, { protocols });
+  return { winRate: Math.round(result.winRate.point * 100), avgRounds: result.avgRounds, interval: result.winRate };
 }
 
-const ANCIENT_GUARDIAN_ELITE = eliteVariant(findEnemy('ancient-guardian'));
+const ANCIENT_GUARDIAN_ELITE = eliteVariant(byId('ancient-guardian'));
 const SNIPER_ELITE = eliteEnemyForColumn(1, 3, Math.random); // the col-3 elite, softened to +1 HP
 
 // The act-1 mid-boss trio (iteration 8): one of these three is drawn at
@@ -153,7 +167,7 @@ const rates: Record<string, Record<string, number>> = {};
 
 for (const enemy of MATCHUPS) {
   const row = FLEETS.map((build) => {
-    const rate = forecastWinRate(build.fleet, enemy, SIMS);
+    const rate = simulateFleet(build.fleet, enemy, SIMS).winRate;
     rates[enemy.id] ??= {};
     rates[enemy.id][build.name] = rate;
     return pad(`${rate}%`, 20);
@@ -163,26 +177,9 @@ for (const enemy of MATCHUPS) {
 
 // --- Iteration 17 ("Outspeed") audit --------------------------------------
 // Win rate alone doesn't show what Outspeed is FOR (shorter fights), so this
-// section also tracks average cannon-round count — simulated directly
-// (bypassing forecastWinRate's cache, which only stores the win percentage)
-// so both numbers come from the exact same simulation runs.
-//
-// Iteration 45.1: this used to be a third private copy of the same combat
-// loop balance.ts, actRun.ts, and enemyValue.ts each hand-rolled — now a
-// thin wrapper over the one shared `sharedSimulateFleet` (scripts/sim/
-// combat.ts), keeping this file's own plain-percent return shape (every
-// call site below already compares it with >=/<= against a whole number)
-// while exposing the underlying Wilson interval for the sanity-check gates
-// at the bottom of this file to read directly.
-function simulateFleet(
-  fleet: PlayerShipState[],
-  enemy: EnemyDef,
-  sims: number,
-  protocols?: ProtocolId[],
-): { winRate: number; avgRounds: number; interval: WilsonInterval } {
-  const result = sharedSimulateFleet(fleet, enemy, sims, { protocols });
-  return { winRate: Math.round(result.winRate.point * 100), avgRounds: result.avgRounds, interval: result.winRate };
-}
+// section also tracks average cannon-round count, reusing the exact same
+// `simulateFleet` calls above would have made anyway (see the wrapper's own
+// comment).
 
 console.log('\nIteration 17 (Outspeed) — average cannon rounds per matchup (strike fleet vs control):\n');
 const roundsHeader = pad('enemy', 26) + pad('strike fleet', 16) + pad('  rounds', 12) + pad('control', 16) + pad('  rounds', 12);
@@ -369,8 +366,8 @@ const MID_FLEET_WITH_ARTIFACT: PlayerShipState[] = MID_FLEET.map((ship) => ({
   equipped: ship.equipped.map((p) => (p === 'comp2' ? 'ancient-artifact' : p)),
 }));
 const ARTIFACT_MATCHUP = GAUNTLET[2]; // shield cruiser — a real accuracy check, benefits directly from +4 computer
-const artifactBaseline = forecastWinRate(MID_FLEET, ARTIFACT_MATCHUP, SIMS);
-const artifactWithPart = forecastWinRate(MID_FLEET_WITH_ARTIFACT, ARTIFACT_MATCHUP, SIMS);
+const artifactBaseline = simulateFleet(MID_FLEET, ARTIFACT_MATCHUP, SIMS).winRate;
+const artifactWithPart = simulateFleet(MID_FLEET_WITH_ARTIFACT, ARTIFACT_MATCHUP, SIMS).winRate;
 console.log('\nIteration 34 (the relic chain) — Ancient artifact spot-check (informational, not gated):');
 console.log(
   `  mid fleet vs ${ARTIFACT_MATCHUP.name}: ${artifactBaseline}% baseline -> ${artifactWithPart}% with the artifact swapped in for comp2 (+${artifactWithPart - artifactBaseline}pp)`,
@@ -380,10 +377,10 @@ console.log(
 // interval-aware ones (see scripts/sim/stats.ts) wherever a Wilson
 // interval is available — the strike/control and final-boss checks below
 // all run through the shared `simulateFleet`, which exposes one. The
-// GAUNTLET-matchup checks still read `rates` (forecastWinRate's own
-// cached point estimate — that table isn't threaded through the shared
-// interval machinery yet) and fall back to a plain PASS/FAIL boolean;
-// noted here rather than silently mixed in as if identical.
+// GAUNTLET-matchup checks still read `rates` (this file's own point-
+// estimate table above — not threaded through the shared interval
+// machinery yet) and fall back to a plain PASS/FAIL boolean; noted here
+// rather than silently mixed in as if identical.
 function toVerdict(pass: boolean): CheckResult['verdict'] {
   return pass ? 'PASS' : 'FAIL';
 }

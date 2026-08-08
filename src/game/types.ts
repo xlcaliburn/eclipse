@@ -288,11 +288,6 @@ export type CombatEvent =
   | PartEffectEvent
   | OutspeedEvent;
 
-export interface CombatResult {
-  winner: Side;
-  log: CombatEvent[];
-}
-
 // --- Run state ----------------------------------------------------------
 
 export type Phase =

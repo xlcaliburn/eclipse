@@ -11,7 +11,6 @@ export type FxItem =
   | { key: number; kind: 'tracer'; x1: number; y1: number; x2: number; y2: number; side: Side; missile: boolean; veer: boolean }
   | { key: number; kind: 'ripple'; x: number; y: number }
   | { key: number; kind: 'shards'; x: number; y: number }
-  | { key: number; kind: 'damage'; x: number; y: number; text: string }
   | { key: number; kind: 'die'; x: number; y: number; raw: number; hit: boolean }
   | { key: number; kind: 'banner'; text: string };
 
@@ -76,13 +75,6 @@ export function TheaterFxLayer({ fx }: { fx: FxItem[] }) {
               style={{ left: item.x, top: item.y }}
             >
               <DieFace value={item.raw} size={26} />
-            </span>
-          );
-        }
-        if (item.kind === 'damage') {
-          return (
-            <span key={item.key} className="fx-damage" style={{ left: item.x, top: item.y }}>
-              {item.text}
             </span>
           );
         }

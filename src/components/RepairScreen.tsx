@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { playerShipLabel } from '../game/ship';
+import { shipUpgradeNote } from '../game/ship';
 import type { PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
-import { FrameSilhouette } from './ShipSilhouette';
+import { ShipPickRow } from './ShipPickRow';
 
 interface RepairScreenProps {
   fleet: PlayerShipState[];
@@ -81,24 +81,12 @@ export function RepairScreen({
               {selectedUpgrade && (
                 <>
                   <p className="hint">Attach to which ship?</p>
-                  <div className="reward-screen__ship-picks">
-                    {fleet.map((ship, i) => {
-                      const hasUpgrade = ship.upgrades.length > 0;
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          className="shop-button"
-                          onClick={() => onChooseOverhaul(selectedUpgrade, i)}
-                          title={hasUpgrade ? `replaces ${getUpgrade(ship.upgrades[0]).name}` : undefined}
-                        >
-                          <FrameSilhouette frameId={ship.frameId} size={24} />
-                          {playerShipLabel(fleet, i)}
-                          {hasUpgrade && <span className="hint"> (replaces {getUpgrade(ship.upgrades[0]).name})</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <ShipPickRow
+                    fleet={fleet}
+                    onPick={(i) => onChooseOverhaul(selectedUpgrade, i)}
+                    noteFor={shipUpgradeNote}
+                    titleFor={(ship) => shipUpgradeNote(ship) ?? undefined}
+                  />
                 </>
               )}
             </>

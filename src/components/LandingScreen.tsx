@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { DailyRecord } from '../game/persistence';
-import { codeToSeed } from '../game/seedCode';
+import { SeedEntry } from './SeedEntry';
+import { useCopyToClipboard } from './useCopyToClipboard';
 import { useIsCompact } from './useIsCompact';
 
 // Iteration 25: a phone browser tab is not the same thing as an installed
@@ -59,12 +60,6 @@ const OUTCOME_LABEL: Record<string, string> = {
   abandoned: '🏳️ Abandoned',
 };
 
-// 2026-08-08: hidden while seed sharing gets re-evaluated — not a code
-// problem, just not ready to advertise on the front door yet. The whole
-// block below (state, handler, JSX) is left in place so this is a one-line
-// flip back on, not a re-implementation.
-const SHOW_SEED_ENTRY = false;
-
 // Shown at every boot, whether or not a save exists (previously this only
 // appeared for returning players — a brand-new player got no context at all
 // and landed straight on commander pick). `hasSave` decides which buttons
@@ -81,31 +76,11 @@ export function LandingScreen({
   onContinueDaily,
   onNewRunFromSeed,
 }: LandingScreenProps) {
-  const [copied, setCopied] = useState(false);
+  const [copied, copyResultText] = useCopyToClipboard();
   const [installHintDismissed, setInstallHintDismissed] = useState(
     () => isRunningInstalled() || wasInstallHintDismissed(),
   );
-  const [seedInput, setSeedInput] = useState('');
-  const [seedError, setSeedError] = useState(false);
   const isCompact = useIsCompact();
-
-  function submitSeed() {
-    const seed = codeToSeed(seedInput);
-    if (seed === null) {
-      setSeedError(true);
-      return;
-    }
-    setSeedError(false);
-    onNewRunFromSeed(seed);
-  }
-
-  function copyResult() {
-    if (!dailyResult?.shareText) return;
-    navigator.clipboard
-      ?.writeText(dailyResult.shareText)
-      .then(() => setCopied(true))
-      .catch(() => setCopied(false));
-  }
 
   function dismissInstallHint() {
     setInstallHintDismissed(true);
@@ -163,40 +138,7 @@ export function LandingScreen({
         </button>
       </div>
 
-      {/* Iteration 26 (placeholder + input fixed in 27): replay a specific
-          sector — the same seed always generates the same map, bosses,
-          shops, and events (iteration 9's determinism), so a code shared by
-          another player (or saved from your own past run) reproduces it
-          exactly. No maxLength here — codeToSeed does its own length/range
-          validation, and truncating a pasted code on the way in would just
-          turn a valid code into an invalid one before it's ever checked. */}
-      {SHOW_SEED_ENTRY && (
-        <div className="landing-screen__seed">
-          <label htmlFor="seed-input" className="landing-screen__seed-label">
-            Have a run seed? Start that exact sector:
-          </label>
-          <div className="landing-screen__seed-row">
-            <input
-              id="seed-input"
-              type="text"
-              className="landing-screen__seed-input"
-              placeholder="e.g. 2K9X4QM"
-              value={seedInput}
-              onChange={(e) => {
-                setSeedInput(e.target.value);
-                setSeedError(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitSeed();
-              }}
-            />
-            <button type="button" className="shop-button" onClick={submitSeed} disabled={!seedInput.trim()}>
-              Go
-            </button>
-          </div>
-          {seedError && <p className="landing-screen__seed-error">Not a valid seed code — check for typos.</p>}
-        </div>
-      )}
+      <SeedEntry onNewRunFromSeed={onNewRunFromSeed} />
 
       {/* Iteration 18: the daily — same sector for everyone today, one
           attempt. Starting it consumes the attempt even if abandoned. */}
@@ -227,7 +169,7 @@ export function LandingScreen({
             {dailyResult.shareText && (
               <>
                 <pre className="daily-share">{dailyResult.shareText}</pre>
-                <button type="button" className="shop-button" onClick={copyResult}>
+                <button type="button" className="shop-button" onClick={() => copyResultText(dailyResult.shareText)}>
                   {copied ? 'Copied!' : 'Copy result'}
                 </button>
               </>

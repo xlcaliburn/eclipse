@@ -247,15 +247,17 @@ export const GAUNTLET: EnemyDef[] = [
   },
 ];
 
-export const BOSS_INDEX = GAUNTLET.length - 1;
-
 // --- Map-oriented lookups (iteration 3) ----------------------------------
-// GAUNTLET's order/indices are load-bearing for the resolver/forecast test
-// suites (they reference GAUNTLET[0], GAUNTLET[2], etc. by index) and are
-// left untouched. These pools reference the same objects for the map's
+// GAUNTLET's order/indices are load-bearing for the combat-engine/balance
+// test suites (they reference GAUNTLET[0], GAUNTLET[2], etc. by index) and
+// are left untouched. These pools reference the same objects for the map's
 // depth-based enemy selection.
 
-const byId = (id: string): EnemyDef => {
+// Exported (47.7.1): scripts/balance.ts used to hand-roll a byte-identical
+// private copy (`findEnemy`) purely to look up enemies by id for its own
+// fixtures — one lookup, one place to get the "unknown id" error message
+// right.
+export const byId = (id: string): EnemyDef => {
   const found = GAUNTLET.find((e) => e.id === id);
   if (!found) throw new Error(`Unknown enemy id: ${id}`);
   return found;
@@ -270,7 +272,6 @@ export const EASY_POOL: EnemyDef[] = [byId('scout-pack'), byId('missile-frigate'
 // SNIPER_PAIR, pushed in below.
 export const MID_POOL: EnemyDef[] = [byId('shield-cruiser'), byId('interceptor-swarm')];
 export const HARD_POOL: EnemyDef[] = [byId('plasma-tank'), byId('ancient-guardian')];
-export const BOSS: EnemyDef = byId('gcds');
 
 // --- Act-2 roster (iteration 8) ---------------------------------------------
 // Built largely on iteration 5/7 weapon tech: the first enemy-side flak
@@ -515,6 +516,19 @@ HARD_POOL.push(ESCORTED_SNIPER); // act-1 hard
 MID_POOL.push(SNIPER_PAIR); // act-1 mid
 MID_POOL_ACT2.push(CARRIER_GROUP); // act-2 mid
 HARD_POOL_ACT2.push(COMMAND_WING); // act-2 hard
+
+// Iteration 17: the fastest ship in an enemy composition, in raw initiative
+// — the "fastest surviving opposing ship" the Outspeed rule compares
+// against. Static/pre-fight, so this is every group's base stat with no
+// round-modifier bonuses (those only exist mid-combat). 47.3i: was defined
+// identically in both EnemyPanel.tsx (its own Outspeed readout) and
+// PrepScreen.tsx (feeding FleetPanel's per-ship badge) — PrepScreen's own
+// comment claimed it was computed once "rather than duplicated inside
+// FleetPanel," which was true of FleetPanel but not of EnemyPanel, right
+// next to it on the same screen.
+export function fastestInitiative(groups: EnemyGroup[]): number {
+  return groups.reduce((best, g) => Math.max(best, g.stats.initiative), -Infinity);
+}
 
 // An elite variant of an enemy: extra HP per ship in every group (default
 // +2), same everything else.

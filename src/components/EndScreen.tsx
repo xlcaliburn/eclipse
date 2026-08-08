@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { playSfx } from '../audio';
 import { playerShipLabel } from '../game/ship';
 import { seedToCode } from '../game/seedCode';
 import type { PlayerShipState, RunStats } from '../game/types';
 import { FrameSilhouette } from './ShipSilhouette';
+import { useCopyToClipboard } from './useCopyToClipboard';
 
 interface EndScreenProps {
   outcome: 'victory' | 'defeat';
@@ -39,8 +40,8 @@ export function EndScreen({
   onNewRun,
 }: EndScreenProps) {
   const won = outcome === 'victory';
-  const [copied, setCopied] = useState(false);
-  const [seedCopied, setSeedCopied] = useState(false);
+  const [copied, copyShareText] = useCopyToClipboard();
+  const [seedCopied, copySeedText] = useCopyToClipboard();
 
   // Once per mount — this screen only ever renders once per run's end, so
   // there's no risk of the cue re-firing on an unrelated re-render.
@@ -55,22 +56,6 @@ export function EndScreen({
     0,
   );
   const mvp = (fleet[mvpIndex]?.kills ?? 0) > 0 ? fleet[mvpIndex] : undefined;
-
-  function copyShare() {
-    if (!dailyShare) return;
-    navigator.clipboard
-      ?.writeText(dailyShare)
-      .then(() => setCopied(true))
-      .catch(() => setCopied(false));
-  }
-
-  function copySeed() {
-    if (seed === null) return;
-    navigator.clipboard
-      ?.writeText(seedToCode(seed))
-      .then(() => setSeedCopied(true))
-      .catch(() => setSeedCopied(false));
-  }
 
   return (
     <div className={`end-screen${won ? ' end-screen--victory' : ' end-screen--defeat'}`}>
@@ -133,7 +118,7 @@ export function EndScreen({
       {dailyShare && (
         <div className="end-screen__daily">
           <pre className="daily-share">{dailyShare}</pre>
-          <button type="button" className="shop-button" onClick={copyShare}>
+          <button type="button" className="shop-button" onClick={() => copyShareText(dailyShare)}>
             {copied ? 'Copied!' : 'Copy result'}
           </button>
         </div>
@@ -145,7 +130,7 @@ export function EndScreen({
             {won ? 'Run it back, or hand this sector to someone else:' : 'Want another shot at this exact sector?'}
           </p>
           <p className="settings-row__seed-code">{seedToCode(seed)}</p>
-          <button type="button" className="shop-button" onClick={copySeed}>
+          <button type="button" className="shop-button" onClick={() => copySeedText(seedToCode(seed))}>
             {seedCopied ? 'Copied!' : 'Copy seed'}
           </button>
         </div>

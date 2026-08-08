@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { fastestInitiative } from '../game/enemies';
 import { deriveFleetStats, fleetHasOnlyMissiles, fleetHasWeapon } from '../game/ship';
 import { actColumns, CARGO_DESCRIPTION, CARGO_LABEL, getNode } from '../game/map';
 import type { RunAction } from '../game/reducer';
@@ -21,11 +22,10 @@ export function PrepScreen({ state, dispatch }: PrepScreenProps) {
     [state.fleet, state.commanderId, state.protocols],
   );
   // Iteration 17: the enemy's fastest raw initiative, for the FleetPanel's
-  // per-ship Outspeed badge — computed once here rather than duplicated
-  // inside FleetPanel, which has no reason to know about EnemyDef shapes.
-  const enemyFastestInitiative = enemy
-    ? enemy.groups.reduce((best, g) => Math.max(best, g.stats.initiative), -Infinity)
-    : undefined;
+  // per-ship Outspeed badge — FleetPanel has no reason to know about
+  // EnemyDef shapes, so this is computed here (and, identically, by
+  // EnemyPanel right beside it — see enemies.ts's fastestInitiative, 47.3i).
+  const enemyFastestInitiative = enemy ? fastestInitiative(enemy.groups) : undefined;
 
   const canEngage = fleetHasWeapon(fleetStats);
   const missileOnlyWarning = fleetHasOnlyMissiles(fleetStats);

@@ -5,6 +5,7 @@ import { getPart } from './parts';
 import { hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
 import type { PartId, PlayerShipState, ShipStats } from './types';
+import { getUpgrade } from './upgrades';
 import type { UpgradeId } from './upgrades';
 
 // `upgrades` are slotless (elite drops) and fold in on top of frame + parts.
@@ -223,9 +224,11 @@ export function applyRepairBanking(ship: PlayerShipState, amount: number, flatBa
 
 // Iteration 31 (the Foundry): total fusion PURCHASES already made on this
 // ship, across every stat — each purchase adds exactly +1 to its stat, so
-// this is just their sum. Exported so ShopScreen (display) and actRun.ts
-// (the sim's spender) price from the exact same number the reducer's
-// FUSE_STAT case does.
+// this is just their sum. Feeds `fusionCost` below, which both ShopScreen
+// (display) and scripts/sim/budget.ts (the sim's spender, since iteration
+// 45 — actRun.ts's hand-rolled spender was retired) call, so every price
+// shown to a player and every price the balance sim pays come from the
+// same escalating-cost math.
 export function totalFusions(ship: PlayerShipState): number {
   const f = ship.fusions;
   if (!f) return 0;
@@ -302,6 +305,19 @@ export function fusionSummary(fusions: PlayerShipState['fusions']): string | nul
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
+// 47.3f: the plain-text "HP x/y · Init … · Comp … · Piloting …" line —
+// FleetOverlay and CommanderSelectScreen each hand-wrote this (including
+// the "Piloting" display rename off `shield`, iteration 29). Not `<StatBar>`
+// (which also renders HP pips and a weapon-dice row — a real visual change
+// these two plain-text screens never had) — just the string both of them
+// already produced. `damage` is optional: omitted, the line shows a bare
+// max HP (CommanderSelectScreen's always-fresh starting-ship preview);
+// provided, it shows "current/max" (FleetOverlay's real fleet snapshot).
+export function formatStatLine(stats: ShipStats, damage?: number): string {
+  const hp = damage === undefined ? `${stats.hp}` : `${Math.max(0, stats.hp - damage)}/${stats.hp}`;
+  return `HP ${hp} · Init ${stats.initiative} · Comp ${stats.computer} · Piloting ${stats.shield}`;
+}
+
 // A slotless expansion bay upgrade pushes a ship's usable slot count past
 // its frame's base by 1. Since iteration 8 (addendum A.4) a ship holds at
 // most 1 permanent upgrade, so this is now always +0 or +1 — the old hard
@@ -329,6 +345,17 @@ export function effectiveSlots(
 
 export function equippedWeaponCount(equippedPartIds: PartId[]): number {
   return equippedPartIds.filter((id) => Boolean(getPart(id).weapon)).length;
+}
+
+// 47.3b: byte-identical copies used to live in RewardScreen.tsx and
+// InterludeScreen.tsx (plus a third, twice-inlined, in RepairScreen.tsx) —
+// every "attach a permanent upgrade to a ship" picker needs the same
+// warning. Addendum A.4: at most 1 permanent upgrade per ship — a second
+// pick replaces (destroys) the first, so say so before the click confirms
+// it.
+export function shipUpgradeNote(ship: PlayerShipState): string | null {
+  if (ship.upgrades.length === 0) return null;
+  return `replaces ${getUpgrade(ship.upgrades[0]).name}`;
 }
 
 export function playerShipLabel(fleet: PlayerShipState[], index: number): string {

@@ -25,7 +25,17 @@ import type { RunState } from './types';
 // *choosing* sub-state (`repairUpgradeOptions` drawn on arrival,
 // `repairSummary` only once resolved) that replaces the old "repair always
 // means already-resolved" assumption baked into `isValidRunState` below.
-export const SAVE_VERSION = 5;
+// v6 (iteration 47.1.1): the 'setup' phase (a customize-your-flagship
+// screen between commander pick and map) was removed on 2026-08-07, but
+// this version wasn't bumped at the time — `isValidRunState`'s phase
+// switch also fell through to `default: return true`, so a save written
+// mid-setup before that removal was accepted as valid and rendered
+// nothing (the exact blank-screen bug the v2 postmortem above warns
+// about). Bumping discards any lingering pre-removal save; the switch
+// below now rejects any phase string it doesn't recognize, not just the
+// ones it has a specific companion-field check for, so the next removed
+// phase can't reintroduce this.
+export const SAVE_VERSION = 6;
 const SAVE_KEY = 'eclipse.save.v1';
 // Iteration 18: the daily run gets its own slot so it can coexist with a
 // standard run; a small separate record tracks today's attempt + result.
@@ -147,8 +157,22 @@ function isValidRunState(state: RunState): boolean {
     // never actually finished computing the state this save claims to be.
     case 'protocol-draft':
       return Array.isArray(state.protocolOffers) && state.protocolOffers.length === 3;
-    default:
+    // Every other phase (map, prep, interlude, victory, defeat, commander)
+    // has no extra companion-field requirement of its own. But the switch
+    // must still be exhaustive over *known* phases and reject anything
+    // else outright (v6) — a phase string that isn't in KNOWN_PHASES is
+    // either corrupt data or, as happened with 'setup', a phase that used
+    // to exist and no longer does. Falling through to `true` here is
+    // exactly the bug the v6 bump above fixes; don't reintroduce it.
+    case 'commander':
+    case 'map':
+    case 'prep':
+    case 'interlude':
+    case 'victory':
+    case 'defeat':
       return true;
+    default:
+      return false;
   }
 }
 

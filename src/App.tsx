@@ -1,18 +1,17 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { globalColumn, hasLineOfRetreat, initialRunState, runReducer } from './game/reducer';
+import { globalColumn } from './game/map';
+import { hasLineOfRetreat, initialRunState, runReducer } from './game/reducer';
+import type { RunAction } from './game/reducer';
 import { clearRun, loadDailyRecord, loadRun, saveDailyRecord, saveRun } from './game/persistence';
 import { dailySeed, dailyShareText } from './game/daily';
-import { getFrame } from './game/frames';
-import { getPart } from './game/parts';
 import { playerShipLabel } from './game/ship';
-import { getUpgrade } from './game/upgrades';
 import './styles.css';
 import { CombatScreen } from './components/CombatScreen';
 import { CommanderSelectScreen } from './components/CommanderSelectScreen';
 import { EndScreen } from './components/EndScreen';
 import { EventScreen } from './components/EventScreen';
 import { FlagshipRecoveryScreen } from './components/FlagshipRecoveryScreen';
-import { FleetOverlay, FleetScreen } from './components/FleetOverlay';
+import { FleetOverlay } from './components/FleetOverlay';
 import { InterludeScreen } from './components/InterludeScreen';
 import { LandingScreen } from './components/LandingScreen';
 import { MapScreen } from './components/MapScreen';
@@ -20,10 +19,11 @@ import { PrepScreen } from './components/PrepScreen';
 import { ProtocolDraftScreen } from './components/ProtocolDraftScreen';
 import { RepairScreen } from './components/RepairScreen';
 import { RewardScreen } from './components/RewardScreen';
+import { shopToastText } from './components/shopToastText';
 import { ShopScreen } from './components/ShopScreen';
 import { Starfield } from './components/Starfield';
 import { HudBar } from './components/HudBar';
-import { SettingsOverlay, SettingsScreen } from './components/SettingsScreen';
+import { SettingsScreen } from './components/SettingsScreen';
 import { TabBar } from './components/TabBar';
 import { Toast } from './components/Toast';
 import type { ToastMessage } from './components/Toast';
@@ -104,6 +104,15 @@ function App() {
     setToast({ id: toastIdRef.current, text });
   }
 
+  // 47.3j: replaces 8 copy-pasted `showToast(...); dispatch(...)` shop
+  // callbacks — shopToastText derives the message (or null, for actions
+  // that don't toast) from the action + current state, purely.
+  function dispatchWithToast(action: RunAction) {
+    const text = shopToastText(action, state);
+    if (text) showToast(text);
+    dispatch(action);
+  }
+
   // Autosave after every reducer action, once the landing screen (if any)
   // has been resolved — never while it's still deciding, so a "New run"
   // pick doesn't race a save of the run being abandoned. Dailies write to
@@ -143,18 +152,22 @@ function App() {
     return () => window.clearTimeout(t);
   }, [state.phase, reducedMotion]);
 
+  // Nothing to confirm away when there was never a save to lose. Shared by
+  // both new-run entry points below — a seeded run (iteration 26) is still
+  // a new run, just with a chosen sector, and abandons a save the same way.
+  function confirmAbandonSaveIfAny(): boolean {
+    return !hasSave || window.confirm('Start a new run? This abandons your saved run.');
+  }
+
   function handleNewRun() {
-    // Nothing to confirm away when there was never a save to lose.
-    if (hasSave && !window.confirm('Start a new run? This abandons your saved run.')) return;
+    if (!confirmAbandonSaveIfAny()) return;
     clearRun();
     dispatch({ type: 'NEW_RUN' });
     setAwaitingBootChoice(false);
   }
 
-  // Iteration 26: same confirm-before-overwrite guard as a plain new run —
-  // a seeded run is still a new run, just with a chosen sector.
   function handleNewRunFromSeed(seed: number) {
-    if (hasSave && !window.confirm('Start a new run? This abandons your saved run.')) return;
+    if (!confirmAbandonSaveIfAny()) return;
     clearRun();
     dispatch({ type: 'NEW_RUN', seed });
     setAwaitingBootChoice(false);
@@ -224,6 +237,22 @@ function App() {
   const canPeekMap =
     showHud && state.phase !== 'map' && state.phase !== 'victory' && state.phase !== 'defeat';
 
+  // Shared by both <MapScreen> instantiations below (47.3k) — the desktop
+  // peek and the live map phase render identical map data, differing only
+  // in which of onClose/interactive vs onViewFleet/onAbandon apply.
+  const mapProps = {
+    map: state.map,
+    act: state.act,
+    position: state.position,
+    visited: state.visited,
+    fled: state.fled,
+    revealedNodes: state.revealedNodes,
+    visionCol: state.visionCol,
+    escalations: state.escalations,
+    bossRevealed: state.bossRevealed,
+    onPickNode: (row: number, col: number) => dispatch({ type: 'PICK_NODE', row, col }),
+  };
+
   // The Map surface, shared between desktop's peek (early-return below) and
   // mobile's tab (rendered inline further down). Both keep a real Close/Back
   // button now (iteration 35 dropped the Mission tab that used to be
@@ -231,20 +260,7 @@ function App() {
   // live map phase, so a read-only tab doesn't show pick affordances it
   // can't act on.
   const chartSurface = (
-    <MapScreen
-      map={state.map}
-      act={state.act}
-      position={state.position}
-      visited={state.visited}
-      fled={state.fled}
-      revealedNodes={state.revealedNodes}
-      visionCol={state.visionCol}
-      escalations={state.escalations}
-      bossRevealed={state.bossRevealed}
-      onClose={() => setSurface('mission')}
-      interactive={isCompact ? state.phase === 'map' : true}
-      onPickNode={(row, col) => dispatch({ type: 'PICK_NODE', row, col })}
-    />
+    <MapScreen {...mapProps} onClose={() => setSurface('mission')} interactive={isCompact ? state.phase === 'map' : true} />
   );
 
   if (!isCompact && surface === 'chart' && canPeekMap) {
@@ -307,20 +323,7 @@ function App() {
           )}
 
           {state.phase === 'map' && (
-            <MapScreen
-              map={state.map}
-              act={state.act}
-              position={state.position}
-              visited={state.visited}
-              fled={state.fled}
-              revealedNodes={state.revealedNodes}
-              visionCol={state.visionCol}
-              escalations={state.escalations}
-              bossRevealed={state.bossRevealed}
-              onViewFleet={() => setSurface('fleet')}
-              onAbandon={handleAbandon}
-              onPickNode={(row, col) => dispatch({ type: 'PICK_NODE', row, col })}
-            />
+            <MapScreen {...mapProps} onViewFleet={() => setSurface('fleet')} onAbandon={handleAbandon} />
           )}
 
           {state.phase === 'prep' && <PrepScreen state={state} dispatch={dispatch} />}
@@ -364,37 +367,16 @@ function App() {
               protocols={state.protocols}
               counterProtocol={state.counterProtocol}
               commodityLotSellable={commodityLotSellable}
-              onBuyPart={(offerIndex) => {
-                showToast(`Bought ${getPart(state.shopOffers![offerIndex]).name}.`);
-                dispatch({ type: 'BUY_PART', offerIndex });
-              }}
+              onBuyPart={(offerIndex) => dispatchWithToast({ type: 'BUY_PART', offerIndex })}
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}
-              onBuyShip={(frameId) => {
-                showToast(`${getFrame(frameId).name} added to the fleet.`);
-                dispatch({ type: 'BUY_SHIP', frameId });
-              }}
+              onBuyShip={(frameId) => dispatchWithToast({ type: 'BUY_SHIP', frameId })}
               onScuttle={(shipIndex) => dispatch({ type: 'SCUTTLE_SHIP', shipIndex })}
-              onBuyCommodityLot={() => {
-                showToast('Commodity lot bought.');
-                dispatch({ type: 'BUY_COMMODITY_LOT' });
-              }}
+              onBuyCommodityLot={() => dispatchWithToast({ type: 'BUY_COMMODITY_LOT' })}
               onSellCommodityLot={() => dispatch({ type: 'SELL_COMMODITY_LOT' })}
-              onBuyMercenary={() => {
-                showToast('Mercenary escort hired.');
-                dispatch({ type: 'BUY_MERCENARY' });
-              }}
-              onBuyRepair={(shipIndex) => {
-                showToast(`Repaired ${playerShipLabel(state.fleet, shipIndex)}.`);
-                dispatch({ type: 'BUY_REPAIR', shipIndex });
-              }}
-              onBuyUpgrade={(shipIndex) => {
-                showToast(`Installed ${getUpgrade(state.shopUpgradeOffer!).name} onto ${playerShipLabel(state.fleet, shipIndex)}.`);
-                dispatch({ type: 'BUY_UPGRADE', shipIndex });
-              }}
-              onFuseStat={(shipIndex, partId) => {
-                showToast(`Fused ${getPart(partId).name} into ${playerShipLabel(state.fleet, shipIndex)}.`);
-                dispatch({ type: 'FUSE_STAT', shipIndex, partId });
-              }}
+              onBuyMercenary={() => dispatchWithToast({ type: 'BUY_MERCENARY' })}
+              onBuyRepair={(shipIndex) => dispatchWithToast({ type: 'BUY_REPAIR', shipIndex })}
+              onBuyUpgrade={(shipIndex) => dispatchWithToast({ type: 'BUY_UPGRADE', shipIndex })}
+              onFuseStat={(shipIndex, partId) => dispatchWithToast({ type: 'FUSE_STAT', shipIndex, partId })}
               onLeave={() => dispatch({ type: 'LEAVE_SHOP' })}
               onViewMap={() => setSurface('chart')}
               onEquip={(shipIndex, partId) => dispatch({ type: 'EQUIP', shipIndex, partId })}
@@ -468,43 +450,24 @@ function App() {
 
       {isCompact && surface === 'chart' && chartSurface}
 
-      {isCompact && surface === 'fleet' && (
-        <FleetScreen
-          fleet={state.fleet}
-          inventory={state.inventory}
-          commanderId={state.commanderId}
-          protocols={state.protocols}
-          counterProtocol={state.counterProtocol}
-          onClose={() => setSurface('mission')}
-        />
-      )}
-
-      {!isCompact && surface === 'fleet' && (
+      {surface === 'fleet' && (
         <FleetOverlay
           fleet={state.fleet}
           inventory={state.inventory}
-          credits={state.credits}
           commanderId={state.commanderId}
           protocols={state.protocols}
           counterProtocol={state.counterProtocol}
+          isCompact={isCompact}
           onClose={() => setSurface('mission')}
         />
       )}
 
-      {isCompact && surface === 'settings' && (
+      {surface === 'settings' && (
         <SettingsScreen
           seed={settingsSeed}
           protocols={state.protocols}
           counterProtocol={state.counterProtocol}
-          onClose={() => setSurface('mission')}
-        />
-      )}
-
-      {!isCompact && surface === 'settings' && (
-        <SettingsOverlay
-          seed={settingsSeed}
-          protocols={state.protocols}
-          counterProtocol={state.counterProtocol}
+          isCompact={isCompact}
           onClose={() => setSurface('mission')}
         />
       )}

@@ -8,6 +8,8 @@ import type { CounterProtocolId } from '../game/counterProtocols';
 import { getProtocol } from '../game/protocols';
 import type { ProtocolId } from '../game/protocols';
 import { seedToCode } from '../game/seedCode';
+import { AdaptivePanel } from './AdaptivePanel';
+import { useCopyToClipboard } from './useCopyToClipboard';
 import { useMotionSetting } from './useReducedMotion';
 import { useSoundSetting } from './useSoundSetting';
 
@@ -83,15 +85,8 @@ export function CounterProtocolRow({ counterProtocolId }: { counterProtocolId: C
 // up mid-attempt and effectively pre-scout the one sector everyone's
 // supposed to be seeing cold.
 function SeedRow({ seed }: { seed: number }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, copy] = useCopyToClipboard();
   const code = seedToCode(seed);
-
-  function copy() {
-    navigator.clipboard
-      ?.writeText(code)
-      .then(() => setCopied(true))
-      .catch(() => setCopied(false));
-  }
 
   return (
     <div className="settings-row">
@@ -103,7 +98,7 @@ function SeedRow({ seed }: { seed: number }) {
         </p>
         <p className="settings-row__seed-code">{code}</p>
       </div>
-      <button type="button" className="settings-row__toggle" onClick={copy}>
+      <button type="button" className="settings-row__toggle" onClick={() => copy(code)}>
         {copied ? 'Copied!' : 'Copy'}
       </button>
     </div>
@@ -223,59 +218,28 @@ function TutorialSetting() {
 // Iteration 35: gained a real Back button — dropping the Mission tab
 // removed the tab bar's own way back to it, so every mobile full-screen
 // tab needs its own now (matching MapScreen's existing "Close" pattern).
+// 47.3g: the mobile-tab (SettingsScreen) / desktop-modal (SettingsOverlay)
+// split is now one component picking its shell via AdaptivePanel —
+// isCompact decides which (desktop has no tab bar, so it needs a modal
+// reachable from the HUD bar's gear button; otherwise moving motion out of
+// the HUD would have left desktop with no way to reach it at all). Was
+// two separate exported components.
 export function SettingsScreen({
   seed,
   protocols,
   counterProtocol,
+  isCompact,
   onClose,
 }: {
   seed: number | null;
   protocols?: ProtocolId[];
   counterProtocol?: CounterProtocolId;
+  isCompact: boolean;
   onClose?: () => void;
 }) {
   return (
-    <div className="settings-screen">
-      <div className="screen-header">
-        <h2>Settings</h2>
-        {onClose && (
-          <button type="button" className="shop-button" onClick={onClose}>
-            Back
-          </button>
-        )}
-      </div>
+    <AdaptivePanel title="Settings" isCompact={isCompact} screenClassName="settings-screen" onClose={onClose}>
       {settingsBody(seed, protocols, counterProtocol)}
-    </div>
-  );
-}
-
-// Desktop has no tab bar, so the same body opens as a modal from the HUD
-// bar's gear button — otherwise moving motion out of the HUD would have left
-// desktop with no way to reach it at all.
-export function SettingsOverlay({
-  seed,
-  protocols,
-  counterProtocol,
-  onClose,
-}: {
-  seed: number | null;
-  protocols?: ProtocolId[];
-  counterProtocol?: CounterProtocolId;
-  onClose: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-panel__header">
-          <h2>Settings</h2>
-        </div>
-
-        {settingsBody(seed, protocols, counterProtocol)}
-
-        <button type="button" className="continue-button" onClick={onClose}>
-          Close
-        </button>
-      </div>
-    </div>
+    </AdaptivePanel>
   );
 }

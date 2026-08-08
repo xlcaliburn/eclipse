@@ -123,7 +123,8 @@ export function maxRows(columns: MapNode[][]): number {
 // fixed single node, never shuffled.
 //
 // Iteration 20 (the economy floor) touched two things here, per the
-// act-1 clear-rate gate in scripts/actRun.ts:
+// act-1 clear-rate gate (then scripts/actRun.ts, since retired —
+// see scripts/runSim.ts / `npm run balance:full`):
 //   - col 1 gained an event node (was 3 combats) — one more income node
 //     early, and one fewer damage-intake node on the way to it.
 //   - both acts' LAST lane column (9) now guarantees a shop (dropping
