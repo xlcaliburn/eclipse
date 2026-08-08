@@ -50,9 +50,11 @@ export interface ScheduledEscalation {
 // with enemies.ts's poolBand and veterancyBonus, which shifted for the same
 // reason (see poolBand's comment) — all three used to step up independently
 // at column 4, stacking into one cliff nobody had designed on purpose.
-// scripts/actRun.ts's local drawAct1Escalations mirrors these numbers by
-// hand (it can't import a full RunState-driven schedule) — keep both in
-// sync.
+// 2026-08-08 (iteration 45): scripts/actRun.ts used to mirror these
+// numbers by hand in a local drawAct1Escalations, which is exactly the
+// "keep both in sync" trap the balancing-engine rebuild exists to
+// eliminate — scripts/sim/agent.ts drives the real reducer (and so this
+// real function) directly, nothing to keep in sync any more.
 //
 // Iteration 32 (2026-08-07): act 2 grew from 10 lane columns to 12 (see
 // map.ts's ACT2_QUOTAS) — room for a third wave where 10 only held two.

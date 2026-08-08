@@ -12,11 +12,14 @@ import type { FinalBossId } from '../src/game/enemies';
 import { COUNTER_PROTOCOLS, getCounterProtocol } from '../src/game/counterProtocols';
 import type { CounterProtocolId } from '../src/game/counterProtocols';
 import { forecastWinRate } from '../src/game/forecast';
-import { initCombat, runToEnd } from '../src/game/combatEngine';
-import { deriveFleetForCombat } from '../src/game/ship';
 import { STARTING_LOADOUT } from '../src/game/parts';
 import type { ProtocolId } from '../src/game/protocols';
 import type { EnemyDef, PlayerShipState } from '../src/game/types';
+import { simulateFleet as sharedSimulateFleet } from './sim/combat';
+import { runChecks } from './sim/gates';
+import type { CheckResult } from './sim/gates';
+import { bandGate, floorGate } from './sim/stats';
+import type { WilsonInterval } from './sim/stats';
 
 // Iteration 17 ("Outspeed"): the strike fleet is a Flagship built around
 // initiative — fusion drive (+3) plus the `drives` elite upgrade (+2) reach
@@ -41,26 +44,26 @@ const NO_SPEED_CONTROL: PlayerShipState[] = [
 const FLEETS: { name: string; fleet: PlayerShipState[] }[] = [
   {
     name: 'starting fleet',
-    fleet: [{ frameId: 'cruiser', equipped: [...STARTING_LOADOUT], damage: 0 }],
+    fleet: [{ frameId: 'cruiser', equipped: [...STARTING_LOADOUT], damage: 0, upgrades: [] }],
   },
   {
     // Same ship, carrying 3 damage into the fight — tests how punishing
     // carryover damage is early in a run.
     name: 'starting fleet (2 dmg)',
-    fleet: [{ frameId: 'cruiser', equipped: [...STARTING_LOADOUT], damage: 2 }],
+    fleet: [{ frameId: 'cruiser', equipped: [...STARTING_LOADOUT], damage: 2, upgrades: [] }],
   },
   {
     // Roughly what a player has by column 3: 1 shop visit, ~12 credits
     // spent on top of the starting loadout.
     name: 'col3-typical fleet',
     fleet: [
-      { frameId: 'cruiser', equipped: ['ion', 'ion', 'comp1', 'hull1', 'shield1', 'hull1'], damage: 0 },
+      { frameId: 'cruiser', equipped: ['ion', 'ion', 'comp1', 'hull1', 'shield1', 'hull1'], damage: 0, upgrades: [] },
     ],
   },
   {
     // Roughly fights 3-5 of a decent run: ~16-18 credits spent on parts.
     name: 'mid fleet',
-    fleet: [{ frameId: 'cruiser', equipped: ['ion', 'ion', 'comp2', 'shield1', 'hull1', 'init1'], damage: 0 }],
+    fleet: [{ frameId: 'cruiser', equipped: ['ion', 'ion', 'comp2', 'shield1', 'hull1', 'init1'], damage: 0, upgrades: [] }],
   },
   {
     // 2026-08-05 (iteration 26): the gap between "mid fleet" (16-18cr,
@@ -75,8 +78,8 @@ const FLEETS: { name: string; fleet: PlayerShipState[] }[] = [
     // the "strong fleet" gate alone couldn't catch.
     name: 'col10 solid fleet',
     fleet: [
-      { frameId: 'cruiser', equipped: ['ion', 'plasma', 'comp2', 'hull1', 'shield1'], damage: 0 },
-      { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0 },
+      { frameId: 'cruiser', equipped: ['ion', 'plasma', 'comp2', 'hull1', 'shield1'], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0, upgrades: [] },
     ],
   },
   {
@@ -84,9 +87,9 @@ const FLEETS: { name: string; fleet: PlayerShipState[] }[] = [
     // earns (parts 32 + interceptor 8 + parts 13 + interceptor 8 + ion 3 + hull 3).
     name: 'strong fleet',
     fleet: [
-      { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'init3', 'shield1'], damage: 0 },
-      { frameId: 'interceptor', equipped: ['plasma', 'comp2', 'hull1'], damage: 0 },
-      { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0 },
+      { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'init3', 'shield1'], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['plasma', 'comp2', 'hull1'], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0, upgrades: [] },
     ],
   },
   {
@@ -105,9 +108,9 @@ const FLEETS: { name: string; fleet: PlayerShipState[] }[] = [
     // near the bottom of this file for the protocol-aware measurement).
     name: 'act-2 endgame fleet',
     fleet: [
-      { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'init3', 'shield1'], damage: 0, fusions: { computer: 1, hp: 1 } },
-      { frameId: 'interceptor', equipped: ['plasma', 'comp2', 'hull1'], damage: 0 },
-      { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0 },
+      { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'init3', 'shield1'], damage: 0, upgrades: [], fusions: { computer: 1, hp: 1 } },
+      { frameId: 'interceptor', equipped: ['plasma', 'comp2', 'hull1'], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['ion', 'hull1'], damage: 0, upgrades: [] },
     ],
   },
   { name: 'strike fleet (init 5)', fleet: STRIKE_FLEET },
@@ -163,21 +166,22 @@ for (const enemy of MATCHUPS) {
 // section also tracks average cannon-round count — simulated directly
 // (bypassing forecastWinRate's cache, which only stores the win percentage)
 // so both numbers come from the exact same simulation runs.
+//
+// Iteration 45.1: this used to be a third private copy of the same combat
+// loop balance.ts, actRun.ts, and enemyValue.ts each hand-rolled — now a
+// thin wrapper over the one shared `sharedSimulateFleet` (scripts/sim/
+// combat.ts), keeping this file's own plain-percent return shape (every
+// call site below already compares it with >=/<= against a whole number)
+// while exposing the underlying Wilson interval for the sanity-check gates
+// at the bottom of this file to read directly.
 function simulateFleet(
   fleet: PlayerShipState[],
   enemy: EnemyDef,
   sims: number,
   protocols?: ProtocolId[],
-): { winRate: number; avgRounds: number } {
-  const fleetInput = deriveFleetForCombat(fleet, undefined, protocols);
-  let wins = 0;
-  let totalRounds = 0;
-  for (let seed = 1; seed <= sims; seed++) {
-    const result = runToEnd(initCombat(fleetInput, enemy, seed));
-    if (result.winner === 'player') wins++;
-    totalRounds += Math.max(0, result.round - 1); // round 0 is the missile phase, not a cannon round
-  }
-  return { winRate: Math.round((wins / sims) * 100), avgRounds: totalRounds / sims };
+): { winRate: number; avgRounds: number; interval: WilsonInterval } {
+  const result = sharedSimulateFleet(fleet, enemy, sims, { protocols });
+  return { winRate: Math.round(result.winRate.point * 100), avgRounds: result.avgRounds, interval: result.winRate };
 }
 
 console.log('\nIteration 17 (Outspeed) — average cannon rounds per matchup (strike fleet vs control):\n');
@@ -189,6 +193,8 @@ const strikeAvgRounds: Record<string, number> = {};
 const controlAvgRounds: Record<string, number> = {};
 const strikeWinRate: Record<string, number> = {};
 const controlWinRate: Record<string, number> = {};
+const strikeWinInterval: Record<string, WilsonInterval> = {};
+const controlWinInterval: Record<string, WilsonInterval> = {};
 
 for (const enemy of MATCHUPS) {
   const strike = simulateFleet(STRIKE_FLEET, enemy, SIMS);
@@ -197,6 +203,8 @@ for (const enemy of MATCHUPS) {
   controlAvgRounds[enemy.id] = control.avgRounds;
   strikeWinRate[enemy.id] = strike.winRate;
   controlWinRate[enemy.id] = control.winRate;
+  strikeWinInterval[enemy.id] = strike.interval;
+  controlWinInterval[enemy.id] = control.interval;
   console.log(
     pad(enemy.name, 26) +
       pad(`${strike.winRate}%`, 16) +
@@ -222,12 +230,12 @@ for (const enemy of MATCHUPS) {
 // — the exact tank-vs-tempo-cover tradeoff the design doc describes.
 const EMPRESS = getFinalBoss('empress');
 const ALL_SLOW_FLEET: PlayerShipState[] = [
-  { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'shield1'], damage: 0 },
-  { frameId: 'bastion', equipped: ['plasma'], damage: 0 },
+  { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'shield1'], damage: 0, upgrades: [] },
+  { frameId: 'bastion', equipped: ['plasma'], damage: 0, upgrades: [] },
 ];
 const SLOW_FLEET_PLUS_INTERCEPTOR: PlayerShipState[] = [
-  { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'shield1'], damage: 0 },
-  { frameId: 'interceptor', equipped: ['plasma'], damage: 0 }, // base initiative 2 — enough to deny the Empress's gap-4 (4-2=2 < 4)
+  { frameId: 'cruiser', equipped: ['plasma', 'plasma', 'comp3', 'hull2', 'shield1'], damage: 0, upgrades: [] },
+  { frameId: 'interceptor', equipped: ['plasma'], damage: 0, upgrades: [] }, // base initiative 2 — enough to deny the Empress's gap-4 (4-2=2 < 4)
 ];
 const empressAllSlow = simulateFleet(ALL_SLOW_FLEET, EMPRESS, SIMS);
 const empressPlusInterceptor = simulateFleet(SLOW_FLEET_PLUS_INTERCEPTOR, EMPRESS, SIMS);
@@ -305,10 +313,12 @@ console.log(finalBossHeader);
 console.log('-'.repeat(finalBossHeader.length));
 
 const finalBossRates: Record<FinalBossId, number> = { titan: 0, empress: 0, citadel: 0 };
+const finalBossInterval: Partial<Record<FinalBossId, WilsonInterval>> = {};
 for (const id of FINAL_BOSS_IDS) {
   const boss = applyCounterProtocol(getFinalBoss(id), REP_SILVER_COUNTER);
   const result = simulateFleet(ENDGAME_FLEET, boss, SIMS, ENDGAME_PROTOCOLS);
   finalBossRates[id] = result.winRate;
+  finalBossInterval[id] = result.interval;
   console.log(pad(getFinalBoss(id).name, 20) + pad(`${result.winRate}%`, 14) + pad(result.avgRounds.toFixed(2), 14));
 }
 
@@ -329,8 +339,11 @@ for (const id of FINAL_BOSS_IDS) {
 // also wall off a merely-solid finish (col10-solid's exact lesson, one
 // act later).
 const finalBossFloor: Record<FinalBossId, number> = { titan: 0, empress: 0, citadel: 0 };
+const finalBossFloorInterval: Partial<Record<FinalBossId, WilsonInterval>> = {};
 for (const id of FINAL_BOSS_IDS) {
-  finalBossFloor[id] = simulateFleet(STRONG_FLEET, getFinalBoss(id), SIMS).winRate;
+  const result = simulateFleet(STRONG_FLEET, getFinalBoss(id), SIMS);
+  finalBossFloor[id] = result.winRate;
+  finalBossFloorInterval[id] = result.interval;
 }
 
 // --- Iteration 34 (the relic chain) — the Ancient artifact, spot-checked --
@@ -354,20 +367,30 @@ console.log(
   `  mid fleet vs ${ARTIFACT_MATCHUP.name}: ${artifactBaseline}% baseline -> ${artifactWithPart}% with the artifact swapped in for comp2 (+${artifactWithPart - artifactBaseline}pp)`,
 );
 
-console.log('\nSanity checks:');
+// Iteration 45.1: gate semantics upgraded from point checks to
+// interval-aware ones (see scripts/sim/stats.ts) wherever a Wilson
+// interval is available — the strike/control and final-boss checks below
+// all run through the shared `simulateFleet`, which exposes one. The
+// GAUNTLET-matchup checks still read `rates` (forecastWinRate's own
+// cached point estimate — that table isn't threaded through the shared
+// interval machinery yet) and fall back to a plain PASS/FAIL boolean;
+// noted here rather than silently mixed in as if identical.
+function toVerdict(pass: boolean): CheckResult['verdict'] {
+  return pass ? 'PASS' : 'FAIL';
+}
 
-const checks: { label: string; pass: boolean }[] = [
+const checks: CheckResult[] = [
   {
     label: 'starting fleet (fresh) beats scout pack >= 97%',
-    pass: rates[GAUNTLET[0].id]['starting fleet'] >= 97,
+    verdict: toVerdict(rates[GAUNTLET[0].id]['starting fleet'] >= 97),
   },
   {
     label: 'starting fleet (fresh) vs shield cruiser <= 45%',
-    pass: rates[GAUNTLET[2].id]['starting fleet'] <= 45,
+    verdict: toVerdict(rates[GAUNTLET[2].id]['starting fleet'] <= 45),
   },
   {
     label: 'strong fleet beats ancient guardian (non-elite) >= 60%',
-    pass: rates[GAUNTLET[7].id]['strong fleet'] >= 60,
+    verdict: toVerdict(rates[GAUNTLET[7].id]['strong fleet'] >= 60),
   },
   {
     // iteration 26: player feedback ("two cruisers with multiple weapons
@@ -380,7 +403,7 @@ const checks: { label: string; pass: boolean }[] = [
     // the fixture this boss is now tuned against; see enemies.ts's GCDS
     // comment for the full re-tune writeup.
     label: 'col10 solid fleet vs GCDS in 20-60%',
-    pass: rates[GAUNTLET[8].id]['col10 solid fleet'] >= 20 && rates[GAUNTLET[8].id]['col10 solid fleet'] <= 60,
+    verdict: toVerdict(rates[GAUNTLET[8].id]['col10 solid fleet'] >= 20 && rates[GAUNTLET[8].id]['col10 solid fleet'] <= 60),
   },
   {
     // Superseded band (kept only as a floor, not a ceiling): re-tuning for
@@ -391,16 +414,16 @@ const checks: { label: string; pass: boolean }[] = [
     // never the complaint; a solid-but-not-maxed build losing every run
     // was.
     label: 'strong fleet beats GCDS >= 60% (ceiling intentionally uncapped since iteration 26)',
-    pass: rates[GAUNTLET[8].id]['strong fleet'] >= 60,
+    verdict: toVerdict(rates[GAUNTLET[8].id]['strong fleet'] >= 60),
   },
   {
     // Same iteration-26 re-tune and same rationale as GCDS above.
     label: 'col10 solid fleet vs Dreadnought (the other act-1 mid-boss) in 20-60%',
-    pass: rates[DREADNOUGHT.id]['col10 solid fleet'] >= 20 && rates[DREADNOUGHT.id]['col10 solid fleet'] <= 60,
+    verdict: toVerdict(rates[DREADNOUGHT.id]['col10 solid fleet'] >= 20 && rates[DREADNOUGHT.id]['col10 solid fleet'] <= 60),
   },
   {
     label: 'strong fleet beats Dreadnought >= 60% (ceiling intentionally uncapped since iteration 26)',
-    pass: rates[DREADNOUGHT.id]['strong fleet'] >= 60,
+    verdict: toVerdict(rates[DREADNOUGHT.id]['strong fleet'] >= 60),
   },
   {
     // Known gap, not yet closed (2026-08-04, iteration 22.6): a 3-ship
@@ -409,7 +432,7 @@ const checks: { label: string; pass: boolean }[] = [
     // FAIL (see this file's Hive Mother comment) rather than silently
     // dropped from the table, so a future pass has the number to beat.
     label: 'strong fleet vs Hive Mother (the other act-1 mid-boss) in 20-60% — KNOWN FAIL, see enemies.ts',
-    pass: rates[HIVE_MOTHER.id]['strong fleet'] >= 20 && rates[HIVE_MOTHER.id]['strong fleet'] <= 60,
+    verdict: toVerdict(rates[HIVE_MOTHER.id]['strong fleet'] >= 20 && rates[HIVE_MOTHER.id]['strong fleet'] <= 60),
   },
   {
     // iteration 26: checked against the same "two-shots me" feedback that
@@ -417,19 +440,19 @@ const checks: { label: string; pass: boolean }[] = [
     // on the easy side) — left as a floor check, not re-tuned; see this
     // file's Hive Mother comment.
     label: 'col10 solid fleet vs Hive Mother >= 60% (already easy, not re-tuned in iteration 26)',
-    pass: rates[HIVE_MOTHER.id]['col10 solid fleet'] >= 60,
+    verdict: toVerdict(rates[HIVE_MOTHER.id]['col10 solid fleet'] >= 60),
   },
   {
     label: 'strong fleet beats the col-7 elite (ancient guardian +2 HP) >= 40%',
-    pass: rates[ANCIENT_GUARDIAN_ELITE.id]['strong fleet'] >= 40,
+    verdict: toVerdict(rates[ANCIENT_GUARDIAN_ELITE.id]['strong fleet'] >= 40),
   },
   {
     label: 'col3-typical fleet beats the col-3 elite (sniper +1 HP) >= 50%',
-    pass: rates[SNIPER_ELITE.id]['col3-typical fleet'] >= 50,
+    verdict: toVerdict(rates[SNIPER_ELITE.id]['col3-typical fleet'] >= 50),
   },
   {
     label: 'a fresh starting fleet vs the col-3 elite is a real risk, not a wall: 5-25%',
-    pass: rates[SNIPER_ELITE.id]['starting fleet'] >= 5 && rates[SNIPER_ELITE.id]['starting fleet'] <= 25,
+    verdict: toVerdict(rates[SNIPER_ELITE.id]['starting fleet'] >= 5 && rates[SNIPER_ELITE.id]['starting fleet'] <= 25),
   },
   {
     // Target 17.4 #1: strike fleet vs its prey — strong but not free.
@@ -440,28 +463,28 @@ const checks: { label: string; pass: boolean }[] = [
     // still squarely "prey" by the gap-4 rule but is an actual fight, so it
     // discriminates: this is where the two fleets' numbers actually differ.
     label: 'strike fleet vs plasma tank (its prey, init 0) is 65-90%',
-    pass: strikeWinRate[GAUNTLET[4].id] >= 65 && strikeWinRate[GAUNTLET[4].id] <= 90,
+    verdict: bandGate(strikeWinInterval[GAUNTLET[4].id], 65, 90),
   },
   {
     label: 'strike fleet vs plasma tank beats the no-speed control (speed is worth buying)',
-    pass: strikeWinRate[GAUNTLET[4].id] > controlWinRate[GAUNTLET[4].id],
+    verdict: toVerdict(strikeWinRate[GAUNTLET[4].id] > controlWinRate[GAUNTLET[4].id]),
   },
   {
     // Target 17.4 #2: vs an init >= 3 enemy (interceptor swarm), speed the
     // fleet can't leverage shouldn't cost it more than 5pp against the
     // control fleet built the same way minus the drive.
     label: 'strike fleet vs interceptor swarm (init 3, can\'t leverage speed) within 5pp of control',
-    pass: Math.abs(strikeWinRate[GAUNTLET[3].id] - controlWinRate[GAUNTLET[3].id]) <= 5,
+    verdict: toVerdict(Math.abs(strikeWinRate[GAUNTLET[3].id] - controlWinRate[GAUNTLET[3].id]) <= 5),
   },
   {
     // Target 17.4 #3: the gap between these two IS the Hive Empress's
     // signature mechanic working as designed.
     label: 'Hive Empress: one Interceptor (tempo cover) measurably improves the win rate',
-    pass: empressPlusInterceptor.winRate > empressAllSlow.winRate,
+    verdict: toVerdict(empressPlusInterceptor.winRate > empressAllSlow.winRate),
   },
   ...FINAL_BOSS_IDS.map((id) => ({
     label: `act-2 endgame fleet (+ silver counter) vs ${getFinalBoss(id).name} in 25-55%`,
-    pass: finalBossRates[id] >= 25 && finalBossRates[id] <= 55,
+    verdict: bandGate(finalBossInterval[id]!, 25, 55),
   })),
   ...FINAL_BOSS_IDS.map((id) => ({
     // 9, not the initially-tried 15: tuning found Titan lands at 15% and
@@ -473,15 +496,11 @@ const checks: { label: string; pass: boolean }[] = [
     // real floor all three bosses can hit at once without re-opening that
     // tradeoff.
     label: `strong fleet (pre-fusion, no counter) still beats ${getFinalBoss(id).name} >= 9% (not a wall)`,
-    pass: finalBossFloor[id] >= 9,
+    verdict: floorGate(finalBossFloorInterval[id]!, 9),
   })),
 ];
 
-for (const check of checks) {
-  console.log(`  [${check.pass ? 'PASS' : 'FAIL'}] ${check.label}`);
-}
-
-const anyFailed = checks.some((c) => !c.pass);
+const anyFailed = runChecks('Sanity checks', checks);
 if (anyFailed) {
   process.exitCode = 1;
 }

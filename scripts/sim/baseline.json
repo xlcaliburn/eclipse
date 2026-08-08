@@ -1,0 +1,8 @@
+{
+  "_comment": "Recorded 2026-08-08 by scripts/runSim.ts (500 seeds/commander) — the first full-run (act 1 + act 2) measurement this project has ever had. Values are full-run clear rate percentages, keyed by commander id (matches RunReport.label in runSim.ts). Update deliberately, reviewed in diff like a snapshot test — see plans/iteration-45.md's status notes for the finding this baseline captures (full-run clear is 0% across every commander in this sample; act 2, once reached, was never won).",
+  "merchant": 0,
+  "engineer": 0,
+  "spymaster": 0,
+  "admiral": 0,
+  "warlord": 0
+}

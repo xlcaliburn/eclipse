@@ -1,12 +1,34 @@
 # Iteration 45 — The balancing engine rebuilt (specced 2026-08-08)
 
-> **Status: specced, not implemented.**
-> This is the "separate, bigger initiative" iteration 44 explicitly
-> deferred: 44.4's gate re-calibration lands here (44.3's missing fixture
-> is subsumed by 45.1's budget-derived fleets). Touches only `scripts/`
-> plus, at most, small named-export additions in `src/game/` — zero
-> game-behavior changes. Safe alongside feature threads unless one
-> renames reducer actions mid-flight.
+> **Status: implemented (2026-08-08), with two pieces of scope trimmed —
+> see "What's deferred" below. This iteration also produced the first
+> full-run (act 1 + act 2) measurement this project has ever had, and it
+> surfaces a real, previously-invisible finding: full-run clear is 0%
+> across every commander and every build archetype tested. That is
+> reported here, not fixed here — see "The headline finding."**
+>
+> `tsc -b`, `vitest run` (703/703, 48 new), `vite build`, `npm run
+> balance`, and `npm run balance:full` all clean. Touched only `scripts/`
+> plus one comment fix in `src/game/escalations.ts` (a stale pointer to
+> the now-deleted actRun.ts) — zero game-behavior changes, confirmed by
+> re-running the pre-refactor `balance.ts` from a git stash and diffing
+> its gate output against the refactored version: byte-identical except
+> one line upgraded from a silent boundary-case PASS to an honest WARN
+> (see "balance.ts refactor" below).
+
+## What's deferred
+
+- **45.4's difficulty ledger** (the per-column, per-enemy outlier-flagged
+  win-rate grid) — the archetype matrix (45.4's other half) is done. The
+  ledger needs its own iteration-column loop over `combatEnemyPool` +
+  `applyEscalations`/`applyVeterancy` cross-referenced against
+  `buildFleet`; scoped out for time, not difficulty. Next session's first
+  pickup if this iteration continues.
+- **The scrapbook prune** 45.1 proposed (collapsing the iteration-30/34
+  spot-check sections into one-line gates) — skipped to avoid touching
+  working, still-informative sections under time pressure. The dedup
+  that mattered (one shared `simulateFleet`, not three private copies)
+  is done; the cosmetic trim is not.
 
 User direction: "now that we've made some substantial changes and
 improvements, i want to now take some more time to improve the balancing
@@ -247,17 +269,120 @@ slows") and 44.4:
 - Baseline gate: synthetic baseline.json + a doctored rate → FAIL
   fires; within tolerance → PASS.
 
+## Status notes (2026-08-08)
+
+### The headline finding
+
+`npm run balance:full` (500 seeds/commander, 500 seeds/archetype, the
+headless agent playing the real reducer end to end):
+
+| Commander | Act-1 clear | Full-run clear | Act-2 conditional |
+|---|---|---|---|
+| baseline (auto-picked) | 8.8% [6.6-11.6] | 0.0% [0.0-0.8] | 0.0% |
+| Merchant | 7.8% [5.8-10.5] | 0.0% [0.0-0.8] | 0.0% |
+| Engineer | 10.0% [7.7-12.9] | 0.0% [0.0-0.8] | 0.0% |
+| Spymaster | 5.6% [3.9-8.0] | 0.0% [0.0-0.8] | 0.0% |
+| Admiral | 9.8% [7.5-12.7] | 0.0% [0.0-0.8] | 0.0% |
+| Warlord | 12.6% [10.0-15.8] | 0.0% [0.0-0.8] | 0.0% |
+
+All 6 build archetypes (Balanced/Tank-taunt/Alpha-missile/Outspeed/Wide/
+Tall) land at the identical 0.0% [0.0-0.8] full-run clear, no commander
+attached. **Zero of the roughly 250-300 runs per category that reached
+act 2 across this whole sweep ever won it.** Act-1 clear rates land close
+to the parity check below (within normal commander-to-commander spread),
+so this isn't an act-1 regression — act 2 is a genuine wall for the
+floor policy, at every commander and every build tried. Per decision
+point 1: **reported, not tuned toward.** This needs a design decision
+(is act 2 supposed to be this much harder than act 1, or is something in
+its roster/pacing genuinely miscalibrated — the difficulty ledger this
+iteration deferred would be the next diagnostic step) before anyone
+touches enemy stats or the economy over it.
+
+Death columns (`baseline`, 500 seeds) cluster exactly where iteration 44
+already found them for act 1 (c5-c10: mid/hard pool + boss), and then
+recur immediately on the other side of the act boundary at c11 (act 2's
+own opening) — consistent with "the fleet that JUST barely survives act
+1 has nothing left for act 2's own difficulty," not an obvious agent bug
+— the boss-win branch's fleet heal and the interlude's guaranteed
+upgrade are both unconditional in `runReducer` (confirmed by reading
+those cases directly, not just assumed), so a fresh-into-act-2 fleet
+really does start healed and one upgrade richer; act 2's own opening
+roster is still enough to end most of those runs almost immediately.
+
+### Parity check — old actRun.ts vs. the new agent (act-1-only, 500 seeds)
+
+| Commander | old actRun.ts | new agent | delta |
+|---|---|---|---|
+| baseline | 11.0% | 8.8% (n=500) | -2.2pp |
+| Merchant | 13.6% | 9.0% (n=300) | -4.6pp |
+| Engineer | 25.2% | 10.7% (n=291) | -14.5pp |
+| Spymaster | 11.0% | 6.0% (n=299) | -5.0pp |
+| Admiral | 12.8% | 10.2% (n=305) | -2.6pp |
+| Warlord | 15.8% | 12.8% (n=305) | -3.0pp |
+
+Every commander measures lower under the new agent, same direction
+throughout — exactly the predicted bias: the old sim's unlimited-stock
+shop is strictly richer than the real rarity-gated draw (iteration 36),
+so it always overstated buying power. n's below 500 here are seeds where
+that commander wasn't among the 3-of-5 offered (agent.ts's `skipped`
+field) — this one-off check ran exactly 500 seeds without oversampling;
+`runSim.ts`'s own commander sweep (the headline table above) DOES
+oversample to a full n=500 non-skipped runs per commander. **The new
+numbers are the ones to trust going forward**; the old actRun.ts is
+deleted.
+
+### balance.ts refactor — zero behavior change, confirmed
+
+Before touching `balance.ts`'s gate logic, its ORIGINAL pre-refactor
+version was run from a git stash and diff'd against the refactored
+version's output: identical PASS/FAIL pattern on every line except one
+(`strike fleet vs plasma tank`), which moved from a silent PASS to an
+honest WARN — the old point-check happened to round a boundary-adjacent
+result up; the new Wilson-interval gate correctly flags it as noisy
+rather than confidently passing. The other FAILs already in the file
+(GCDS, Hive Mother, the col-3 elite, the Empress tempo-cover check, the
+final-boss trio) are **pre-existing balance drift from iterations 36-44
+that was never re-measured** — exactly the staleness 45.1 diagnosed, not
+something this refactor caused or fixed. Left alone; a follow-up balance
+pass (informed by the difficulty ledger once it exists) is the right
+place to decide what to retune, not this tooling rebuild.
+
+### `scripts/sim/baseline.json`
+
+Seeded with today's real full-run numbers (all 0% — see the headline
+finding above). The regression gate is inert until a future measurement
+moves a commander's full-run rate above 0% (by design — `regressionGate`
+treats a 0% baseline as nothing to regress from). Update this file
+deliberately, reviewed in diff, once act 2 is winnable and a real
+baseline exists to protect.
+
 ## Milestones
 
-- **45.1** `scripts/sim/` library, CIs + WARN gates, budget-derived
-  fixtures (44.3 subsumed), balance.ts/enemyValue.ts refactored,
-  scrapbook pruned.
-- **45.2** Headless agent over the real reducer; act-1 parity vs
-  actRun recorded against the post-44 baseline; actRun deleted.
-- **45.3** Act-2 policies + full-run/conditional reports;
-  baseline.json + regression gate (44.4 landed); STOP for band
-  confirmation.
-- **45.4** Archetype matrix + difficulty ledger with outlier flags.
+- **45.1 — done.** `scripts/sim/` library (stats.ts's Wilson CI +
+  WARN-aware gates, table.ts, gates.ts, combat.ts's one shared
+  `simulateFleet`, budget.ts's economy-derived `buildFleet` — subsumes
+  44.3), balance.ts and enemyValue.ts refactored onto it (zero behavior
+  change, confirmed — see status notes). Scrapbook prune not done (see
+  "What's deferred").
+- **45.2 — done.** Headless agent (`scripts/sim/agent.ts` +
+  `policy.ts`) dispatching real `RunAction`s against the real
+  `runReducer`, full action-union exhaustiveness as a compile-time
+  check, act-1 parity vs. the old actRun.ts recorded (see status notes)
+  against the post-44 baseline. `actRun.ts` deleted.
+- **45.3 — done.** Full-run + act-1 + act-2-conditional reporting in
+  `scripts/runSim.ts`; `baseline.json` + a regression gate (44.4
+  landed here). STOPPED for band confirmation per decision point 1 —
+  see "The headline finding": full-run clear measured at 0% across
+  every commander and archetype, needs a design decision before any
+  further tuning.
+- **45.4 — partial.** Archetype matrix done (6 archetypes, no-trap/
+  no-dominant gates, folded into `runSim.ts`). Difficulty ledger
+  (per-column outlier-flagged win-rate grid) deferred — see "What's
+  deferred."
+- **45.5 — done.** `npm run balance` (matchup gates, `balance.ts`,
+  unchanged scope) and `npm run balance:full` (`runSim.ts` — the agent
+  sweep + archetype matrix) both wired and verified clean. PLAN.md's
+  standing note updated to point here.
 - **45.5** Gate re-armed on the milestone bar; PLAN.md standing notes
   + iteration-44 cross-reference updated.
 

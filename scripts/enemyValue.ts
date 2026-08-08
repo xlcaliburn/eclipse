@@ -10,10 +10,9 @@ import {
 } from '../src/game/enemies';
 import { PARTS, STARTING_LOADOUT } from '../src/game/parts';
 import { ESCALATIONS } from '../src/game/escalations';
-import { initCombat, runToEnd } from '../src/game/combatEngine';
-import { deriveFleetForCombat } from '../src/game/ship';
 import type { EnemyDef, PlayerShipState, ShipStats } from '../src/game/types';
 import type { EscalationId, ScheduledEscalation } from '../src/game/escalations';
+import { simulateFleet as sharedSimulateFleet } from './sim/combat';
 
 // Prices an enemy composition in credits, using the player's own shop as the
 // yardstick — "what would it cost to buy this ship's capability out of the
@@ -220,13 +219,11 @@ const LATE_ACT1_FLEET: PlayerShipState[] = [
   { frameId: 'interceptor', equipped: ['ion', 'hull1'], upgrades: [], damage: 0 },
 ];
 
+// Iteration 45.1: delegates to the one shared `sharedSimulateFleet`
+// (scripts/sim/combat.ts) instead of this file's own private copy of the
+// same loop, keeping the plain-percent return this file's callers expect.
 function simulate(fleet: PlayerShipState[], enemy: EnemyDef, sims = 2000): number {
-  const input = deriveFleetForCombat(fleet);
-  let wins = 0;
-  for (let seed = 1; seed <= sims; seed++) {
-    if (runToEnd(initCombat(input, enemy, seed)).winner === 'player') wins++;
-  }
-  return Math.round((wins / sims) * 100);
+  return Math.round(sharedSimulateFleet(fleet, enemy, sims).winRate.point * 100);
 }
 
 // What a fleet's parts would cost at shop prices — so a win rate can be read

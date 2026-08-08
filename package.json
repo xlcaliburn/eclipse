@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "balance": "tsx scripts/balance.ts"
+    "balance": "tsx scripts/balance.ts",
+    "balance:full": "tsx scripts/runSim.ts"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
