@@ -109,7 +109,7 @@ export const PROTOCOLS: Record<ProtocolId, ProtocolDef> = {
     id: 'ghost-fleet-protocol',
     tier: 'prismatic',
     name: 'Ghost fleet protocol',
-    blurb: 'A ship that would be destroyed withdraws instead, critically damaged but alive.',
+    blurb: 'A ship that would be destroyed survives instead, critically damaged but alive.',
     cost: 'Every repair costs double for the rest of the run.',
   },
   'lone-flagship': {

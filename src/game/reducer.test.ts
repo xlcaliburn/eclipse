@@ -20,7 +20,6 @@ import {
   eliteReward,
   fleetCap,
   frameCost,
-  hasLineOfRetreat,
   initialRunState,
   partCost,
   rollRarity,
@@ -31,14 +30,6 @@ import {
 import { mulberry32 } from './rng';
 import type { PartId, PlayerShipState, RunState } from './types';
 import type { UpgradeId } from './upgrades';
-
-function freshCombat(seed = 1, enemy = GAUNTLET[0]) {
-  return initCombat(
-    [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
-    enemy,
-    seed,
-  );
-}
 
 // Act-1 column 0 is normally the single-node opener (iteration 8) — these
 // fixtures test generic node-type behavior (combat/shop/repair/event), not
@@ -104,14 +95,19 @@ describe('CHOOSE_COMMANDER — commander phase gate', () => {
 
   // Iteration 21: the free starting Interceptor moved from the Warlord to
   // the new Admiral (wide) when the Warlord was reworked to a tall,
-  // one-capital-ship doctrine.
-  it('the Admiral starts with a free, ion-fitted Interceptor — fleet begins at 2', () => {
+  // one-capital-ship doctrine. Iteration 51.2: a second free Interceptor
+  // added — the fleet now begins at 3.
+  it('the Admiral starts with two free, ion-fitted Interceptors — fleet begins at 3', () => {
     let state = initialRunState();
     state = { ...state, commanderChoices: ['admiral', 'merchant', 'engineer'] };
     const result = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'admiral' });
-    expect(result.fleet).toHaveLength(2);
+    expect(result.fleet).toHaveLength(3);
     expect(result.fleet[1].frameId).toBe('interceptor');
     expect(result.fleet[1].equipped).toEqual(['ion']);
+    expect(result.fleet[2].frameId).toBe('interceptor');
+    expect(result.fleet[2].equipped).toEqual(['ion']);
+    expect(result.fleet[1].name).not.toBe(result.fleet[2].name);
+    expect(result.shipsCommissioned).toBe(3);
   });
 
   it('the Warlord starts with one random upgrade already fitted to the Flagship instead', () => {
@@ -951,22 +947,6 @@ describe('flagship recovery (iteration 24)', () => {
     expect(result.phase).not.toBe('flagship-recovery');
   });
 
-  it('WITHDRAW gates too, when the Flagship dies mid-withdrawal but the fleet survives', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    const combat = initCombat(
-      [
-        { stats: { initiative: 0, hp: 1, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 1 }, // Flagship destroyed
-        { stats: { initiative: 0, hp: 3, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 },
-      ],
-      GAUNTLET[0],
-      1,
-    );
-    state = { ...state, phase: 'combat', fleet: fleetWithDestroyedFlagship(), combat: { ...combat, round: 1 } };
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.phase).toBe('flagship-recovery');
-    expect(result.flagshipRecoveryResumePhase).toBe('map');
-  });
-
   it('RESOLVE_FLAGSHIP_RECOVERY(recover: true) rebuilds the Flagship — fresh loadout, same name and record — and deducts credits', () => {
     const gated: RunState = {
       ...initialRunState(),
@@ -1514,116 +1494,6 @@ describe('ambush win bonus (14.2/14.3)', () => {
     expect(result.pendingAmbushBonus).toBeUndefined();
   });
 
-  it('withdrawing from an event ambush forfeits the pending bonus', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    state = {
-      ...state,
-      phase: 'combat',
-      combat: { ...freshCombat(), round: 1 },
-      pendingAmbushBonus: { credits: 6 },
-    };
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.pendingAmbushBonus).toBeUndefined();
-  });
-});
-
-describe('WITHDRAW — retreat from a losing fight', () => {
-  it('is rejected before round 1 (missile phase must resolve first)', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    state = { ...state, phase: 'combat', combat: freshCombat() }; // round is still 0
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.phase).toBe('combat'); // rejected, unchanged
-  });
-
-  it('is rejected once the fight already has a winner', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    const combat = { ...freshCombat(), round: 1, winner: 'player' as const };
-    state = { ...state, phase: 'combat', combat };
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.phase).toBe('combat');
-  });
-
-  it('persists damage, salvages a destroyed ship (upgrades do not survive), marks the node fled, reverts position, pays nothing', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    const firstPosition = state.position!;
-    const fleet: PlayerShipState[] = [
-      { frameId: 'cruiser', equipped: ['ion', 'comp1'], damage: 0, upgrades: [] }, // survives
-      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: ['spine'] }, // destroyed
-    ];
-    const combat = initCombat(
-      [
-        { stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 2 },
-        { stats: { initiative: 0, hp: 1, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 1 }, // 0 remaining
-      ],
-      GAUNTLET[0],
-      1,
-    );
-    state = { ...state, phase: 'combat', fleet, combat: { ...combat, round: 1 } };
-    const creditsBefore = state.credits;
-
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.phase).toBe('map');
-    expect(result.fleet).toHaveLength(1);
-    expect(result.fleet[0].frameId).toBe('cruiser');
-    expect(result.fleet[0].damage).toBe(2);
-    expect(result.inventory).toContain('ion');
-    expect(result.credits).toBe(creditsBefore); // no reward
-    expect(result.pendingReward).toBeUndefined();
-    expect(result.fled).toContainEqual(firstPosition);
-    expect(result.position).toBeNull(); // reverted to before column 0
-    expect(result.visited).toHaveLength(0);
-  });
-
-  it('a fled node can never be picked again', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    state = { ...state, phase: 'combat', combat: { ...freshCombat(), round: 1 } };
-    state = runReducer(state, { type: 'WITHDRAW' });
-    expect(state.phase).toBe('map');
-
-    const retry = runReducer(state, { type: 'PICK_NODE', row: 0 });
-    expect(retry.phase).toBe('map'); // refused — still on the map
-    expect(retry.position).toBeNull();
-  });
-
-  it('has no line of retreat at the boss node (only 1 node in that column)', () => {
-    const state = stateWithMap('combat', {
-      position: { col: 8, row: 0 },
-      visited: [
-        { col: 7, row: 0 },
-        { col: 8, row: 0 },
-      ],
-    });
-    const atBoss: RunState = {
-      ...state,
-      position: { col: 10, row: 0 },
-      visited: [...state.visited, { col: 9, row: 0 }, { col: 10, row: 0 }],
-    };
-    expect(hasLineOfRetreat(atBoss)).toBe(false);
-
-    const combat = { ...freshCombat(1, GAUNTLET[8]), round: 1 };
-    const result = runReducer({ ...atBoss, phase: 'combat', combat }, { type: 'WITHDRAW' });
-    expect(result.phase).toBe('combat'); // rejected
-  });
-
-  it('has no line of retreat during an ambush fight (position is still the event node)', () => {
-    let state = runReducer(stateWithMap('event'), { type: 'PICK_NODE', row: 0 });
-    state = { ...state, currentEvent: { eventId: 'ancient-cache', ambushEnemy: GAUNTLET[0] } };
-    state = runReducer(state, { type: 'EVENT_CONTINUE' }); // -> 'prep', position still the event node
-    expect(hasLineOfRetreat(state)).toBe(false);
-
-    state = runReducer(state, { type: 'ENGAGE' });
-    if (state.combat) state = { ...state, combat: { ...state.combat, round: 1 } };
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.phase).toBe('combat'); // rejected
-  });
-
-  it('has no line of retreat once every sibling node in the column is also fled', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    const col0 = state.map.act1Columns[0];
-    const siblings = col0.filter((n) => n.row !== state.position!.row).map((n) => ({ col: n.col, row: n.row }));
-    state = { ...state, fled: siblings };
-    expect(hasLineOfRetreat(state)).toBe(false);
-  });
 });
 
 describe('boss variety + dossier (iteration 5)', () => {
@@ -1706,16 +1576,6 @@ describe('fog of war + info broker (iteration 6)', () => {
     state = { ...state, phase: 'map' };
     state = runReducer(state, { type: 'PICK_NODE', row: 0 });
     expect(state.visionCol).toBe(1); // now at col 0, so col 0+1 visible
-  });
-
-  it('visionCol never decreases when WITHDRAW reverts position (monotonic reveal)', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    state = { ...state, phase: 'combat', combat: { ...freshCombat(), round: 1 } };
-    const visionBefore = state.visionCol;
-    state = runReducer(state, { type: 'WITHDRAW' });
-    expect(state.phase).toBe('map');
-    expect(state.position).toBeNull(); // reverted to before column 0
-    expect(state.visionCol).toBe(visionBefore); // still revealed
   });
 
 });
@@ -2055,12 +1915,6 @@ describe('BUY_MERCENARY (iteration 20)', () => {
     expect(result.runStats?.shipsLost ?? []).not.toContain('Mercenary escort');
   });
 
-  it('WITHDRAW: a mercenary that survived to the retreat still leaves the fleet, not just a destroyed one', () => {
-    const state = combatWithMercenary(0, undefined);
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.fleet).toHaveLength(1);
-    expect(result.fleet.some((s) => s.mercenary)).toBe(false);
-  });
 });
 
 describe('commander effects (iteration 6)', () => {
@@ -2626,15 +2480,6 @@ describe('iteration 8: the opener (act-1 column 0)', () => {
     expect(result.pendingReward?.upgradeOptions).toBeUndefined();
   });
 
-  it('Withdraw is unavailable at the opener (a single node — no line of retreat)', () => {
-    const state: RunState = {
-      ...initialRunState(),
-      phase: 'map',
-      position: { col: 0, row: 0 },
-      visited: [{ col: 0, row: 0 }],
-    };
-    expect(hasLineOfRetreat(state)).toBe(false);
-  });
 });
 
 // 2026-08-04: the interlude used to offer a 3-way choice (Refit / War
@@ -2904,6 +2749,32 @@ describe('ISSUE_ORDER (iteration 48, fleet orders)', () => {
   });
 });
 
+describe('Forewarned (iteration 51.1): ENGAGE wires openingComputerBonus', () => {
+  function engagedState(overrides: Partial<RunState> = {}): RunState {
+    const prepped: RunState = {
+      ...initialRunState(),
+      phase: 'prep',
+      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }],
+      currentEnemy: GAUNTLET[0],
+      currentCombatSeed: 1,
+      ...overrides,
+    };
+    return runReducer(prepped, { type: 'ENGAGE' });
+  }
+
+  it('ENGAGE seeds +1 opening computer for the Spymaster', () => {
+    const state = engagedState({ commanderId: 'spymaster' });
+    expect(state.combat?.openingComputerBonus).toBe(1);
+  });
+
+  it('ENGAGE seeds 0 opening computer for every other commander', () => {
+    for (const commanderId of ['merchant', 'engineer', 'warlord', 'admiral'] as const) {
+      const state = engagedState({ commanderId });
+      expect(state.combat?.openingComputerBonus).toBe(0);
+    }
+  });
+});
+
 // --- Cargo rewards (iteration 15.1) -------------------------------------
 describe('cargo reward payouts', () => {
   // A won combat at act-1 col 1 (winReward(1) = 4, 2026-08-08: cols 1-3
@@ -3041,21 +2912,6 @@ describe('heat track', () => {
     expect(state.heat).toBe(4);
   });
 
-  it('withdrawing costs +1 heat', () => {
-    // Column 0 forced to 3 combat nodes (stateWithMap) — picking row 0 from
-    // the start (position null) leaves rows 1/2 as a line of retreat.
-    let state = runReducer(stateWithMap('combat', { heat: 1 }), { type: 'PICK_NODE', row: 0 });
-    const combat = initCombat(
-      [{ stats: { initiative: 0, hp: 20, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
-      state.currentEnemy!,
-      1,
-    );
-    state = { ...state, phase: 'combat', combat: { ...combat, round: 1 } };
-    expect(hasLineOfRetreat(state)).toBe(true);
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.heat).toBe(2);
-  });
-
   it('the interlude resets heat to 0', () => {
     const state: RunState = { ...initialRunState(), phase: 'interlude', heat: 3 };
     const result = runReducer(state, { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
@@ -3112,24 +2968,6 @@ describe('interception at heat 4 ("Hunted")', () => {
     expect(result.interceptionActive).toBeUndefined();
     expect(result.pendingReward?.credits).toBe(winReward(globalColumn(1, col)));
   });
-
-  it('withdrawing from the interception also resets heat to 0', () => {
-    // Column 0 forced to 3 shop nodes (stateWithMap) — picking row 0 from
-    // the start (position null, heat armed) triggers interception there,
-    // and rows 1/2 remain as a line of retreat.
-    let state = runReducer(stateWithMap('shop', { heat: MAX_HEAT }), { type: 'PICK_NODE', row: 0 });
-    expect(state.interceptionActive).toBe(true);
-    const combat = initCombat(
-      [{ stats: { initiative: 0, hp: 20, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
-      state.currentEnemy!,
-      1,
-    );
-    state = { ...state, phase: 'combat', combat: { ...combat, round: 1 } };
-    expect(hasLineOfRetreat(state)).toBe(true); // "follows normal retreat rules" even though the node is shop-typed
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.heat).toBe(0);
-    expect(result.interceptionActive).toBeUndefined();
-  });
 });
 
 describe('the fleet remembers (iteration 18)', () => {
@@ -3155,21 +2993,21 @@ describe('the fleet remembers (iteration 18)', () => {
     expect(state.fleet[0].name!.startsWith('ISV ')).toBe(true);
   });
 
-  it("names the Admiral's free Interceptor and advances the commission counter", () => {
+  it("names the Admiral's two free Interceptors and advances the commission counter by 2", () => {
     let state = initialRunState({ seed: 7 });
     // Force admiral into the choices for a deterministic test.
     state = { ...state, commanderChoices: ['admiral', ...state.commanderChoices.slice(1)] };
     const after = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'admiral' });
-    expect(after.fleet).toHaveLength(2);
+    expect(after.fleet).toHaveLength(3);
     expect(after.fleet[1].name).toBe(shipName(7, 1, 'interceptor'));
-    expect(after.shipsCommissioned).toBe(2);
+    expect(after.fleet[2].name).toBe(shipName(7, 2, 'interceptor'));
+    expect(after.shipsCommissioned).toBe(3);
   });
 
   it('a won fight increments fightsWon, credits kills to ships, and bumps fightsSurvived for survivors', () => {
     const after = playThroughOpener();
     const stats = after.runStats!;
     expect(stats.fightsWon).toBe(1);
-    expect(stats.fightsWithdrawn).toBe(0);
     expect(stats.shipsLost).toEqual([]); // the opener can't destroy the starting ship
     // Two picket drones died; every kill is attributable to a plain player
     // hit-roll here (no prow/arc in the starting loadout).
@@ -3811,20 +3649,6 @@ describe('iteration 49.5: the colony ship chain', () => {
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.phase).toBe('reward');
     expect(result.colonyStage).toBe(2);
-  });
-
-  it('withdrawing from the raider ambush forfeits the chainEffect — colonyStage stays cleared, chain dead', () => {
-    let state = runReducer(stateWithMap('combat'), { type: 'PICK_NODE', row: 0 });
-    state = {
-      ...state,
-      phase: 'combat',
-      colonyStage: undefined, // already cleared at the colony-raiders choice
-      pendingAmbushBonus: { chainEffect: 'colony-defended' },
-      combat: { ...freshCombat(), round: 1 },
-    };
-    const result = runReducer(state, { type: 'WITHDRAW' });
-    expect(result.colonyStage).toBeUndefined();
-    expect(result.pendingAmbushBonus).toBeUndefined();
   });
 
   it('the founders\' gift and the cash settlement both clear colonyStage, only late-stage arrival reachable', () => {

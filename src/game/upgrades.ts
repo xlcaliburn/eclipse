@@ -23,7 +23,7 @@ export const UPGRADES: Upgrade[] = [
   { id: 'lattice', name: 'Deflector lattice', description: '+1 piloting' },
   { id: 'drives', name: 'Overtuned drives', description: '+2 initiative' },
   { id: 'autoloader', name: 'Autoloader', description: '+1 cannon die (1 dmg)' },
-  { id: 'regen', name: 'Regenerative plating', description: 'Repairs 1 damage after each fight, win or withdraw' },
+  { id: 'regen', name: 'Regenerative plating', description: 'Repairs 1 damage after each fight won' },
   { id: 'bay', name: 'Expansion bay', description: '+1 part slot on this ship (stacks, capped at 8 total)' },
 ];
 

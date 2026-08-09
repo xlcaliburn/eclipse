@@ -57,16 +57,16 @@ describe('dailyShareText (iteration 18)', () => {
       dailyDate: '2026-08-03',
       act: 2,
       position: { col: 4, row: 1 },
-      runStats: { fightsWon: 9, fightsWithdrawn: 2, shipsLost: ['ISV Kestrel'], damageDealt: 40, damageTaken: 31 },
+      runStats: { fightsWon: 9, shipsLost: ['ISV Kestrel'], damageDealt: 40, damageTaken: 31 },
     } as unknown as RunState;
     expect(dailyShareText(state, 'defeat')).toBe(
-      'Eclipse Daily — 2026-08-03\n💥 Defeat · Act 2 · Column 5\n⚔️ 9 won · ↩️ 2 withdrawn · ☠ 1 ship lost',
+      'Eclipse Daily — 2026-08-03\n💥 Defeat · Act 2 · Column 5\n⚔️ 9 won · ☠ 1 ship lost',
     );
   });
 
   it('falls back cleanly when stats are absent (pre-18 save shapes)', () => {
     const state = { dailyDate: '2026-08-03', act: 1, position: null } as unknown as RunState;
-    expect(dailyShareText(state, 'victory')).toContain('⚔️ 0 won · ↩️ 0 withdrawn · ☠ 0 ships lost');
+    expect(dailyShareText(state, 'victory')).toContain('⚔️ 0 won · ☠ 0 ships lost');
   });
 });
 

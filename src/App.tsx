@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { globalColumn } from './game/map';
-import { hasLineOfRetreat, initialRunState, runReducer } from './game/reducer';
+import { initialRunState, runReducer } from './game/reducer';
 import type { RunAction } from './game/reducer';
 import { clearRun, loadDailyRecord, loadRun, saveDailyRecord, saveRun } from './game/persistence';
 import { dailySeed, dailyShareText } from './game/daily';
@@ -334,10 +334,8 @@ function App() {
               enemy={state.currentEnemy}
               playerLabels={state.fleet.map((_, i) => playerShipLabel(state.fleet, i))}
               playerFrameIds={state.fleet.map((ship) => ship.frameId)}
-              canWithdraw={hasLineOfRetreat(state)}
               onAdvanceRound={() => dispatch({ type: 'ADVANCE_ROUND' })}
               onContinue={() => dispatch({ type: 'CONTINUE' })}
-              onWithdraw={() => dispatch({ type: 'WITHDRAW' })}
               onUseActive={(shipIndex, abilityIndex) => dispatch({ type: 'USE_ACTIVE', shipIndex, abilityIndex })}
               onSelectEnemy={(index) => dispatch({ type: 'SET_PRIORITY_TARGET', index })}
               onIssueOrder={(order, targetIndex) => dispatch({ type: 'ISSUE_ORDER', order, targetIndex })}

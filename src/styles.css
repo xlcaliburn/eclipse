@@ -213,7 +213,6 @@ h1, h2, h3 {
   .settings-row__toggle,
   .shop-button,
   .continue-button,
-  .withdraw-button,
   .engage-button {
     min-height: 44px;
     display: inline-flex;
@@ -2565,30 +2564,6 @@ h1, h2, h3 {
 .shop-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.withdraw-button {
-  font-family: var(--font-display);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  color: var(--danger);
-  border: 1px solid var(--danger);
-  border-radius: 6px;
-  padding: 6px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: box-shadow 0.15s ease, background 0.15s ease;
-}
-
-.withdraw-button:hover:not(:disabled) {
-  box-shadow: 0 0 14px var(--danger-glow);
-  background: color-mix(in srgb, var(--danger) 22%, transparent);
-}
-
-.withdraw-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  border-color: var(--border);
-  color: var(--text-dim);
 }
 
 .frame-card {

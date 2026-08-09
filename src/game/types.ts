@@ -194,11 +194,11 @@ export interface PlayerShipState {
   // ships literally) stay valid without a SAVE_VERSION bump.
   name?: string; // seeded at commissioning ("ISV Resolute"); falls back to "Frame #N" in labels
   kills?: number; // enemy ships this hull has destroyed, across the whole run
-  fightsSurvived?: number; // fights this hull came out of alive (wins and withdrawals)
+  fightsSurvived?: number; // fights this hull came out of alive (wins)
   // Iteration 20 (war assets): a hired escort, good for exactly one combat.
-  // Removed from the fleet the moment that combat resolves (win, loss, or
-  // withdrawal) — see reducer.ts's CONTINUE/WITHDRAW. No salvage, no kill
-  // credit, doesn't count toward shipsLost.
+  // Removed from the fleet the moment that combat resolves (win or loss —
+  // 51.3 removed the third option, withdrawal) — see reducer.ts's
+  // CONTINUE. No salvage, no kill credit, doesn't count toward shipsLost.
   mercenary?: boolean;
   // Iteration 20 (commodity runs), moved here in iteration 21: the GLOBAL
   // column (map.ts's globalColumn) where THIS ship's commodity lot was
@@ -223,7 +223,6 @@ export interface PlayerShipState {
 // share text. Lives on RunState (optional — see PlayerShipState note).
 export interface RunStats {
   fightsWon: number;
-  fightsWithdrawn: number;
   shipsLost: string[]; // names, in the order they were lost
   damageDealt: number; // summed from roll events; arc/prow/rift side-damage undercounted by design
   damageTaken: number;
@@ -321,9 +320,10 @@ export interface AmbushBonus {
   // Iteration 49 (the debt broker / colony ship chains): a win-conditional
   // side effect beyond credits/a part — applied wherever pendingAmbushBonus
   // is consumed on a WON fight (reducer.ts's CONTINUE), same as credits/
-  // partId above. Nothing is applied on loss or withdraw (bonus forfeited,
-  // same existing rule). 'debt-cleared' clears RunState.loanOutstanding;
-  // 'colony-defended' sets RunState.colonyStage to 2.
+  // partId above. Nothing is applied on a loss (bonus forfeited, same
+  // existing rule — 51.3 removed the other non-win outcome, withdraw).
+  // 'debt-cleared' clears RunState.loanOutstanding; 'colony-defended' sets
+  // RunState.colonyStage to 2.
   chainEffect?: 'debt-cleared' | 'colony-defended';
 }
 
@@ -369,7 +369,11 @@ export interface RunState {
   targetingStance: TargetingStance;
   position: MapPosition | null; // null before the first node is picked
   visited: MapPosition[];
-  fled: MapPosition[]; // withdrawn-from nodes — visible on the map, never pickable again
+  // Nodes the run can never revisit — visible on the map, never pickable
+  // again. 51.3 removed withdraw (the only other writer); the sole writer
+  // now is a warp-lane shortcut (iteration 32, PICK_NODE): the skipped
+  // column is marked fled the moment the shortcut is taken.
+  fled: MapPosition[];
   credits: number;
   inventory: PartId[]; // owned, unequipped parts
   fleet: PlayerShipState[];
@@ -418,8 +422,8 @@ export interface RunState {
   // same as every pre-49 save. Cleared by 'debt-collectors' settling the
   // debt outright, or by a WON fight against the collectors (see
   // AmbushBonus.chainEffect: 'debt-cleared'). Left set by a declined fight
-  // or a withdraw — the collectors just come back on a later 50% roll (see
-  // events.ts's drawEvent).
+  // — the collectors just come back on a later 50% roll (see events.ts's
+  // drawEvent).
   loanOutstanding?: boolean;
   // Iteration 49.5 (the colony ship): tracks the chain's three beats.
   // Absent means the chain never started, or already finished/lapsed.
@@ -428,8 +432,8 @@ export interface RunState {
   // back to absent. Set to 1 by 'colony-ship's escort choice; set to 2 only
   // by a WON fight against the raiders (AmbushBonus.chainEffect:
   // 'colony-defended') — 'colony-raiders' itself clears this at CHOICE time
-  // regardless of option picked, so a withdraw or loss ends the chain (see
-  // events.ts's drawEvent/resolveEventChoice).
+  // regardless of option picked, so a loss ends the chain (see events.ts's
+  // drawEvent/resolveEventChoice).
   colonyStage?: 1 | 2;
   // Set by EVENT_CONTINUE when an event choice's ambush carries a
   // win-conditional bonus (see `AmbushBonus`); consumed and cleared by
@@ -447,10 +451,9 @@ export interface RunState {
   heat: number;
   // True only while the current prep/combat is a heat-4 interception (a
   // hunter-killer squad that replaced a shop/repair/event node's real
-  // content) — lets CONTINUE/WITHDRAW reset heat to 0 instead of applying
-  // the normal win/withdraw delta, and lets `hasLineOfRetreat` use the
-  // node's real reachability instead of the "no retreat" rule that applies
-  // to an event's own in-screen ambush choice.
+  // content) — lets CONTINUE reset heat to 0 on a win instead of applying
+  // the normal win delta. (Pre-51.3 this also gated WITHDRAW's heat reset
+  // and hasLineOfRetreat's reachability rule; both are gone with withdraw.)
   interceptionActive?: boolean;
   // Iteration 18: the daily run. All optional — absence means a standard
   // run (every pre-18 save), and reads fall back accordingly.

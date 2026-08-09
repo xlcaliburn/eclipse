@@ -6,7 +6,6 @@ import {
   issueOrder,
   setPriorityTarget,
   runToEnd,
-  shipEndState,
   useActive,
 } from './combatEngine';
 import type { FleetOrderId, TargetingStance } from './combatEngine';
@@ -113,7 +112,6 @@ export type RunAction =
   // (an enemy-side index), omitted for the two fleet-wide stance orders.
   | { type: 'ISSUE_ORDER'; order: FleetOrderId; targetIndex?: number }
   | { type: 'CONTINUE' }
-  | { type: 'WITHDRAW' }
   | { type: 'PICK_UPGRADE'; upgradeId: UpgradeId; shipIndex: number }
   | { type: 'LEAVE_REWARD' }
   | { type: 'INTERLUDE_CHOOSE'; shipIndex: number }
@@ -135,7 +133,7 @@ export type RunAction =
   | { type: 'BUY_COMMODITY_LOT' }
   | { type: 'SELL_COMMODITY_LOT' }
   // Iteration 20 (war assets): a one-fight-only escort. Consumed the very
-  // next time a combat resolves (win or withdraw), regardless of outcome.
+  // next time a combat resolves (win or loss), regardless of outcome.
   | { type: 'BUY_MERCENARY' }
   // 2026-08-06: pay a shop to fully heal one ship's accumulated damage —
   // REPAIR_COST_PER_HP credits per point, same shape as any other per-ship
@@ -172,6 +170,12 @@ const SECTOR_SCAN_DEPTH = 2;
 // ENGAGE actually seeds — not a re-derived duplicate.
 export const BASE_COMMAND_POINTS = 2;
 export const SPYMASTER_COMMAND_POINTS = 3;
+// Iteration 51.1 ("Forewarned"): +1 player-side computer for the whole
+// fleet during the opening exchange (missile phase + cannon round 1) —
+// see combatEngine.ts's CombatState.openingComputerBonus. Exported for the
+// same "one source of truth" reasoning as BASE_COMMAND_POINTS, in case any
+// UI copy wants the number.
+export const SPYMASTER_FOREWARNED_COMPUTER = 1;
 
 // Iteration 46.2 (2026-08-08): a flat, free heal on every won fight,
 // universal (every commander, stacks with regen/the Engineer's bonus) —
@@ -269,12 +273,12 @@ function withCounterProtocol(enemy: EnemyDef, state: RunState): EnemyDef {
 // that can never be rebought — losing it in a fight the rest of the fleet
 // survives used to just mean it was gone for good, permanently. This wraps
 // whatever a fight's natural next state would have been (a won fight's
-// reward/interlude/victory, or a withdrawal's return to the map) behind a
-// one-time salvage offer when that's exactly what happened. Every field the
-// natural transition already set (fleet, credits, pendingReward, etc.)
-// stays on `next` untouched — only `phase` is swapped out and restored by
-// RESOLVE_FLAGSHIP_RECOVERY, so this needs no duplicate branch logic at any
-// of its four call sites.
+// reward/interlude/victory) behind a one-time salvage offer when that's
+// exactly what happened. Every field the natural transition already set
+// (fleet, credits, pendingReward, etc.) stays on `next` untouched — only
+// `phase` is swapped out and restored by RESOLVE_FLAGSHIP_RECOVERY, so this
+// needs no duplicate branch logic at any of its three call sites. (51.3
+// removed the fourth: WITHDRAW's return-to-map path.)
 function withFlagshipRecoveryGate(originalFleet: PlayerShipState[], next: RunState): RunState {
   if (next.fleet.length === 0) return next; // total wipe — 'defeat' is a separate, earlier return; not reachable here
   if (next.fleet.some((s) => s.frameId === 'cruiser')) return next; // Flagship survived — nothing to gate
@@ -399,18 +403,20 @@ function attributeFightStats(
 
 type FightStats = { kills: number[]; damageDealt: number; damageTaken: number };
 
-// 47.5a: extracted from CONTINUE and WITHDRAW, which each hand-rolled the
-// same post-fight fleet walk (skip mercenaries, salvage a destroyed ship's
-// equipped parts to inventory, carry a survivor's kills/fightsSurvived
-// forward) — the single highest-consequence duplication found in this
-// file's review, since either copy drifting from the other silently
-// changes salvage/kill-crediting rules. `outcome` is index-aligned to
-// `fleet`; CONTINUE derives it from `combatOutcome` (the fight has a
-// winner), WITHDRAW from `shipEndState` directly (the fight does NOT —
-// `combatOutcome` would throw). Heal (regen/Engineer/POST_WIN_REPAIR) is
-// deliberately NOT applied here — see `applyPostFightHeal` below, called
-// as a separate pass so each caller's own heal rules stay independent of
-// settlement.
+// 47.5a: extracted from CONTINUE and (pre-51.3) WITHDRAW, which each
+// hand-rolled the same post-fight fleet walk (skip mercenaries, salvage a
+// destroyed ship's equipped parts to inventory, carry a survivor's
+// kills/fightsSurvived forward) — the single highest-consequence
+// duplication found in the 47.5 review, since either copy drifting from the
+// other silently changes salvage/kill-crediting rules. 51.3 removed
+// WITHDRAW outright, leaving CONTINUE as the one caller, but the shape is
+// kept as-is rather than collapsed into CONTINUE — `outcome` stays a plain
+// index-aligned array (CONTINUE derives it from `combatOutcome`, since the
+// fight always has a winner by the time this runs) so the function's own
+// logic doesn't need to know how its caller got there. Heal
+// (regen/Engineer/POST_WIN_REPAIR) is deliberately NOT applied here — see
+// `applyPostFightHeal` below, called as a separate pass so heal rules stay
+// independent of settlement.
 function settleFleetAfterFight(
   fleet: PlayerShipState[],
   outcome: { endDamage: number; destroyed: boolean }[],
@@ -430,15 +436,12 @@ function settleFleetAfterFight(
     if (ship.mercenary) return;
     const shipOutcome = outcome[i];
     // Iteration 28 (Ghost fleet protocol): a ship that would be destroyed
-    // withdraws instead — no resolver change needed, since this is purely
-    // a reinterpretation of the fight's already-computed outcome: it
-    // simply doesn't take the "destroyed" branch below, and lands at 1 HP
-    // (critically damaged, not gone) instead. Its parts/upgrades are
-    // untouched (it never actually died), unlike a real destruction's
-    // salvage-and-lose. WITHDRAW never passes `ghostFleet` — a ship lost
-    // mid-withdrawal has always been lost outright, protocol or not; this
-    // extraction preserves that rather than newly applying the protocol
-    // somewhere it never used to reach.
+    // survives critically damaged instead — no resolver change needed,
+    // since this is purely a reinterpretation of the fight's
+    // already-computed outcome: it simply doesn't take the "destroyed"
+    // branch below, and lands at 1 HP (critically damaged, not gone)
+    // instead. Its parts/upgrades are untouched (it never actually died),
+    // unlike a real destruction's salvage-and-lose.
     if (shipOutcome.destroyed && opts.ghostFleet) {
       const maxHp = deriveStats(ship.frameId, ship.equipped, ship.upgrades, opts.protocols).hp;
       survivingFleet.push({
@@ -468,35 +471,39 @@ function settleFleetAfterFight(
   return { survivingFleet, inventory, salvagedParts, lostShips };
 }
 
-// 47.5b: the 3 hand-spread RunStats merges (defeat, win, withdraw) folded
-// into one. `opts` covers exactly what varied between the three: only the
-// win/withdraw branches bump their own counter or append lostShips; defeat
-// touches neither (both flags omitted, `lostShips` omitted) — only
-// damageDealt/damageTaken change there, matching the original.
+// 47.5b: the (originally 3) hand-spread RunStats merges (defeat, win,
+// withdraw) folded into one. 51.3 removed withdraw, leaving 2 — `opts` is
+// kept as an options bag rather than collapsed into a plain boolean, since
+// a defeat still needs neither flag (only damageDealt/damageTaken change
+// there, matching the original 3-way shape).
 function mergeRunStats(
   base: RunStats,
   fightStats: FightStats,
-  opts: { won?: boolean; withdrew?: boolean; lostShips?: string[] } = {},
+  opts: { won?: boolean; lostShips?: string[] } = {},
 ): RunStats {
   return {
     ...base,
     fightsWon: base.fightsWon + (opts.won ? 1 : 0),
-    fightsWithdrawn: base.fightsWithdrawn + (opts.withdrew ? 1 : 0),
     shipsLost: opts.lostShips && opts.lostShips.length > 0 ? [...base.shipsLost, ...opts.lostShips] : base.shipsLost,
     damageDealt: base.damageDealt + fightStats.damageDealt,
     damageTaken: base.damageTaken + fightStats.damageTaken,
   };
 }
 
-// 47.5c: the divergent post-fight heal blocks in CONTINUE (regen +
-// Engineer's flat bonus + POST_WIN_REPAIR, with the Engineer's heal
-// BANKED past full via applyRepairBanking) vs WITHDRAW (bare regen, no
-// banking — regen now heals after any survived fight per iteration 39,
-// but the Engineer's bonus/banking stay win-only, tied to the reward
-// itself, not to merely surviving) — encoded as options rather than two
-// copies of the same shape. Applied as a separate pass AFTER
-// settleFleetAfterFight, over ships whose `damage` is already the
-// settled end-of-fight value.
+// 47.5c: originally the divergent post-fight heal blocks in CONTINUE
+// (regen + Engineer's flat bonus + POST_WIN_REPAIR, with the Engineer's
+// heal BANKED past full via applyRepairBanking) vs WITHDRAW (bare regen,
+// no banking — iteration 39 made regen heal after any survived fight, not
+// just a win, while the Engineer's bonus/banking stayed win-only, tied to
+// the reward itself). 51.3 removed WITHDRAW, so CONTINUE is the only
+// caller left and every call now passes `regen: true` alongside the win
+// options — regen's "any survived fight" framing collapses back to
+// win-only in practice, since winning is the only way to survive a fight
+// any more. Left as an options bag (not simplified into a plain heal call)
+// since the Engineer's bank/flat still vary independently of regen at the
+// one remaining call site. Applied as a separate pass AFTER
+// settleFleetAfterFight, over ships whose `damage` is already the settled
+// end-of-fight value.
 function applyPostFightHeal(
   ship: PlayerShipState,
   opts: { regen?: boolean; flat?: number; bank?: boolean } = {},
@@ -645,40 +652,6 @@ function repairSummaryText(totalRepaired: number, shipCount: number): string {
   return `Repaired ${totalRepaired} damage across ${shipCount} ship${shipCount > 1 ? 's' : ''}.`;
 }
 
-function samePosition(a: MapPosition, b: MapPosition): boolean {
-  return a.col === b.col && a.row === b.row;
-}
-
-// The position the run reverts to if the current node is fled — the node
-// visited immediately before it, or null if the current node was column 0
-// (there is no "before column 0").
-function revertedPosition(state: RunState): MapPosition | null {
-  const revertedIndex = state.visited.length - 2;
-  return revertedIndex >= 0 ? state.visited[revertedIndex] : null;
-}
-
-// Whether the fight at the player's current node can be walked away from.
-// The boss column has only one node, so it naturally has no line of
-// retreat once "itself" is excluded below — no special case needed. Ambush
-// fights (the player's position is still the event node they were jumped
-// from) are excluded explicitly: you were jumped, there is nothing to
-// retreat to. A heat-4 interception is the one exception to that
-// exclusion (15.2): it can land on an event node too, but it "follows
-// normal retreat rules" per spec — the player walked in on their own feet,
-// they just got jumped once inside — so it falls through to the ordinary
-// reachability check below instead.
-export function hasLineOfRetreat(state: RunState): boolean {
-  if (!state.position) return false;
-  const columns = actColumns(state.map, state.act);
-  const node = getNode(columns, state.position);
-  if (node.type === 'event' && !state.interceptionActive) return false;
-  const candidates = reachableNodes(columns, revertedPosition(state));
-  return candidates.some(
-    (n) =>
-      !samePosition(n, state.position!) &&
-      !state.fled.some((f) => samePosition(f, n)),
-  );
-}
 
 export function runReducer(state: RunState, action: RunAction): RunState {
   switch (action.type) {
@@ -693,8 +666,10 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const { rng, nextCounter } = runRng(state);
 
       // The Admiral (wide, iteration 21) inherits the old Warlord's free
-      // starting Interceptor — the fleet begins at 2 ships either way, just
-      // under the commander whose whole doctrine is "many hulls" now.
+      // starting Interceptor — the fleet begins at 3 ships now (51.2: a
+      // second free, ion-fitted Interceptor added on top of the original
+      // one — the simplest available lever on the worst-measuring
+      // commander's numbers, see plans/iteration-51.md's 51.2).
       const fleet =
         action.commanderId === 'admiral'
           ? [
@@ -705,6 +680,15 @@ export function runReducer(state: RunState, action: RunAction): RunState {
                 damage: 0,
                 upgrades: [],
                 name: shipName(state.map.seed, commissioned, 'interceptor'),
+                kills: 0,
+                fightsSurvived: 0,
+              },
+              {
+                frameId: 'interceptor' as const,
+                equipped: ['ion'] as PartId[],
+                damage: 0,
+                upgrades: [],
+                name: shipName(state.map.seed, commissioned + 1, 'interceptor'),
                 kills: 0,
                 fightsSurvived: 0,
               },
@@ -735,7 +719,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         phase: 'map',
         commanderId: action.commanderId,
         fleet: finalFleet,
-        shipsCommissioned: action.commanderId === 'admiral' ? commissioned + 1 : state.shipsCommissioned,
+        shipsCommissioned: action.commanderId === 'admiral' ? commissioned + 2 : state.shipsCommissioned,
         rngCounter: nextCounter(),
       };
     }
@@ -758,9 +742,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.fled.some((f) => f.col === node.col && f.row === node.row)) return state;
 
       // A shortcut skips exactly one column outright — every node in it is
-      // marked fled (same "can't return" rule WITHDRAW already uses), since
-      // position just moved two columns at once and the run can never
-      // visit them now.
+      // marked fled (the "can never be picked again" rule `fled` exists
+      // for — see its doc comment on RunState), since position just moved
+      // two columns at once and the run can never visit them now.
       const isShortcut = state.position !== null && targetCol === state.position.col + 2;
       const skippedColumn = isShortcut ? (columns[state.position!.col + 1] ?? []) : [];
       const fled = [...state.fled, ...skippedColumn.map((n) => ({ col: n.col, row: n.row }))];
@@ -768,7 +752,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const position: MapPosition = { col: node.col, row: node.row };
       const visited = [...state.visited, position];
       // Arriving anywhere reveals your next set of choices (fog of war,
-      // iteration 6) — a high-water mark, so retreating never un-reveals.
+      // iteration 6) — a high-water mark, so it only ever climbs.
       const visionCol = Math.max(state.visionCol, node.col + visionStep(state));
 
       // Iteration 32 (the pursuit clock, 32.3): arriving at any act-2 lane
@@ -1002,6 +986,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         {
           commandPoints: state.commanderId === 'spymaster' ? SPYMASTER_COMMAND_POINTS : BASE_COMMAND_POINTS,
           exploitEnabled: state.commanderId === 'spymaster',
+          openingComputerBonus: state.commanderId === 'spymaster' ? SPYMASTER_FOREWARNED_COMPUTER : 0,
         },
       );
       // Neither fleet has a missile weapon — round 0 is a guaranteed no-op,
@@ -1076,7 +1061,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
       const startingInventory = ambushBonus?.partId ? [...state.inventory, ambushBonus.partId] : [...state.inventory];
       // Iteration 28 (Ghost fleet protocol): a ship that would be destroyed
-      // withdraws instead — see settleFleetAfterFight's own comment for why.
+      // survives critically damaged instead — see settleFleetAfterFight's
+      // own comment for why.
       const ghostFleet = hasProtocol(state.protocols, 'ghost-fleet-protocol');
       const settled = settleFleetAfterFight(state.fleet, outcome.playerShips, fightStats, startingInventory, {
         protocols: state.protocols,
@@ -1277,62 +1263,6 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       });
     }
 
-    case 'WITHDRAW': {
-      if (state.phase !== 'combat' || !state.combat || state.combat.winner) return state;
-      if (state.combat.round < 1) return state; // can't back out before the missile phase resolves
-      if (!hasLineOfRetreat(state)) return state;
-
-      // Surviving ships keep their damage, same as a win; destroyed ships
-      // are lost with parts salvaged and upgrades gone (existing rules).
-      // No credits, no reward screen — the fight simply stops.
-      // Iteration 18: kills earned before withdrawing still count, and
-      // surviving a withdrawal is still surviving a fight.
-      const fightStats = attributeFightStats(state.combat.log, state.fleet.length);
-      const baseStats = state.runStats ?? emptyRunStats();
-      // `state.combat.winner` is guaranteed unset here (guarded above), so
-      // this uses `shipEndState` directly rather than `combatOutcome` (which
-      // throws before a winner exists) — see settleFleetAfterFight's own
-      // comment. No `ghostFleet` option passed: a ship lost mid-withdrawal
-      // has always been lost outright, protocol or not.
-      const outcome = state.combat.playerShips.map(shipEndState);
-      const settled = settleFleetAfterFight(state.fleet, outcome, fightStats, [...state.inventory]);
-      const lostShips = settled.lostShips;
-      const inventory = settled.inventory;
-      // Iteration 39: regen now heals after ANY survived fight, not just a
-      // win — "regenerative plating" shouldn't care why the fight ended.
-      // The Engineer's flat bonus/banking stay win-only (applyPostFightHeal
-      // not passed `flat`/`bank`) — those are tied to the reward itself,
-      // not to the ship surviving.
-      const survivingFleet = settled.survivingFleet.map((ship) => applyPostFightHeal(ship, { regen: true }));
-      const runStats = mergeRunStats(baseStats, fightStats, { withdrew: true, lostShips });
-
-      const fled = [...state.fled, state.position!];
-      const position = revertedPosition(state);
-      const visited = state.visited.slice(0, -1);
-
-      // 15.2: withdrawing costs heat too (they watched you run) — except an
-      // interception, which always resets to 0 regardless of outcome: they
-      // found you either way, so the track restarts clean rather than
-      // stepping up from an already-armed 4.
-      const heat = state.interceptionActive ? 0 : addHeat(state.heat, 1);
-
-      return withFlagshipRecoveryGate(state.fleet, {
-        ...state,
-        phase: 'map',
-        fleet: survivingFleet,
-        inventory,
-        combat: undefined,
-        currentEnemy: undefined,
-        fled,
-        position,
-        visited,
-        heat,
-        interceptionActive: undefined,
-        runStats,
-        pendingAmbushBonus: undefined, // withdrawing from an event ambush forfeits any win-conditional bonus
-      });
-    }
-
     case 'PICK_UPGRADE': {
       if (state.phase !== 'reward' || !state.pendingReward?.upgradeOptions) return state;
       if (!state.pendingReward.upgradeOptions.includes(action.upgradeId)) return state;
@@ -1416,9 +1346,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // itself is a passive derive-time bonus (see ship.ts), not applied
       // here. No mercenaries can be present at this point (they're always
       // stripped from the fleet by the end of the fight that led here — see
-      // CONTINUE/WITHDRAW) but the filter stays explicit rather than
-      // assumed, matching the "mercenaries are never touched by a protocol"
-      // rule stated in plans/iteration-28.md.
+      // CONTINUE) but the filter stays explicit rather than assumed,
+      // matching the "mercenaries are never touched by a protocol" rule
+      // stated in plans/iteration-28.md.
       if (chosen === 'lone-flagship') {
         const escorts = state.fleet.filter((s) => s.frameId !== 'cruiser' && !s.mercenary);
         const scrapValue = escorts.reduce((sum, s) => sum + hullScrapValue(s.frameId), 0);

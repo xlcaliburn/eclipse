@@ -19,7 +19,7 @@ export function dailySeed(dateStr: string): number {
 }
 
 export function emptyRunStats(): RunStats {
-  return { fightsWon: 0, fightsWithdrawn: 0, shipsLost: [], damageDealt: 0, damageTaken: 0 };
+  return { fightsWon: 0, shipsLost: [], damageDealt: 0, damageTaken: 0 };
 }
 
 const OUTCOME_LINE: Record<DailyOutcome, string> = {
@@ -37,7 +37,7 @@ export function dailyShareText(state: RunState, outcome: DailyOutcome): string {
   const lines = [
     `Eclipse Daily — ${state.dailyDate ?? '????-??-??'}`,
     `${OUTCOME_LINE[outcome]} · Act ${state.act} · Column ${column}`,
-    `⚔️ ${stats.fightsWon} won · ↩️ ${stats.fightsWithdrawn} withdrawn · ☠ ${stats.shipsLost.length} ship${stats.shipsLost.length === 1 ? '' : 's'} lost`,
+    `⚔️ ${stats.fightsWon} won · ☠ ${stats.shipsLost.length} ship${stats.shipsLost.length === 1 ? '' : 's'} lost`,
   ];
   return lines.join('\n');
 }

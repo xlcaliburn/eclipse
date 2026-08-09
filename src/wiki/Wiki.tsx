@@ -267,8 +267,7 @@ export function Wiki() {
             </li>
             <li>
               <strong>Phase order:</strong> every fight opens with one missile phase (all missiles fire once), then
-              repeating cannon rounds until one side is destroyed or the player withdraws. Within a phase, ships act
-              in initiative order.
+              repeating cannon rounds until one side is destroyed. Within a phase, ships act in initiative order.
             </li>
             <li>
               <strong>Outspeed:</strong> a ship whose initiative beats the fastest surviving enemy by{' '}

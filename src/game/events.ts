@@ -1188,8 +1188,8 @@ export function resolveEventChoice(
       if (choiceIndex === 1) {
         // 49.4: `loanOutstanding` stays set at choice time — cleared only
         // via the ambush's win-conditional chainEffect (see AmbushBonus).
-        // A withdraw or loss leaves the debt live; the collectors return
-        // on a later 50% roll — deliberate, the loan's teeth.
+        // A loss leaves the debt live; the collectors return on a later
+        // 50% roll — deliberate, the loan's teeth.
         return {
           state,
           outcomeText: 'You turn to fight the enforcers. Win, and the debt is cleared for good.',
@@ -1220,8 +1220,8 @@ export function resolveEventChoice(
         };
       }
       // choiceIndex 1: drive the raiders off. `colonyStage` clears at
-      // choice time (a withdraw means the convoy scattered, chain dead)
-      // and is only restored to 2 via the ambush's chainEffect on a win.
+      // choice time (a loss means the convoy scattered, chain dead) and is
+      // only restored to 2 via the ambush's chainEffect on a win.
       return {
         state: { ...state, colonyStage: undefined },
         outcomeText: 'You peel off to drive the raiders from the convoy. Win, and the colonists remember your name.',

@@ -62,15 +62,16 @@ export const COMMANDERS: Record<CommanderId, Commander> = {
       'Salvage-claim events cost no heat',
       '3 command points per fight instead of 2',
       "Unlocks the Exploit weakness order — mark an enemy ship; your whole fleet gains +2 computer against it for the round",
+      'Forewarned: +1 computer for the whole fleet during the missile phase and the first cannon round',
     ],
   },
   admiral: {
     id: 'admiral',
     name: 'The Admiral',
-    description: 'Starts wide with an extra hull already in formation — more ships, cheaper ships, and veterans who only get sharper.',
+    description: 'Starts wide with extra hulls already in formation — more ships, cheaper ships, and veterans who only get sharper.',
     bullets: [
       'Fleet cap 5 instead of 4',
-      'Starts with a free, ion-fitted Interceptor — the fleet begins at 2 ships',
+      'Starts with two free, ion-fitted Interceptors — the fleet begins at 3 ships',
       'Every hull costs 25% less',
       'Any ship with 3+ kills gains +1 initiative',
     ],

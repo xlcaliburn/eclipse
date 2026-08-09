@@ -120,6 +120,14 @@ export interface CombatState {
   // At most one per round (canIssueOrder refuses a second); cleared by
   // advanceRound alongside the round-modifier reset.
   orderThisRound: FleetOrderId | null;
+  // 51.1 (Spymaster "Forewarned"): set once at initCombat from
+  // CombatOrderOptions.openingComputerBonus, never changes mid-fight — see
+  // that field's own comment. Read with `?? 0` at its one consuming site
+  // (advanceRound) rather than bumping SAVE_VERSION: old mid-fight saves
+  // lack this key, and an `undefined ?? 0` numeric add degrades safely
+  // (unlike iteration 48's bracingShipIndices, which needed a real bump
+  // because `.includes()` throws on undefined at multiple read sites).
+  openingComputerBonus: number;
 }
 
 export interface PlayerFleetInput {
@@ -738,9 +746,18 @@ export interface CombatProtocolFlags {
 // not a drafted-protocol one. Defaults (2 CP, no Exploit) apply whenever a
 // call site doesn't care — every existing initCombat call in the test
 // suite, scripts/sim, and EnemyPanel's preview keeps compiling unchanged.
+// 51.1 (Spymaster "Forewarned"): +1 player-side computer during the opening
+// exchange (missile phase + cannon round 1) only — folded into
+// `advanceRound`'s per-round derivation of `roundModifiers.computerBonus`
+// the same way Alpha doctrine's `playerBaseShieldZeroed` is derived from
+// `alphaDoctrineActive` (NOT part of the armed-actives reset bag), so it
+// composes additively with uplink2/orders rather than overwriting them.
+// Defaults to 0 for every non-Spymaster ENGAGE and for every existing
+// initCombat call site (tests, scripts/sim, EnemyPanel's preview).
 export interface CombatOrderOptions {
   commandPoints?: number;
   exploitEnabled?: boolean;
+  openingComputerBonus?: number;
 }
 
 export function initCombat(
@@ -793,6 +810,7 @@ export function initCombat(
     commandPoints: orderOptions?.commandPoints ?? 2,
     exploitEnabled: !!orderOptions?.exploitEnabled,
     orderThisRound: null,
+    openingComputerBonus: orderOptions?.openingComputerBonus ?? 0,
   };
 }
 
@@ -849,9 +867,15 @@ export function advanceRound(state: CombatState): CombatState {
   // fight-long `alphaDoctrineActive` flag, not part of the "armed actives"
   // bag freshRoundModifiers() resets — true for the opening exchange only
   // (the missile phase and the first cannon round).
+  // 51.1 (Spymaster "Forewarned"): same per-round-derived shape — +1 player
+  // computer folded additively onto whatever uplink2/orders already armed
+  // this round (`state.roundModifiers.computerBonus`), for the opening
+  // exchange only. `?? 0` covers a pre-51.1 mid-fight save (see
+  // CombatState.openingComputerBonus's own comment).
   const roundModifiers: RoundModifiers = {
     ...state.roundModifiers,
     playerBaseShieldZeroed: state.alphaDoctrineActive && roundNumber <= 1,
+    computerBonus: state.roundModifiers.computerBonus + (roundNumber <= 1 ? (state.openingComputerBonus ?? 0) : 0),
   };
 
   log.push({ kind: 'phase-start', phase, round: roundNumber });
@@ -987,6 +1011,7 @@ export function advanceRound(state: CombatState): CombatState {
     commandPoints: state.commandPoints,
     exploitEnabled: state.exploitEnabled,
     orderThisRound: null, // iteration 48: at most one order arms per round — cleared same as roundModifiers
+    openingComputerBonus: state.openingComputerBonus ?? 0,
   };
 }
 
@@ -1241,10 +1266,14 @@ export function runToEnd(state: CombatState): CombatState {
 }
 
 // 47.5a: a ship's clamped end-of-fight damage + whether it's destroyed —
-// pure function of one CombatShip, no `state.winner` requirement. Exported
-// so the reducer's WITHDRAW case (which runs deliberately on an UNFINISHED
-// fight — `combatOutcome` below would throw) can compute the identical
-// destroyed/endDamage formula without re-deriving it by hand.
+// pure function of one CombatShip, no `state.winner` requirement.
+// `combatOutcome` below maps every player ship through this. Originally
+// also exported for the reducer's WITHDRAW case, which ran deliberately on
+// an UNFINISHED fight (`combatOutcome` would throw) and needed the
+// identical destroyed/endDamage formula without re-deriving it by hand —
+// 51.3 removed WITHDRAW, so this is internal-only again, but is left
+// exported (harmless) rather than churning the combatEngine.ts public
+// surface for its own sake.
 export function shipEndState(s: CombatShip): { endDamage: number; destroyed: boolean } {
   return { endDamage: Math.min(s.damage, s.stats.hp), destroyed: s.damage >= s.stats.hp };
 }

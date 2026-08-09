@@ -1697,6 +1697,71 @@ describe('Alpha doctrine (iteration 28)', () => {
   });
 });
 
+describe('Forewarned (iteration 51.1, Spymaster CombatOrderOptions.openingComputerBonus)', () => {
+  it('adds the bonus to player computer during round 0 and round 1, gone by round 2', () => {
+    const fleet = [
+      {
+        stats: blankStats({
+          hp: 50,
+          computer: 2,
+          missiles: [{ diceCount: 1, damage: 1 }],
+          cannons: [{ diceCount: 1, damage: 1 }],
+        }),
+        initialDamage: 0,
+      },
+    ];
+    const foe = enemy({}, { hp: 50 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { openingComputerBonus: 1 });
+    state = advanceRound(state); // round 0 — missile phase
+    const round0 = state.log.filter((e) => e.kind === 'roll' && e.side === 'player') as { computer: number }[];
+    expect(round0.length).toBeGreaterThan(0);
+    expect(round0.every((e) => e.computer === 3)).toBe(true);
+
+    state = advanceRound(state); // round 1 — cannon
+    const round1 = state.log.filter(
+      (e) => e.kind === 'roll' && e.side === 'player' && e.round === 1,
+    ) as { computer: number }[];
+    expect(round1.length).toBeGreaterThan(0);
+    expect(round1.every((e) => e.computer === 3)).toBe(true);
+
+    state = advanceRound(state); // round 2 — bonus is gone
+    const round2 = state.log.filter(
+      (e) => e.kind === 'roll' && e.side === 'player' && e.round === 2,
+    ) as { computer: number }[];
+    expect(round2.length).toBeGreaterThan(0);
+    expect(round2.every((e) => e.computer === 2)).toBe(true);
+  });
+
+  it('composes additively with uplink2 (+2 -> +3 total in round 1)', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 50, computer: 0, cannons: [{ diceCount: 1, damage: 1 }], actives: ['uplink2'] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 50 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { openingComputerBonus: 1 });
+    state = advanceRound(state); // round 0 — missile (no-op, no missiles) — round modifiers reset here
+    state = useActive(state, 0, 0); // arm uplink2 for round 1
+    state = advanceRound(state); // round 1 — cannon
+    const round1 = state.log.filter(
+      (e) => e.kind === 'roll' && e.side === 'player' && e.round === 1,
+    ) as { computer: number }[];
+    expect(round1.length).toBeGreaterThan(0);
+    expect(round1.every((e) => e.computer === 3)).toBe(true); // 0 base + 1 Forewarned + 2 uplink
+  });
+
+  it('defaults to 0 without the option — a commander-less fight is unchanged', () => {
+    const fleet = [{ stats: blankStats({ hp: 50, computer: 2, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 50 });
+    let state = initCombat(fleet, foe, 1); // no orderOptions at all
+    state = advanceRound(state); // round 0 — missile (no-op)
+    state = advanceRound(state); // round 1 — cannon
+    const round1 = state.log.filter(
+      (e) => e.kind === 'roll' && e.side === 'player' && e.round === 1,
+    ) as { computer: number }[];
+    expect(round1.length).toBeGreaterThan(0);
+    expect(round1.every((e) => e.computer === 2)).toBe(true);
+  });
+});
+
 // Iteration 40 (Overcharged rounds / "digital dice"): a weapon with
 // `overcharge: true` rolls on a 7-face die instead of 6 — a natural 7
 // always hits and deals +1 bonus damage. Swept across many seeds (no

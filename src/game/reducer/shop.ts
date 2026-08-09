@@ -625,11 +625,11 @@ export function handleShopAction(state: RunState, action: ShopAction): RunState 
       // Deliberately NOT capped by fleetCap (2026-08-04) — a mercenary is a
       // one-fight rental, not a permanent addition to the roster (it's
       // already excluded from shipsCommissioned above, and every mustering-
-      // out path — CONTINUE, WITHDRAW, the act-1/2 boundary — drops it
-      // regardless of fleet size). A player already at the cap is exactly
-      // who most wants a temporary extra hull for one hard fight; blocking
-      // that made the cap punish the one purchase it can't actually
-      // overcrowd anything with.
+      // out path — CONTINUE, the act-1/2 boundary — drops it regardless of
+      // fleet size). A player already at the cap is exactly who most wants
+      // a temporary extra hull for one hard fight; blocking that made the
+      // cap punish the one purchase it can't actually overcrowd anything
+      // with.
       const cost = mercenaryCost(state.commanderId);
       if (state.credits < cost) return state;
       return {

@@ -23,11 +23,6 @@ export interface PolicyConfig {
   // Damage-ratio (0-1, ship damage / max HP) above which a repair/heal
   // option is chosen over spending on new gear.
   repairThreshold: number;
-  // Combat: withdraw once round 1 resolves if the player fleet's surviving
-  // HP fraction is below this multiple of the enemy's — e.g. 0.5 means
-  // "retreat once we're worse off than half the enemy's remaining
-  // strength," matching a real player's "this is going badly" read.
-  withdrawHpRatio: number;
   // Route-choice node-type score deltas, layered on the shared floor
   // (ported from the old actRun.ts chooseNode) — same table shape as that
   // function's commander bias switch, generalized to archetype.
@@ -54,7 +49,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     framePriority: ['interceptor', 'corvette', 'bastion'],
     fleetCap: 3,
     repairThreshold: 0.4,
-    withdrawHpRatio: 0.4,
     routeBias: {},
   },
   'tank-taunt': {
@@ -63,7 +57,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     framePriority: ['bastion', 'interceptor'],
     fleetCap: 2,
     repairThreshold: 0.5,
-    withdrawHpRatio: 0.3, // a tank absorbs more before bailing
     routeBias: { repair: 15 },
   },
   'alpha-missile': {
@@ -72,7 +65,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     framePriority: ['interceptor', 'corvette'],
     fleetCap: 3,
     repairThreshold: 0.4,
-    withdrawHpRatio: 0.4,
     routeBias: {},
   },
   outspeed: {
@@ -81,7 +73,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     framePriority: ['interceptor', 'corvette'],
     fleetCap: 3,
     repairThreshold: 0.4,
-    withdrawHpRatio: 0.4,
     routeBias: {},
   },
   wide: {
@@ -90,7 +81,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     framePriority: ['interceptor', 'corvette', 'interceptor', 'corvette'],
     fleetCap: 4,
     repairThreshold: 0.35,
-    withdrawHpRatio: 0.4,
     routeBias: { shop: 15, shipyard: 15 }, // wide needs more shop visits to fill more hulls
   },
   tall: {
@@ -103,7 +93,6 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     framePriority: [], // never buys an escort — everything into the Flagship
     fleetCap: 1,
     repairThreshold: 0.4,
-    withdrawHpRatio: 0.45, // one hull lost is the whole run — bail earlier
     // 2026-08-08: was `{ shipyard: 20 }` ("the Foundry lives there") — with
     // the Foundry gone and this archetype never buying a hull
     // (framePriority: []), a shipyard visit has nothing for it (shipyards

@@ -87,12 +87,6 @@ export function EndScreen({
           <>
             <dt>Fights won</dt>
             <dd>{runStats.fightsWon}</dd>
-            {runStats.fightsWithdrawn > 0 && (
-              <>
-                <dt>Withdrawals</dt>
-                <dd>{runStats.fightsWithdrawn}</dd>
-              </>
-            )}
             <dt>Damage dealt / taken</dt>
             <dd>
               {runStats.damageDealt} / {runStats.damageTaken}

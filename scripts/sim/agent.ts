@@ -22,7 +22,6 @@ import {
   eliteReward,
   fleetCap as commanderFleetCap,
   frameCost,
-  hasLineOfRetreat,
   initialRunState,
   mercenaryCost,
   partCost,
@@ -60,7 +59,6 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   // floor" section) — accounted for here, not dispatched anywhere below.
   ISSUE_ORDER: true,
   CONTINUE: true,
-  WITHDRAW: true,
   PICK_UPGRADE: true,
   LEAVE_REWARD: true,
   INTERLUDE_CHOOSE: true,
@@ -99,7 +97,6 @@ export interface AgentRunOutcome {
   act: 1 | 2;
   diedAt: { globalCol: number; type: string } | null;
   fightsWon: number;
-  fightsWithdrawn: number;
   actionsDispatched: number;
   // Liveness guard (45.6): true if any dispatch this run believed legal
   // was rejected by the reducer (returned state unchanged) — a policy/
@@ -174,11 +171,11 @@ function scoreNode(node: MapNode, ratio: number, config: PolicyConfig, commander
 function pickNode(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, rng: () => number): MapNode {
   const columns = actColumns(state.map, state.act);
   const shortcuts = state.act === 2 ? (state.map.act2Shortcuts ?? []) : [];
-  // `reachableNodes` doesn't know about `fled` — after a WITHDRAW reverts
-  // position, the node just fled from is geometrically reachable again
-  // (same position, same candidate set) but PICK_NODE's own guard rejects
-  // re-picking it. Filter it out here rather than relying on the reducer
-  // to reject a candidate this function should never have offered.
+  // `reachableNodes` doesn't know about `fled` — a warp-lane shortcut
+  // (iteration 32) marks the column it skipped as fled, and PICK_NODE's
+  // own guard rejects re-picking any of those nodes. Filter them out here
+  // rather than relying on the reducer to reject a candidate this function
+  // should never have offered.
   const options = reachableNodes(columns, state.position, shortcuts).filter(
     (n) => !state.fled.some((f) => f.col === n.col && f.row === n.row),
   );
@@ -311,29 +308,14 @@ function runShop(state: RunState, config: PolicyConfig, commanderId: CommanderId
 
 // --- Combat --------------------------------------------------------------
 
-function fractionAlive(ships: { damage: number; stats: { hp: number } }[]): number {
-  const totalHp = ships.reduce((n, s) => n + s.stats.hp, 0);
-  if (totalHp === 0) return 0;
-  const remaining = ships.reduce((n, s) => n + Math.max(0, s.stats.hp - s.damage), 0);
-  return remaining / totalHp;
-}
-
-function runCombat(state: RunState, config: PolicyConfig, tracker: { count: number; rejected: string | null }): RunState {
+// 51.3: withdraw is gone — every fight the agent enters now resolves to a
+// winner (AUTO_RESOLVE/runToEnd) and then CONTINUEs. This removed the
+// agent's old bail-out valve (`config.withdrawHpRatio`, a going-badly
+// heuristic that used to fire WITHDRAW instead); see plans/iteration-51.md's
+// 51.3/51.4 for the measured cost of losing it.
+function runCombat(state: RunState, tracker: { count: number; rejected: string | null }): RunState {
   let s = dispatch(state, { type: 'ENGAGE' }, tracker);
   if (s.phase !== 'combat' || !s.combat) return s; // shouldn't happen — see the fleetHasWeapon note in agent.ts's header comment
-  // Reach round 1 (resolve the missile phase, if there was one) before
-  // deciding whether to withdraw — WITHDRAW is illegal before round 1.
-  while (s.combat && !s.combat.winner && s.combat.round < 1) {
-    s = dispatch(s, { type: 'ADVANCE_ROUND' }, tracker);
-  }
-  if (s.combat && !s.combat.winner) {
-    const playerFrac = fractionAlive(s.combat.playerShips);
-    const enemyFrac = fractionAlive(s.combat.enemyShips);
-    const goingBadly = playerFrac < config.withdrawHpRatio * enemyFrac;
-    if (goingBadly && hasLineOfRetreat(s)) {
-      return dispatch(s, { type: 'WITHDRAW' }, tracker); // -> phase 'map' directly, no CONTINUE
-    }
-  }
   if (s.combat && !s.combat.winner) {
     s = dispatch(s, { type: 'AUTO_RESOLVE' }, tracker);
   }
@@ -372,7 +354,7 @@ function runEventChoice(state: RunState, tracker: { count: number; rejected: str
 function step(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, rng: () => number, tracker: { count: number; rejected: string | null }): RunState {
   switch (state.phase) {
     case 'prep':
-      return runCombat(state, config, tracker);
+      return runCombat(state, tracker);
     case 'combat':
       // Only reachable if ENGAGE itself silently no-op'd (no weapon) —
       // runCombat handles the normal path start-to-finish in one call.
@@ -462,7 +444,6 @@ export function simulateRunWithAgent(
     act: state.act,
     diedAt,
     fightsWon: state.runStats?.fightsWon ?? 0,
-    fightsWithdrawn: state.runStats?.fightsWithdrawn ?? 0,
     actionsDispatched: tracker.count,
     rejectedDispatch: tracker.rejected !== null,
     rejectedAction: tracker.rejected ?? undefined,

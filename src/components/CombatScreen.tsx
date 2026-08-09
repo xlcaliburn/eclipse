@@ -29,10 +29,8 @@ interface CombatScreenProps {
   enemy: EnemyDef;
   playerLabels: string[];
   playerFrameIds: FrameId[];
-  canWithdraw: boolean;
   onAdvanceRound: () => void;
   onContinue: () => void;
-  onWithdraw: () => void;
   onUseActive: (shipIndex: number, abilityIndex: number) => void;
   onSelectEnemy: (index: number) => void;
   onIssueOrder: (order: FleetOrderId, targetIndex?: number) => void;
@@ -43,17 +41,14 @@ export function CombatScreen({
   enemy,
   playerLabels,
   playerFrameIds,
-  canWithdraw,
   onAdvanceRound,
   onContinue,
-  onWithdraw,
   onUseActive,
   onSelectEnemy,
   onIssueOrder,
 }: CombatScreenProps) {
   const finished = Boolean(combat.winner);
   const won = combat.winner === 'player';
-  const withdrawEnabled = canWithdraw && combat.round >= 1;
 
   // Iteration 48 (fleet orders): which targeted order (Brace/Exploit
   // weakness) is mid-pick, awaiting a theater click — null for the two
@@ -251,30 +246,19 @@ export function CombatScreen({
           shouldn't require scrolling past a growing play-by-play to reach. */}
       <div className="combat-screen__actions">
         {!finished && (
-          <>
-            <button
-              type="button"
-              className="continue-button"
-              disabled={isReplaying}
-              onClick={onAdvanceRound}
-            >
-              {/* round 0 is always a real missile phase by the time this
-                  renders — reducer.ts's ENGAGE already auto-skips it
-                  entirely when neither fleet carries a missile (see
-                  hasMissilePhase), so round 0 here never means "nothing's
-                  about to happen." */}
-              {combat.round === 0 ? 'Start Missile Phase' : 'Next round'}
-            </button>
-            <button
-              type="button"
-              className="withdraw-button"
-              disabled={!withdrawEnabled || isReplaying}
-              onClick={onWithdraw}
-              title="Keep damage, forfeit reward, node is lost"
-            >
-              Withdraw
-            </button>
-          </>
+          <button
+            type="button"
+            className="continue-button"
+            disabled={isReplaying}
+            onClick={onAdvanceRound}
+          >
+            {/* round 0 is always a real missile phase by the time this
+                renders — reducer.ts's ENGAGE already auto-skips it
+                entirely when neither fleet carries a missile (see
+                hasMissilePhase), so round 0 here never means "nothing's
+                about to happen." */}
+            {combat.round === 0 ? 'Start Missile Phase' : 'Next round'}
+          </button>
         )}
         {finished && (
           <button type="button" className="continue-button" disabled={isReplaying} onClick={onContinue}>
@@ -307,9 +291,6 @@ export function CombatScreen({
             ? 'Click one of your ships in the theater to brace it — click the Brace tile again to cancel.'
             : 'Click an enemy ship in the theater to mark it — click the Exploit weakness tile again to cancel.'}
         </p>
-      )}
-      {!finished && !canWithdraw && (
-        <p className="hint">No line of retreat here — this fight must be finished.</p>
       )}
       {onboardingPopup && <OnboardingPopup topic={onboardingPopup} onClose={dismissOnboardingPopup} />}
     </div>
