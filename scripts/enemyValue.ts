@@ -9,6 +9,8 @@ import {
   FINAL_BOSS_IDS,
 } from '../src/game/enemies';
 import { PARTS, STARTING_LOADOUT } from '../src/game/parts';
+import { bossColumn, globalColumn, laneColumns } from '../src/game/map';
+import { eliteReward, winReward } from '../src/game/reducer';
 import { ESCALATIONS } from '../src/game/escalations';
 import type { EnemyDef, PlayerShipState, ShipStats } from '../src/game/types';
 import type { EscalationId, ScheduledEscalation } from '../src/game/escalations';
@@ -99,18 +101,32 @@ const STARTING_FIT_VALUE = STARTING_LOADOUT.reduce((sum, id) => sum + (PART_COST
 // Credits banked by the time the player *arrives* at `col`, assuming they win
 // every combat node on the way in (one node per column) and bank all of it.
 // This is the optimistic ceiling: real routes take shops, repairs, and events
-// that spend it. winReward(col) = 4 + col.
-function bankedByColumn(col: number): number {
+// that spend it.
+//
+// 2026-08-08: was hardcoded `4 + c` — the pre-iteration-22.6 reward formula,
+// stale by 3cr/fight plus every later refinement (the act-1 col 1-3 halving,
+// act 2's flat +3). One of the three staleness bugs plans/iteration-47.md's
+// 47.7.3 catalogued in this file; reading the REAL `winReward` closes the
+// whole class rather than re-copying today's numbers into a second place.
+// `winReward` takes a GLOBAL column, so map through `globalColumn` first.
+function bankedByColumn(act: 1 | 2, col: number): number {
   let total = 0;
-  for (let c = 0; c < col; c++) total += 4 + c;
+  for (let c = 0; c < col; c++) total += winReward(globalColumn(act, c), act);
   return total;
+}
+
+// Everything act 1 pays out end to end: every lane column won, plus the
+// act-1 boss (which pays at the elite rate — see the reducer's CONTINUE).
+function act1FullClearIncome(): number {
+  const lanes = laneColumns(1);
+  return bankedByColumn(1, lanes) + eliteReward(globalColumn(1, bossColumn(1)), 1);
 }
 
 // Total fleet value the player could theoretically be fielding at `col`.
 function playerBudget(act: 1 | 2, col: number): number {
   // Act 2 arrives carrying act 1's whole banked total on top.
-  const priorAct = act === 2 ? bankedByColumn(10) : 0;
-  return STARTING_FIT_VALUE + priorAct + bankedByColumn(col);
+  const priorAct = act === 2 ? act1FullClearIncome() : 0;
+  return STARTING_FIT_VALUE + priorAct + bankedByColumn(act, col);
 }
 
 function pct(n: number): string {
@@ -131,11 +147,15 @@ function row(label: string, enemy: EnemyDef, budget: number): string {
 }
 
 // A run schedules 4 escalations without replacement: 2 land in act 1 (after
-// local columns 3 and 6) and 2 more in act 2. Because the reducer rebases
-// them onto global columns, act-1's pair is still live during act 2 — so a
-// late act-1 fight faces 2, and a late act-2 fight faces all 4. Modelling
-// "every escalation at once" would overstate act 1 by more than double.
-const LIVE_ESCALATIONS: Record<1 | 2, number> = { 1: 2, 2: 4 };
+// local columns 3 and 6) and 2 more in act 2.
+//
+// 2026-08-08: act 2 was 4 here — correct when act-1's pair carried through
+// and stacked, but iteration 46.3 made only the CURRENT act's escalations
+// live (it was the single biggest lever behind act 2's 0% clear rate; see
+// the reducer's PICK_NODE, which filters `e.act === state.act`). Modelling
+// 4 overstated every act-2 fight. The second of 47.7.3's three staleness
+// bugs.
+const LIVE_ESCALATIONS: Record<1 | 2, number> = { 1: 2, 2: 2 };
 
 function scheduled(ids: EscalationId[], act: 1 | 2): ScheduledEscalation[] {
   return ids.map((id) => ({ id, act, landsAfterColumn: -1 }) as ScheduledEscalation);
@@ -169,7 +189,12 @@ function report() {
     console.log(
       ['node'.padEnd(34), 'value'.padStart(7), 'ships'.padStart(9), 'share'.padStart(17)].join(' '),
     );
-    for (let col = act === 1 ? 1 : 0; col <= 9; col++) {
+    // 2026-08-08: was hardcoded `col <= 9` for both acts — act 2 has been 12
+    // lane columns since iteration 32's starchart expansion, so the pre-boss
+    // columns this tool exists to price were never priced at all. The third
+    // of 47.7.3's staleness bugs.
+    const lastLaneCol = laneColumns(act) - 1;
+    for (let col = act === 1 ? 1 : 0; col <= lastLaneCol; col++) {
       const budget = playerBudget(act, col);
       const pool = combatEnemyPool(act, col);
       const hardest = pool.reduce((best, e) => (enemyValue(e) > enemyValue(best) ? e : best), pool[0]);
@@ -182,7 +207,7 @@ function report() {
 
     // The specific late-game case: the last elite under the worst escalation
     // draw the schedule can actually produce for this act.
-    const lastCol = 9;
+    const lastCol = laneColumns(act) - 1;
     const budget = playerBudget(act, lastCol);
     const { ids, enemy: worst } = worstRealisticEscalations(
       act,
@@ -196,16 +221,16 @@ function report() {
   }
 
   console.log('\n\n=== BOSSES ===');
-  const act1Budget = playerBudget(1, 10);
+  const act1Budget = playerBudget(1, bossColumn(1));
   for (const id of BOSS_IDS) {
     console.log(row(`act1 boss: ${getBoss(id).name}`, getBoss(id), act1Budget));
   }
-  const act2Budget = playerBudget(2, 10);
+  const act2Budget = playerBudget(2, bossColumn(2));
   for (const id of FINAL_BOSS_IDS) {
     console.log(row(`act2 boss: ${getFinalBoss(id).name}`, getFinalBoss(id), act2Budget));
   }
 
-  console.log(`\nStarting fit: ${STARTING_FIT_VALUE}cr. Act-1 full clear banks ${bankedByColumn(10)}cr.`);
+  console.log(`\nStarting fit: ${STARTING_FIT_VALUE}cr. Act-1 full clear banks ${act1FullClearIncome()}cr.`);
 }
 
 // --- Cross-check against the simulator -------------------------------------
@@ -234,7 +259,7 @@ function fleetPartsCost(fleet: PlayerShipState[]): number {
 
 function simulationCheck() {
   console.log('\n\n=== SIMULATED WIN RATE (act-1 column 9) ===');
-  const col = 9;
+  const col = laneColumns(1) - 1;
   const base = applyVeterancy(eliteEnemyForColumn(1, col, () => 0.99), col);
   const squadronsOnly = applyEscalations(base, col, scheduled(['squadrons'], 1));
   // The real worst case in act 1: squadrons plus one more, not all five.
@@ -249,7 +274,7 @@ function simulationCheck() {
   ];
 
   console.log(
-    `Column-9 budget is ${playerBudget(1, 9).toFixed(0)}cr. ` +
+    `Column-${col} budget is ${playerBudget(1, col).toFixed(0)}cr. ` +
       `"lean" fleet = ${fleetPartsCost(LATE_ACT1_FLEET)}cr of parts (under-spent, a floor); ` +
       `"rich" = ${fleetPartsCost(OVERBUILT)}cr (about what a clean run can field).\n`,
   );

@@ -605,9 +605,43 @@ h1, h2, h3 {
 /* Fleet orders (iteration 48): the "click a ship to complete this order"
    hint — accent-colored (not the plain --text-dim of a normal hint) since
    it names an action the player is expected to take right now, same
-   urgency register as the priority-target hint just above it in markup. */
+   urgency register as the priority-target hint just above it in markup.
+   53.2 added the inline Cancel control: flex row instead of plain text so
+   the button sits beside the instruction rather than wrapping onto its own
+   centered line under it (the parent .combat-screen is text-align: center,
+   which a bare inline button would otherwise inherit awkwardly). */
 .combat-order-pick-hint {
   color: var(--warning);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 53.2: cancelling a pick used to only be "click the tile again," which
+   stopped being reliable once picking auto-collapses the command bar (see
+   CombatScreen's handleOrderTileClick/cancelPick) — the tile that would
+   cancel it is now hidden. This button is the always-visible replacement,
+   styled as an outlined chip in the hint's own warning hue rather than a
+   filled button so it doesn't compete with the "Next round" button below it
+   for primary-action weight. */
+.combat-order-pick-hint__cancel {
+  background: none;
+  border: 1px solid var(--warning);
+  border-radius: 4px;
+  color: var(--warning);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.combat-order-pick-hint__cancel:hover {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
 }
 
 .warning {
@@ -2224,7 +2258,7 @@ h1, h2, h3 {
   color: var(--text-dim);
 }
 
-/* Collapse control: mobile-only, where the pinned dock costs ~300px of a
+/* Collapse control: mobile-only, where the pinned dock costs ~280px of a
    phone screen. Above the breakpoint the bar is an in-flow strip inside the
    panel that costs nothing to leave open, so the control would be noise —
    hidden there, and .combat-command-bar__body stays visible regardless of
@@ -2233,11 +2267,12 @@ h1, h2, h3 {
   display: none;
 }
 
-/* Pinned to the bottom of the viewport, above the tab bar, so the hand and
-   actives stay reachable without scrolling past a growing log. Height-
-   capped and internally scrollable rather than letting a big hand push the
-   dock past the tab bar; combat-screen reserves matching space below its
-   own content so the log's tail is never hidden underneath it. */
+/* Pinned to the bottom of the viewport, above the tab bar, so fleet orders
+   and ship actives stay reachable without scrolling past a growing log.
+   Height-capped and internally scrollable rather than letting a big active-
+   ability list push the dock past the tab bar; combat-screen reserves
+   matching space below its own content so the log's tail is never hidden
+   underneath it. */
 @media (max-width: 720px) {
   .combat-command-bar {
     position: fixed;
@@ -2248,15 +2283,38 @@ h1, h2, h3 {
     margin: 0;
     padding: 6px 12px;
     /* Safety net only, not the primary scroll mechanism — see
-       .combat-hand__cards below, which scrolls sideways per-row so a full
-       hand + full active-ability list never has to grow past this. Fixed
-       px, not vh: the two rows' height is set by their fixed-size font/
-       padding, not the viewport, so a vh-based cap that fit on a tall
-       phone was still cutting cards off mid-row on a shorter one. 300px
-       comfortably covers both sections (hand + ship actives) at one row
-       each, with headroom to spare; this only engages for something
-       unexpectedly tall, like a wrapped card name. */
-    max-height: 300px;
+       .combat-hand__cards below, which scrolls sideways per-row so neither
+       section's row ever has to grow past this. Fixed px, not vh: the two
+       rows' height is set by their fixed-size font/padding, not the
+       viewport, so a vh-based cap that fit on a tall phone was still
+       cutting cards off mid-row on a shorter one.
+       Re-derived at 53.1 — the old 300px figure predated iteration 48's
+       fleet orders (which replaced the reaction-card hand this cap was
+       originally sized for) and was never rechecked against the new
+       contents. Current budget, top to bottom:
+         toggle strip           35px  (34px min-height + 1px border)
+         bar padding             12px (6px top + 6px bottom)
+         orders section          76px (12px margin + ~18px heading incl.
+                                        the .command-points pip row, which
+                                        adds width not height — 2-3 short
+                                        pips never wraps the heading — +
+                                        ~46px card row: 53.3's compact
+                                        orders tile drops the description,
+                                        so it's just the kind+name lines)
+         ship-actives section   122px (12px margin + ~18px heading + ~92px
+                                        card row: kind+name+2-line desc+
+                                        ship-owner line, the tallest tile
+                                        in the bar)
+                                ------
+                                245px, + ~35px headroom for browser text-
+                                        size scaling and a wrapped ship-
+                                        owner label (.card-tile__ship has
+                                        no nowrap/ellipsis) = 280px.
+       Both sections fit inside this budget without either needing to
+       scroll vertically — the spec's "orders take priority, actives
+       scroll" fallback wasn't needed. If a future addition to either
+       section blows this budget, that's the tradeoff to make. */
+    max-height: 280px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     /* Fully opaque, not color-mixed — this overlays the in-flow log and
@@ -2334,6 +2392,36 @@ h1, h2, h3 {
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+
+  /* 53.3: four order tiles at the shared 128px width is ~512px of nowrap
+     content in a ~360px viewport — two tiles, including (for Spymaster)
+     the exclusive Exploit weakness tile that's the whole point of his kit,
+     were always scrolled off screen on first paint. Picked option: a
+     narrower mobile-only tile for orders specifically, dropping the
+     description to the title/tooltip (still set on the <button> in
+     CombatCommandBar) rather than wrapping to a 2x2 grid or just adding a
+     scroll affordance — orders have four short, memorable names ("Brace",
+     "Attack run"), unlike parts, so the description is the least-missed
+     thing to cut, and this also shrinks the row height, which 53.1's
+     budget above accounts for. Ship actives keep the shared 128px tile
+     with its description: part names alone don't reliably disambiguate,
+     and there's no fixed small set of them to memorize. */
+  .combat-command-bar .combat-orders .card-tile {
+    width: 92px;
+  }
+  .combat-command-bar .combat-orders .card-tile__desc {
+    display: none;
+  }
+
+  /* 53.4: the picking/armed states are box-shadow glows sized for a 150px
+     desktop tile; at the mobile tile's smaller footprint (92px orders /
+     128px actives) the 1px border they also set was easy to miss next to
+     the glow. Bumping the border itself keeps both states readable without
+     touching the desktop rule. */
+  .card-tile--picking,
+  .card-tile--armed {
+    border-width: 2px;
+  }
 }
 
 .combat-ship__name {
@@ -2385,6 +2473,14 @@ h1, h2, h3 {
     width: 5px;
     height: 7px;
   }
+  /* 53.4: the pick-target ring is a 1px border + box-shadow glow, same
+     shape as .combat-ship--priority — at the theater's cramped mobile
+     size (28px silhouette, 4-5px padding) the border alone was thin
+     enough to lose against the glow. Matches the card-tile picking/armed
+     border bump above for the same reason. */
+  .combat-ship--pick-target {
+    border-width: 2px;
+  }
 }
 
 /* Combat screen */
@@ -2396,16 +2492,18 @@ h1, h2, h3 {
   text-align: center;
 }
 
-/* Reserves room below the log for the pinned hand/actives dock (see
-   .combat-command-bar's own ≤720px rule) — placed after the base rule
+/* Reserves room below the log for the pinned fleet-orders/ship-actives dock
+   (see .combat-command-bar's own ≤720px rule) — placed after the base rule
    above so this padding-bottom actually wins the cascade instead of being
    reset by that rule's padding shorthand. Keyed to the dock's actual state:
    the dock unmounts once the fight resolves, and reserving its height
-   unconditionally left ~300px of dead space under a bar that was no longer
-   there. No modifier class = no dock = no reservation. */
+   unconditionally left dead space under a bar that was no longer there.
+   No modifier class = no dock = no reservation. 280px matches the dock's
+   own re-derived max-height (53.1) — keep the two in sync if that budget
+   ever changes. */
 @media (max-width: 720px) {
   .combat-screen--dock-open {
-    padding-bottom: calc(300px + 24px);
+    padding-bottom: calc(280px + 24px);
   }
   /* Collapsed leaves only the toggle strip pinned. */
   .combat-screen--dock-collapsed {
