@@ -29,17 +29,27 @@ export interface PolicyConfig {
   routeBias: Partial<Record<'combat' | 'elite' | 'shop' | 'shipyard' | 'repair' | 'event', number>>;
 }
 
+// 2026-08-12: reordered and re-paired with framePriority below after
+// iteration 52's typed slots. The old order led with hull1+shield1 (both
+// DEFENSE parts) — fine when every slot was untyped, but the cheap hulls
+// this list is bought onto now have at most one slot that accepts a
+// defense part (Interceptor W-S-U, Frigate W-W-U, Picket S-S-U). The
+// second defense buy simply had nowhere to go, so the agent silently
+// under-built and measured ~2pp worse — see the merchant investigation
+// recorded in plans/iteration-52.md's status notes. Interleaving the
+// categories means whatever hull the agent ends up with, the next buy on
+// the list has somewhere to sit.
 const BASE_PART_PRIORITY: PartId[] = [
-  'hull1',
-  'shield1',
   'plasma',
   'comp2',
-  'hull2',
-  'shield2',
+  'hull1',
   'plasma',
   'comp3',
-  'antimatter',
+  'shield1',
+  'hull2',
   'init3',
+  'antimatter',
+  'shield2',
 ];
 
 export const ARCHETYPES: Record<string, PolicyConfig> = {
@@ -55,6 +65,13 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     // slot for 7cr) and Gunboat (rare, 3 dedicated weapon slots) are
     // straightforward upgrades on the existing picks' own doctrine, not a
     // new one.
+    // 2026-08-12: leaving Interceptor first is deliberate and MEASURED.
+    // Its layout (W-S-U) can seat only one defense part, so pairing the
+    // hull list to the part list — universal-heavy Corvette/Sloop first —
+    // looked like the obvious fix. Measured at n=3000 it was WORSE (7.8%
+    // vs 8.6% act-1 clear for the merchant): the Interceptor's innate Jink
+    // and initiative 2 are worth more than slot flexibility at this price
+    // point. Don't "fix" this ordering again without re-measuring.
     framePriority: ['interceptor', 'corvette', 'bastion', 'frigate', 'gunboat'],
     fleetCap: 3,
     repairThreshold: 0.4,
