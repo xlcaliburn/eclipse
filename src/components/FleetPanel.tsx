@@ -10,7 +10,7 @@ import type { PartId, PlayerShipState } from '../game/types';
 import { PartCard } from './PartCard';
 import { PowerPipRow } from './PowerPipRow';
 import { CounterProtocolRow, ProtocolRow } from './SettingsScreen';
-import { SlotRow } from './SlotRow';
+import { ShipBlueprint } from './ShipBlueprint';
 import { StatBar } from './StatBar';
 import { UpgradeBadgeRow } from './UpgradeBadgeRow';
 import { FrameSilhouette } from './ShipSilhouette';
@@ -100,7 +100,6 @@ export function FleetPanel({
       {fleet.map((ship, shipIndex) => {
         const stats = deriveFleetStats([ship], commanderId, protocols)[0];
         const selected = shipIndex === selectedShipIndex;
-        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols, commanderId) - ship.equipped.length;
         const outspeeding =
           outspeedFastestEnemyInitiative !== undefined &&
           qualifiesForOutspeed(stats.initiative, outspeedFastestEnemyInitiative, outspeedGap);
@@ -164,17 +163,12 @@ export function FleetPanel({
             </div>
             {/* Iteration 13: same StatBar as the enemy panel and combat cards. */}
             <StatBar stats={stats} damage={ship.damage} />
-            {/* Iteration 52.2: the typed-slot shape, filled vs. empty at a
-                glance — same layout the shop's frame card previewed before
-                this ship was ever bought. */}
-            <SlotRow layout={effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId)} equipped={ship.equipped} />
-            {/* Iteration 57.3: the power budget, same pip family as HP
-                above. Bonus slots (bay/Lone flagship/Warlord) never grant
-                power (ship.ts's layoutFeasibility) — the budget shown here
-                is always the frame's own flat number, regardless of how
-                many slots this ship's upgrades/protocols/commander granted
-                it above. */}
-            <PowerPipRow used={equippedPower(ship.equipped)} budget={getFrame(ship.frameId).power} />
+            {/* 2026-08-12: the slot shape and the power meter both moved
+                into the Items fold below (see ShipBlueprint). They used to
+                render here unconditionally, which put a full-width band of
+                colour on every ship on the prep screen — a screen the
+                player is usually just passing through, not fitting on. The
+                fold's summary line carries the numbers instead. */}
             {/* 2026-08-08: always shown now, not just when something's
                 fitted — an open augment slot (dashed, dim) is exactly the
                 info a Warlord player needs to see at a glance, now that
@@ -184,27 +178,47 @@ export function FleetPanel({
               emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
             />
             {(() => {
-              const grid = (
-                <div className="slot-grid">
-                  {ship.equipped.map((partId, i) => (
-                    <PartCard
-                      key={`${partId}-${i}`}
-                      part={getPart(partId)}
-                      onClick={() => onUnequip(shipIndex, partId)}
-                    />
-                  ))}
-                  {Array.from({ length: emptySlots }).map((_, i) => (
-                    <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty inventory slot" />
-                  ))}
-                </div>
+              const layout = effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId);
+              const power = equippedPower(ship.equipped);
+              const budget = getFrame(ship.frameId).power;
+              const body = (
+                <>
+                  <ShipBlueprint
+                    layout={layout}
+                    equipped={ship.equipped}
+                    onUnequip={(partId) => onUnequip(shipIndex, partId)}
+                  />
+                  {/* Iteration 57.3, relabelled 2026-08-12: the pips alone
+                      were being read as a second health bar — identical
+                      dimensions to the HP pips, but with INVERTED
+                      semantics (lit = spent here, lit = remaining there).
+                      The word "Power" and the fraction do the work now;
+                      the pips are the supporting visual, not the whole
+                      message. Bonus slots (bay/Lone flagship/Warlord)
+                      never grant power, so this budget is always the
+                      frame's own flat number however many slots the ship
+                      ended up with. */}
+                  <div className="blueprint__power">
+                    <span className="blueprint__power-label">Power</span>
+                    <PowerPipRow used={power} budget={budget} />
+                    <span className="blueprint__power-value">
+                      {power} / {budget}
+                    </span>
+                  </div>
+                </>
               );
-              if (!collapsibleParts) return grid;
+              if (!collapsibleParts) return body;
               return (
                 // onClick stops propagation because the whole card is a
                 // select-ship target.
                 <details className="parts-fold" onClick={(e) => e.stopPropagation()}>
-                  <summary className="parts-fold__summary">Items</summary>
-                  {grid}
+                  <summary className="parts-fold__summary">
+                    Items
+                    <span className="parts-fold__summary-detail">
+                      {ship.equipped.length}/{layout.length} slots · {power}/{budget} power
+                    </span>
+                  </summary>
+                  {body}
                 </details>
               );
             })()}

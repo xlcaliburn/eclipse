@@ -1685,6 +1685,89 @@ h1, h2, h3 {
 
 /* Collapsed parts/inventory on the prep screen. The summary carries the
    counts so folding costs nothing you'd scan for. */
+/* Ship blueprint (2026-08-12) — one socket per slot, the fitted part
+   inside it and the slot's own kind spelled out underneath. Replaces the
+   fleet panel's old pairing of an always-visible SlotRow (a colour/letter
+   code that needed a legend) plus a separate parts grid, which showed the
+   same loadout twice. Borders are deliberately restrained now that the
+   label carries the meaning — weapon sockets in particular are no longer
+   --danger, which made a normally-armed ship read as an error state. */
+.blueprint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.blueprint__slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.blueprint__socket {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px;
+  background: var(--panel-2);
+}
+
+.blueprint__label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Empty socket: a dashed well the size of a part card, so an unfitted
+   slot reads as "waiting for a part of this kind" rather than as blank
+   space the layout forgot about. */
+.blueprint__empty {
+  width: 92px;
+  height: 62px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  background: transparent;
+}
+
+/* Per-kind tint on the socket edge + its label — a supporting cue, since
+   the word underneath is the primary one. */
+.blueprint__slot--weapon .blueprint__socket { border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
+.blueprint__slot--weapon .blueprint__label { color: var(--warning); }
+.blueprint__slot--defense .blueprint__socket { border-color: color-mix(in srgb, var(--success) 55%, var(--border)); }
+.blueprint__slot--defense .blueprint__label { color: var(--success); }
+.blueprint__slot--systems .blueprint__socket { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.blueprint__slot--systems .blueprint__label { color: var(--accent); }
+
+.blueprint__power {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.blueprint__power-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.blueprint__power-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.parts-fold__summary-detail {
+  margin-left: 6px;
+  opacity: 0.8;
+}
+
 .parts-fold {
   margin-top: 6px;
 }
@@ -2461,6 +2544,18 @@ h1, h2, h3 {
   .combat-command-bar--collapsed .combat-command-bar__body {
     display: none;
   }
+  /* 2026-08-12: during a targeted-order pick the dock body hides so the
+     ship cards behind it are tappable — but WITHOUT touching
+     .combat-screen's dock-state padding, which is what actually moves the
+     document (304px vs 72px). The dock is position:fixed, so shrinking it
+     costs the page nothing; the earlier fix collapsed it via handCollapsed
+     instead, which swung that reservation and lurched the whole page on
+     every order tap. Reported as "resize spasms" — see CombatScreen's own
+     note. */
+  .combat-screen--picking .combat-command-bar__body,
+  .combat-screen--picking .combat-command-bar__toggle {
+    display: none;
+  }
   .combat-command-bar .combat-hand {
     margin: 6px 0;
   }
@@ -2495,21 +2590,26 @@ h1, h2, h3 {
     overflow: hidden;
   }
 
-  /* 53.3: four order tiles at the shared 128px width is ~512px of nowrap
-     content in a ~360px viewport — two tiles, including (for Spymaster)
-     the exclusive Exploit weakness tile that's the whole point of his kit,
-     were always scrolled off screen on first paint. Picked option: a
-     narrower mobile-only tile for orders specifically, dropping the
-     description to the title/tooltip (still set on the <button> in
-     CombatCommandBar) rather than wrapping to a 2x2 grid or just adding a
-     scroll affordance — orders have four short, memorable names ("Brace",
-     "Attack run"), unlike parts, so the description is the least-missed
-     thing to cut, and this also shrinks the row height, which 53.1's
-     budget above accounts for. Ship actives keep the shared 128px tile
-     with its description: part names alone don't reliably disambiguate,
-     and there's no fixed small set of them to memorize. */
+  /* 53.3, corrected 2026-08-12 after a player report: orders now WRAP to a
+     2-column grid instead of scrolling horizontally. 53.3's narrower-tile
+     fix never actually solved the problem it described — 4 tiles at 92px
+     plus gaps is still ~398px of nowrap content in a ~360px viewport, so
+     the fourth (for the Spymaster, the exclusive Exploit weakness tile)
+     stayed off-screen, just less obviously. An order is a primary,
+     every-round control; it has to be a visible button, not something you
+     discover by swiping a row that carries no scroll affordance. The grid
+     overrides the shared `nowrap`/`overflow-x` on .combat-hand__cards for
+     this section only — ship actives keep the scrolling row, since they're
+     1-per-combat and there can be arbitrarily many. */
+  .combat-command-bar .combat-orders .combat-hand__cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    overflow-x: visible;
+  }
   .combat-command-bar .combat-orders .card-tile {
-    width: 92px;
+    width: auto;
+    min-height: 0;
   }
   .combat-command-bar .combat-orders .card-tile__desc {
     display: none;

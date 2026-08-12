@@ -61,31 +61,29 @@ export function CombatScreen({
   // Mobile only (the toggle is display:none above the breakpoint): the pinned
   // dock costs ~280px of a phone screen (see .combat-command-bar's ≤720px
   // rule), which is worth it while you're choosing an order/active and dead
-  // weight while you're reading the theater. Declared here, ahead of
-  // pickingOrder's effects below, since 53.2 ties the two together — a pick
-  // auto-collapses the dock and a completed/cancelled pick restores it.
+  // weight while you're reading the theater. Driven ONLY by the player's own
+  // toggle — see the picking note below for why a pick no longer touches it.
   const [handCollapsed, setHandCollapsed] = useState(false);
 
   // A pick left open across a round boundary would be stale (CP/armed
   // state just reset) — same "the round moved on" cleanup the replay
-  // ticker/fx layer already do via their own effects. Also restores the
-  // dock in the edge case where the player opened a pick, then advanced
-  // the round without completing or cancelling it — nothing else would
-  // un-collapse the bar the pick auto-collapsed.
+  // ticker/fx layer already do via their own effects.
   useEffect(() => {
     setPickingOrder(null);
-    setHandCollapsed(false);
   }, [combat.round]);
 
-  // 53.2: a tile click starts a pick, and completing it means tapping a ship
-  // card in the theater — but on mobile the command bar sits fixed *over*
-  // the theater (see handCollapsed below), so the ship the player needs to
-  // tap may be hidden behind it. Collapsing the bar the moment a pick
-  // starts, and restoring it the moment the pick ends (either way — see
-  // handleOrderPick and the Cancel control on the pick hint), frees the
-  // whole viewport for the theater exactly when it's needed. A no-op on
-  // desktop, where handCollapsed never gates layout (the toggle is
-  // display:none above the breakpoint).
+  // 53.2, reworked 2026-08-12 after a player report of the mobile view
+  // "moving up and down / resize spasms". The original fix flipped
+  // `handCollapsed` on pick entry to get the fixed dock off the ship cards.
+  // But `handCollapsed` drives `.combat-screen`'s dock-state class, whose
+  // reserved `padding-bottom` swings 304px -> 72px — so every order tap
+  // reflowed the whole document by 232px, and the round-change reset
+  // lurched it back. The dock is `position: fixed`, so its own height costs
+  // the document nothing; only that reservation moves things. So picking
+  // now hides the dock's BODY (a purely visual `--picking` class) while
+  // leaving the reservation — and therefore the page — completely still.
+  // `scrollIntoView` went too: it was a second source of movement competing
+  // with the first, and with the body hidden the theater is already clear.
   function handleOrderTileClick(order: FleetOrderId) {
     if (order === 'brace' || order === 'exploit-weakness') {
       if (pickingOrder === order) {
@@ -93,7 +91,6 @@ export function CombatScreen({
         return;
       }
       setPickingOrder(order);
-      setHandCollapsed(true);
       return;
     }
     onIssueOrder(order);
@@ -103,18 +100,14 @@ export function CombatScreen({
     if (!pickingOrder) return;
     onIssueOrder(pickingOrder, index);
     setPickingOrder(null);
-    setHandCollapsed(false);
   }
 
   // Re-clicking the tile that started the pick still cancels it (see
-  // handleOrderTileClick above), but that tile lives in the command bar,
-  // which this same pick just collapsed — so it's no longer the reliable
-  // affordance it was before 53.2. The pick hint's Cancel button (rendered
-  // below, outside the bar) shares this so cancelling never requires
-  // reopening the dock first.
+  // handleOrderTileClick above), but that tile is inside the dock body,
+  // which a pick hides — so the pick hint's Cancel button (rendered below,
+  // outside the bar) is the reliable affordance.
   function cancelPick() {
     setPickingOrder(null);
-    setHandCollapsed(false);
   }
 
   const { onboardingPopup, dismissOnboardingPopup } = useOnboardingPopup(combat, enemy);
@@ -160,16 +153,6 @@ export function CombatScreen({
     tickerFastForward();
   }
 
-  // 53.2: complements the auto-collapse above — even with the dock out of
-  // the way, a long log can have scrolled the theater itself out of the
-  // viewport by the time the player reaches for a pick. Harmless on desktop,
-  // where the theater is normally already in view (a no-op scroll).
-  useEffect(() => {
-    if (pickingOrder) {
-      theaterRef.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
-    }
-  }, [pickingOrder, reducedMotion, theaterRef]);
-
   const { visibleLog, pendingDamage, pendingDestroyed, activeAttacker, activeTarget } = rollbackToRevealed(
     combat.log,
     revealedCount,
@@ -189,7 +172,11 @@ export function CombatScreen({
   const dockState = finished ? 'none' : handCollapsed ? 'collapsed' : 'open';
 
   return (
-    <div className={`combat-screen${dockState === 'none' ? '' : ` combat-screen--dock-${dockState}`}`}>
+    <div
+      className={`combat-screen${dockState === 'none' ? '' : ` combat-screen--dock-${dockState}`}${
+        pickingOrder ? ' combat-screen--picking' : ''
+      }`}
+    >
       {finished && (
         <h2 className={won ? 'verdict verdict--win' : 'verdict verdict--loss'}>{won ? 'Victory' : 'Defeat'}</h2>
       )}

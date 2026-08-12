@@ -4,13 +4,13 @@ import { getFrame } from '../game/frames';
 import { getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import { upgradeCapFor } from '../game/reducer';
-import { deriveStats, effectiveSlotLayout, effectiveSlots, equippedPower, formatStatLine, playerShipLabel } from '../game/ship';
+import { deriveStats, effectiveSlotLayout, equippedPower, formatStatLine, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { AdaptivePanel } from './AdaptivePanel';
 import { PartCard } from './PartCard';
 import { PowerPipRow } from './PowerPipRow';
 import { CounterProtocolRow, ProtocolRow } from './SettingsScreen';
-import { SlotRow } from './SlotRow';
+import { ShipBlueprint } from './ShipBlueprint';
 import { UpgradeBadgeRow } from './UpgradeBadgeRow';
 
 interface FleetOverlayProps {
@@ -50,7 +50,6 @@ function fleetBody(
 
       {fleet.map((ship, shipIndex) => {
         const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols);
-        const emptySlots = effectiveSlots(ship.frameId, ship.upgrades, protocols, commanderId) - ship.equipped.length;
         return (
           <div key={shipIndex} className="ship-card">
             <div className="ship-card__header">
@@ -61,17 +60,21 @@ function fleetBody(
               upgrades={ship.upgrades}
               emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
             />
-            {/* Iteration 52.2: same typed-slot shape FleetPanel shows. */}
-            <SlotRow layout={effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId)} equipped={ship.equipped} />
-            {/* Iteration 57.3: same power meter FleetPanel shows. */}
-            <PowerPipRow used={equippedPower(ship.equipped)} budget={getFrame(ship.frameId).power} />
-            <div className="slot-grid">
-              {ship.equipped.map((partId, i) => (
-                <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
-              ))}
-              {Array.from({ length: emptySlots }).map((_, i) => (
-                <div key={`empty-${i}`} className="slot slot--empty" role="img" aria-label="Empty inventory slot" />
-              ))}
+            {/* 2026-08-12: the same one-blueprint view FleetPanel uses —
+                this surface had the identical duplication (a slot row AND
+                a parts grid showing the same loadout twice). Read-only
+                here, so no onUnequip: the overlay is for looking at the
+                fleet, and refitting happens on the prep/shop screens. */}
+            <ShipBlueprint
+              layout={effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId)}
+              equipped={ship.equipped}
+            />
+            <div className="blueprint__power">
+              <span className="blueprint__power-label">Power</span>
+              <PowerPipRow used={equippedPower(ship.equipped)} budget={getFrame(ship.frameId).power} />
+              <span className="blueprint__power-value">
+                {equippedPower(ship.equipped)} / {getFrame(ship.frameId).power}
+              </span>
             </div>
           </div>
         );
