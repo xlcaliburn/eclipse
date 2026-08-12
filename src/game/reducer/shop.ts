@@ -373,8 +373,24 @@ export function hullScrapValue(frameId: FrameId): number {
 // Floored at 0 — a refit is a purchase, never a payout, even if scrap
 // value alone would exceed the target's list price (a cheap enough target
 // relative to an expensive current hull, in principle).
-export function refitCost(current: PlayerShipState, targetFrameId: Exclude<FrameId, 'cruiser'>): number {
-  return Math.max(0, getFrame(targetFrameId).cost - hullScrapValue(current.frameId));
+// 2026-08-12: the target's price now goes through `frameCost`, not its raw
+// list price. A refit is a hull acquisition, so every discount that applies
+// to BUYING a hull applies to trading into one — the Admiral's 25%, the
+// Warlord's Dreadnought cut, Armada mandate, the store's second-hand
+// multiplier. Without this the Admiral's own commander-screen promise
+// ("Every hull costs 25% less") was simply false on this one path; 52.5's
+// spec named the raw cost only because it never considered commander
+// pricing. The trade-in stays on the RAW value of the old hull — what a
+// used hull is worth doesn't depend on who is selling it.
+export function refitCost(
+  current: PlayerShipState,
+  targetFrameId: Exclude<FrameId, 'cruiser'>,
+  commanderId?: CommanderId,
+  protocols?: ProtocolId[],
+  shopKind?: 'store' | 'shipyard',
+): number {
+  const price = frameCost(getFrame(targetFrameId).cost, targetFrameId, commanderId, protocols, shopKind);
+  return Math.max(0, price - hullScrapValue(current.frameId));
 }
 
 // Iteration 52.5: every rule a legal refit target must hold —
@@ -629,7 +645,7 @@ export function handleShopAction(state: RunState, action: ShopAction): RunState 
       if (state.phase !== 'shop') return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship || !canRefit(state, ship, action.frameId)) return state;
-      const cost = refitCost(ship, action.frameId);
+      const cost = refitCost(ship, action.frameId, state.commanderId, state.protocols, state.shopKind);
       if (state.credits < cost) return state;
       // Clamp damage (not just carry it over): a cost-increasing refit
       // does not guarantee a higher max HP (Bastion 12cr/6HP -> Freighter

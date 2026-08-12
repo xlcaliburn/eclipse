@@ -738,6 +738,35 @@ describe('REFIT_SHIP (iteration 52.5, the hull refit)', () => {
     expect(refitCost(ship, 'corvette')).toBe(8 - 3); // corvette 8cr
   });
 
+  // 2026-08-12: a refit is a hull acquisition, so commander/protocol hull
+  // pricing applies to it exactly as it does to BUY_SHIP. Before this, the
+  // Admiral paid full list price to refit — making his own commander-screen
+  // line ("Every hull costs 25% less") false on that one path.
+  it('refitCost honours commander hull discounts; the trade-in stays on raw value', () => {
+    const ship: PlayerShipState = { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] }; // scrap 3 either way
+    // Corvette 8cr -> Admiral pays floor(8 * 0.75) = 6, less the 3 trade-in.
+    expect(refitCost(ship, 'corvette', 'admiral')).toBe(6 - 3);
+    expect(refitCost(ship, 'corvette', 'merchant')).toBe(8 - 3); // no hull discount — unchanged
+  });
+
+  it('REFIT_SHIP charges the discounted price for a commander with a hull discount', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] },
+    ];
+    let state = stateWithMap('shop', {
+      phase: 'shop',
+      shopKind: 'shipyard',
+      credits: 20,
+      fleet,
+      shopFrameOffers: ['corvette'],
+      commanderId: 'admiral',
+    });
+    state = runReducer(state, { type: 'REFIT_SHIP', shipIndex: 1, frameId: 'corvette' });
+    expect(state.fleet[1].frameId).toBe('corvette');
+    expect(state.credits).toBe(20 - (6 - 3)); // discounted, matching what the UI shows
+  });
+
   it('REFIT_SHIP applies the refit: new frameId, deducts refitCost, consumes the shipyard offer', () => {
     const fleet: PlayerShipState[] = [
       { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },

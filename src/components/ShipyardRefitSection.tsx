@@ -58,7 +58,10 @@ export function ShipyardRefitSection({
             <div className="refit-row__targets">
               {targets.map((frameId) => {
                 const frame = FRAMES[frameId];
-                const cost = refitCost(ship, frameId);
+                // Same discount inputs the reducer's REFIT_SHIP case passes
+                // (shopKind is 'shipyard' by construction here) — the
+                // displayed price and the charged price must agree.
+                const cost = refitCost(ship, frameId, commanderId, protocols, 'shipyard');
                 const disabled = credits < cost;
                 return (
                   <button
