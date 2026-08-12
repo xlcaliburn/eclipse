@@ -1,9 +1,11 @@
+import type { CommanderId } from '../game/commanders';
 import { shipUpgradeNote } from '../game/ship';
 import type { PlayerShipState } from '../game/types';
 import { ShipPickRow } from './ShipPickRow';
 
 interface InterludeScreenProps {
   fleet: PlayerShipState[];
+  commanderId?: CommanderId;
   onChoose: (shipIndex: number) => void;
 }
 
@@ -13,7 +15,7 @@ interface InterludeScreenProps {
 // pending is which ship banks the guaranteed upgrade; this used to be one
 // of three competing choices (Refit / War chest / Field promotion), which
 // meant a boss kill could net nothing more than a slightly bigger paycheck.
-export function InterludeScreen({ fleet, onChoose }: InterludeScreenProps) {
+export function InterludeScreen({ fleet, commanderId, onChoose }: InterludeScreenProps) {
   return (
     <div className="interlude-screen">
       <h2>The long war continues</h2>
@@ -25,8 +27,10 @@ export function InterludeScreen({ fleet, onChoose }: InterludeScreenProps) {
         <ShipPickRow
           fleet={fleet}
           onPick={onChoose}
-          noteFor={shipUpgradeNote}
-          titleFor={(ship) => shipUpgradeNote(ship) ?? undefined}
+          // Bug fixed 2026-08-12: same missing-commanderId issue as
+          // RewardScreen/RepairScreen — see shipUpgradeNote's own comment.
+          noteFor={(ship) => shipUpgradeNote(ship, commanderId)}
+          titleFor={(ship) => shipUpgradeNote(ship, commanderId) ?? undefined}
         />
       </div>
     </div>

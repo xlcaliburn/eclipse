@@ -6,6 +6,7 @@ import {
   issueOrder,
   setPriorityTarget,
   runToEnd,
+  unissueOrder,
   useActive,
 } from './combatEngine';
 import type { FleetOrderId, TargetingStance } from './combatEngine';
@@ -114,6 +115,11 @@ export type RunAction =
   // is required for 'brace' (a player-side index) and 'exploit-weakness'
   // (an enemy-side index), omitted for the two fleet-wide stance orders.
   | { type: 'ISSUE_ORDER'; order: FleetOrderId; targetIndex?: number }
+  // 2026-08-12: reverses whichever order ISSUE_ORDER last armed this
+  // round — a misclick (wrong ship braced, wrong order picked) no longer
+  // permanently costs the command point. Only valid up to the next
+  // ADVANCE_ROUND (see combatEngine's canUnissueOrder/unissueOrder).
+  | { type: 'UNISSUE_ORDER' }
   | { type: 'CONTINUE' }
   | { type: 'PICK_UPGRADE'; upgradeId: UpgradeId; shipIndex: number }
   | { type: 'LEAVE_REWARD' }
@@ -1035,6 +1041,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return { ...state, combat: issueOrder(state.combat, action.order, action.targetIndex) };
     }
 
+    case 'UNISSUE_ORDER': {
+      if (state.phase !== 'combat' || !state.combat) return state;
+      return { ...state, combat: unissueOrder(state.combat) };
+    }
+
     case 'CONTINUE': {
       if (state.phase !== 'combat' || !state.combat || !state.combat.winner) return state;
       const { rng, nextCounter } = runRng(state);
@@ -1183,12 +1194,25 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         foundParts.push(wreckPart);
       }
 
-      // Iteration 40 ("Captured schematic"): every elite kill also drops a
-      // weapon straight to inventory — no pick needed, unlike the upgrade
-      // options below. Currently always the one captured-plasma variant;
-      // more captured weapons can join CAPTURED_SCHEMATIC_PART_ID's pool
-      // later without touching this call site.
-      if (isElite) {
+      // 2026-08-12 (player report): an elite used to guarantee its elevated
+      // credit payout (eliteReward + ELITE_KILL_BONUS, below) AND the
+      // captured-schematic part drop AND a 3-choice augment pick, all at
+      // once — four rewards stacked onto one fight. The credits stay (an
+      // elite SHOULD pay more than a plain win); the schematic and the
+      // augment pick are now mutually exclusive, decided by one coin flip
+      // off the same seeded rng stream every other reward draw here uses
+      // (still fully reproducible from the run's seed — just a new draw in
+      // the sequence, so elite-fight seeds diverge from pre-this-change
+      // runs, same as any other reward-draw reordering in this codebase's
+      // history). No lean toward either side: 50/50.
+      const eliteGetsSchematic = isElite && rng() < 0.5;
+
+      // Iteration 40 ("Captured schematic"): drops a weapon straight to
+      // inventory, no pick needed, unlike the upgrade options below.
+      // Currently always the one captured-plasma variant; more captured
+      // weapons can join CAPTURED_SCHEMATIC_PART_ID's pool later without
+      // touching this call site.
+      if (eliteGetsSchematic) {
         inventory = [...inventory, CAPTURED_SCHEMATIC_PART_ID];
         foundParts.push(CAPTURED_SCHEMATIC_PART_ID);
       }
@@ -1238,8 +1262,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // both were removed outright 2026-08-07 (see upgrades.ts), so elites
       // are back to a 3-option pick off the full remaining list — the
       // pre-39 default, restored now that nothing makes the elite pool
-      // exclusive any more.
-      const upgradeOptions = isElite ? randomUpgradeIds(3, rng) : undefined;
+      // exclusive any more. 2026-08-12: only offered when the coin flip
+      // above didn't already give the schematic — see its own comment.
+      const upgradeOptions = isElite && !eliteGetsSchematic ? randomUpgradeIds(3, rng) : undefined;
 
       // The Spymaster's free intelligence, drawn from the same rng stream so
       // the whole run stays reproducible from its seed.

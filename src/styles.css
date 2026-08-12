@@ -59,6 +59,26 @@ h1, h2, h3 {
   z-index: 1; /* above the fixed starfield */
 }
 
+/* 2026-08-12: the corner build tag (BuildTag.tsx) — a bug-report aid, not
+   game content, so it stays out of the way: fixed, low-contrast, and
+   pointer-events:none so it never eats a click meant for whatever's under
+   it (the combat dock's own fixed elements included). z-index above the
+   starfield but below any overlay/modal — nothing currently stacks this
+   high in the bottom-right corner, so it never needs to. */
+.build-tag {
+  position: fixed;
+  right: 6px;
+  bottom: 2px;
+  z-index: 2;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim, #666);
+  opacity: 0.35;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* HUD bar (iteration 10.6): a persistent top readout, additive to the
    existing per-screen credit/intel badges. */
 .hud-bar {
@@ -917,6 +937,15 @@ h1, h2, h3 {
   color: var(--danger);
 }
 
+/* 2026-08-12: the frame's own flat power, shown only when a carried
+   reactor has pushed the budget above it — replaces what used to be a
+   separate "(+N from reactors)" span (.blueprint__power-reactor,
+   removed) with the hull's structural number stated directly. */
+.power-fraction__base {
+  margin-left: 3px;
+  color: var(--text-dim);
+}
+
 /* Map screen */
 .map-screen {
   background: var(--panel);
@@ -1230,6 +1259,24 @@ h1, h2, h3 {
 .combat-hand {
   margin: 16px 0;
   text-align: left;
+}
+
+/* 2026-08-12: the "Fleet orders" heading's command-point readout — plain
+   text, not the pip meter 60.2 cut (that read as a second HP bar); this
+   is a single small number, not a repeat of that problem. */
+.combat-orders h3 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.combat-orders__cp {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
 }
 
 .combat-hand__cards {
@@ -1757,16 +1804,6 @@ h3 .info-dot,
   margin-top: 4px;
 }
 
-/* 60.8: the "(+N from reactors)" caption, now the only text sitting beside
-   the bolt+fraction — the "Power" word label and the duplicate fraction
-   span it used to sit next to are gone (PowerPipRow's icon carries that
-   meaning on its own now). */
-.blueprint__power-reactor {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  color: var(--text-dim);
-}
 
 .parts-fold__summary-detail {
   margin-left: 6px;
@@ -3033,12 +3070,25 @@ h3 .info-dot,
   display: flex;
   align-items: center;
   gap: 6px;
+  /* 2026-08-12: pinned to the card's bottom edge regardless of how much
+     description/dice-row content sits above it — without this, cards
+     with a longer description sat the price at a different height than
+     their neighbors in the same row, breaking the shop grid's alignment. */
+  margin-top: auto;
+  padding-top: 4px;
 }
 
 .part-card__power,
 .frame-card__power {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 12px;
   font-weight: 600;
+  color: var(--accent);
+}
+
+.part-card__power-icon {
   color: var(--accent);
 }
 

@@ -39,8 +39,21 @@ import type { UpgradeId } from './upgrades';
 // the opener itself, so they override it to a normal 3-node column. Act
 // stays 1, so column numbers still equal the global column reward math
 // unchanged from before iteration 8.
-function mapWithFirstColumn(type: 'combat' | 'elite' | 'shop' | 'shipyard' | 'repair' | 'event'): GameMap {
-  const base = initialRunState().map;
+// 2026-08-12: optional `seed` — every caller before this was fine leaving
+// it unset (initialRunState()'s own `randomSeed()` default), since nothing
+// downstream cared which of the map's own random draws fired. That
+// stopped being true the moment a test's ASSERTION started depending on
+// an rng-driven branch (the elite schematic/augment coin flip below) —
+// pinning `rngCounter` alone can't reproduce a specific outcome when the
+// map's own seed is different every run. Passing an explicit seed here
+// makes the whole state (and everything derived from it) fully
+// deterministic for the handful of tests that need it; every other
+// caller is unaffected.
+function mapWithFirstColumn(
+  type: 'combat' | 'elite' | 'shop' | 'shipyard' | 'repair' | 'event',
+  seed?: number,
+): GameMap {
+  const base = initialRunState(seed !== undefined ? { seed } : undefined).map;
   const overriddenCol0 = [0, 1, 2].map((row) => ({ col: 0, row, type }));
   const act1Columns = base.act1Columns.map((col, i) => (i === 0 ? overriddenCol0 : col));
   return { ...base, act1Columns };
@@ -49,8 +62,9 @@ function mapWithFirstColumn(type: 'combat' | 'elite' | 'shop' | 'shipyard' | 're
 function stateWithMap(
   type: 'combat' | 'elite' | 'shop' | 'shipyard' | 'repair' | 'event',
   overrides: Partial<RunState> = {},
+  seed?: number,
 ): RunState {
-  return { ...initialRunState(), phase: 'map', map: mapWithFirstColumn(type), ...overrides };
+  return { ...initialRunState(seed !== undefined ? { seed } : undefined), phase: 'map', map: mapWithFirstColumn(type, seed), ...overrides };
 }
 
 // `cargo` defaults to (and always explicitly sets) undefined — without that,
@@ -1172,7 +1186,7 @@ describe('CONTINUE — total defeat', () => {
   });
 });
 
-function wonNonBossState(overrides: Partial<RunState> = {}, isElite = false): RunState {
+function wonNonBossState(overrides: Partial<RunState> = {}, isElite = false, seed?: number): RunState {
   const fleet: PlayerShipState[] = overrides.fleet ?? [
     { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
   ];
@@ -1184,7 +1198,7 @@ function wonNonBossState(overrides: Partial<RunState> = {}, isElite = false): Ru
   );
   const wonCombat = { ...combat, winner: 'player' as const };
   return {
-    ...stateWithMap('combat'),
+    ...stateWithMap('combat', {}, seed),
     phase: 'combat',
     position: { col: 0, row: 0 },
     fleet,
@@ -1209,7 +1223,13 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
   // relied entirely on 'optics'/'salvage', both removed outright, so
   // elites draw 3 from the full remaining list again.
   it('an elite win offers exactly 3 upgrade options and blocks leaving until resolved', () => {
-    const state = runReducer(wonNonBossState({}, true), { type: 'CONTINUE' });
+    // 2026-08-12: seed + rngCounter both pinned so the coin flip (the new
+    // schematic-vs-augment exclusivity, reducer.ts's `eliteGetsSchematic`)
+    // lands on the augment side — this test exists specifically to
+    // exercise that branch. Both are needed: rngCounter alone can't pin an
+    // outcome when the map's own seed is different every call (see
+    // mapWithFirstColumn's comment).
+    const state = runReducer(wonNonBossState({ rngCounter: 0 }, true, 1), { type: 'CONTINUE' });
     expect(state.phase).toBe('reward');
     expect(state.pendingReward?.upgradeOptions).toHaveLength(3);
 
@@ -1226,7 +1246,10 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
   });
 
   it('PICK_UPGRADE refuses an id that was not offered', () => {
-    const state = runReducer(wonNonBossState({}, true), { type: 'CONTINUE' });
+    // 2026-08-12: same seed + rngCounter pin as the test above — needs the
+    // augment branch of the schematic/augment coin flip to have options
+    // to refuse an id against.
+    const state = runReducer(wonNonBossState({ rngCounter: 0 }, true, 1), { type: 'CONTINUE' });
     const result = runReducer(state, { type: 'PICK_UPGRADE', upgradeId: 'zzz-not-real' as never, shipIndex: 0 });
     expect(result.fleet[0].upgrades).toHaveLength(0);
     expect(result.pendingReward?.upgradeOptions).toHaveLength(3);
@@ -1234,7 +1257,8 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
 
   it('a second upgrade replaces (destroys) the first — at most 1 permanent upgrade per ship (addendum A.4)', () => {
     const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: ['spine'] }];
-    const state = runReducer(wonNonBossState({ fleet }, true), { type: 'CONTINUE' });
+    // 2026-08-12: same seed + rngCounter pin — needs the augment branch.
+    const state = runReducer(wonNonBossState({ fleet, rngCounter: 0 }, true, 1), { type: 'CONTINUE' });
     const upgradeId = state.pendingReward!.upgradeOptions!.find((u) => u !== 'spine') ?? state.pendingReward!.upgradeOptions![0];
     const picked = runReducer(state, { type: 'PICK_UPGRADE', upgradeId, shipIndex: 0 });
     expect(picked.fleet[0].upgrades).toEqual([upgradeId]);
@@ -1286,13 +1310,20 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
     );
     const state = runReducer(
       {
-        ...stateWithMap('combat'),
+        // 2026-08-12: seed pinned (see mapWithFirstColumn's comment) —
+        // rngCounter alone can't reliably pin the schematic/augment coin
+        // flip below when the map's own seed is different every call.
+        ...stateWithMap('combat', {}, 1),
         phase: 'combat',
         position: { col: 0, row: 0 },
         fleet,
         currentEnemy: { ...GAUNTLET[0], id: `${GAUNTLET[0].id}-elite` },
         combat: { ...combat, winner: 'player' as const },
         commanderId: 'warlord',
+        // Pinned so the schematic/augment coin flip
+        // (reducer.ts's `eliteGetsSchematic`) lands on the augment side —
+        // this test needs upgradeOptions present to pick from.
+        rngCounter: 0,
       },
       { type: 'CONTINUE' },
     );
@@ -3013,14 +3044,18 @@ describe('cargo reward payouts', () => {
   // A won combat at act-1 col 1 (winReward(1) = 4, 2026-08-08: cols 1-3
   // halved), with the node's cargo tag forced explicitly rather than left
   // to the random map.
-  function wonCargoState(cargo: CargoTag | undefined, overrides: Partial<RunState> = {}): RunState {
+  function wonCargoState(cargo: CargoTag | undefined, overrides: Partial<RunState> = {}, seed?: number): RunState {
     const enemy = GAUNTLET[0];
     const combat = initCombat(
       [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
       enemy,
       1,
     );
-    const base = initialRunState();
+    // 2026-08-12: optional explicit seed — see mapWithFirstColumn's own
+    // comment for why (this test file's second, separate helper that
+    // needed the same fix once a test's assertion started depending on a
+    // seed-sensitive rng branch).
+    const base = initialRunState(seed !== undefined ? { seed } : undefined);
     return {
       ...base,
       map: forceNodeType(base.map, 1, 0, 'combat', 1, cargo),
@@ -3081,7 +3116,12 @@ describe('cargo reward payouts', () => {
   // wreck-field drop is.
   it('an elite kill drops a Captured schematic, surfaced on the reward screen (iteration 41)', () => {
     const eliteEnemy = { ...GAUNTLET[0], id: `${GAUNTLET[0].id}-elite` };
-    const state = wonCargoState('patrol', { currentEnemy: eliteEnemy });
+    // 2026-08-12: seed + rngCounter both pinned so the schematic/augment
+    // coin flip (reducer.ts's `eliteGetsSchematic`) lands on the
+    // schematic side — this test exists specifically to exercise that
+    // branch. See mapWithFirstColumn's comment for why a seed is needed
+    // (rngCounter alone can't pin an outcome against an unseeded map).
+    const state = wonCargoState('patrol', { currentEnemy: eliteEnemy, rngCounter: 1 }, 1);
     const result = runReducer(state, { type: 'CONTINUE' });
     expect(result.inventory).toContain(CAPTURED_SCHEMATIC_PART_ID);
     expect(result.pendingReward?.foundParts).toContain(CAPTURED_SCHEMATIC_PART_ID);

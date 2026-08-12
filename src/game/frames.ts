@@ -324,13 +324,24 @@ export const FRAMES: Record<FrameId, Frame> = {
     },
     blurb: 'The roster\'s wall — innately draws every enemy shot.',
   },
+  // 2026-08-12: a flexibility premium — every universal slot costs +2cr
+  // over what a restricted (typed) slot would, off a 6cr baseline for a
+  // fully-restricted 3-slot common hull. Picket's own 1-universal price
+  // is unchanged by this rule (6 + 2x1 = 8, what it already cost); Sloop's
+  // 3 universal slots move it 9 -> 12 (6 + 2x3). The point isn't Picket's
+  // own number — it's that Sloop's build space is a strict superset of
+  // Picket's (anything a systems slot accepts, a universal slot also
+  // does), so it should cost a real premium to have that superset rather
+  // than sit 1cr apart. Scoped to these two for now — the rest of the
+  // roster's hand-tuned prices carry their own balance history and a
+  // wholesale reprice off this formula is a separate, bigger pass.
   tender: {
     id: 'tender',
     name: 'Sloop',
     slotLayout: ['universal', 'universal', 'universal'],
     baseInitiative: 1,
     baseHp: 3,
-    cost: 9,
+    cost: 12,
     rarity: 'common',
     power: 3, // 58.1: slots(3) + TIER_INDEX.common(0)
     blurb: 'Fully universal — build it as anything. No innate; the flexibility is the whole pitch.',

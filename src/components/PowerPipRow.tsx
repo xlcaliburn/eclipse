@@ -3,6 +3,14 @@ import { PowerBoltIcon } from './PartIcon';
 interface PowerPipRowProps {
   used: number;
   budget: number;
+  // 2026-08-12: the frame's own innate power, when a caller has it AND it
+  // differs from `budget` — i.e. a carried reactor is inflating the
+  // budget above the hull's structural number. Shown as "(base N)" next
+  // to the fraction; omitted when equal to budget (most ships, no
+  // reactor equipped) so it never states the obvious. Callers compute
+  // this as `budget - equippedPowerGen(equipped)` — powerBudget's own
+  // definition — rather than a second getFrame import.
+  base?: number;
 }
 
 // Iteration 57.3 introduced this as a segmented pip meter (same visual
@@ -19,12 +27,14 @@ interface PowerPipRowProps {
 // feature, or similar) — canEquip/canRefit never let a live build reach
 // this state — but the fraction still renders sanely, danger-colored,
 // instead of silently claiming to fit.
-export function PowerPipRow({ used, budget }: PowerPipRowProps) {
+export function PowerPipRow({ used, budget, base }: PowerPipRowProps) {
   const over = used > budget;
+  const showBase = base !== undefined && base !== budget;
   return (
     <span className={`power-fraction${over ? ' power-fraction--over' : ''}`} title={`Power ${used}/${budget}`}>
       <PowerBoltIcon size={12} className="power-fraction__icon" />
       {used}/{budget}
+      {showBase && <span className="power-fraction__base">(base {base})</span>}
     </span>
   );
 }

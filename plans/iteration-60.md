@@ -369,3 +369,15 @@ under this session by iteration-59 — see above),
 `src/components/PowerPipRow.tsx`, `src/components/PartIcon.tsx`,
 `src/game/frames.ts` (blurbs only), `src/styles.css`. `HudBar.tsx` was
 read but not edited (60.4 already done at HEAD).
+
+**Correction, 2026-08-12 (player report)**: 60.2's "demote order tile
+descriptions to tooltip on ALL widths" was overreach. The order names
+("Attack run", "Evasive pattern", "Brace", "Exploit weakness") are
+bespoke and don't self-explain the way a common UI verb does, and a
+hover-only tooltip is unreachable on touch entirely — the player lost
+the ability to tell what an order does mid-combat. Reverted: order tiles
+keep the visible `.card-tile__desc` line, same as ship-active tiles
+always did. The CP-pip cut, the empty-actives cut, and the toggle-copy
+fix from 60.2 all stand — only the description-visibility call is
+reversed. `.card-tile__desc`'s existing mobile CSS (2-line clamp,
+`styles.css:2572`) needed no change; it was already written for this.

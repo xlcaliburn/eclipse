@@ -62,6 +62,8 @@ function fleetBody(
         // 58.3: powerBudget (innate + any carried reactor's grant) —
         // getFrame(...).power alone would silently hide a reactor's
         // contribution here, same reasoning as FleetPanel's card.
+        // reactorGen recovers the frame's own flat number
+        // (`budget - reactorGen`) for PowerPipRow's `base` prop.
         const budget = powerBudget(ship.frameId, ship.equipped);
         const reactorGen = equippedPowerGen(ship.equipped);
         return (
@@ -93,12 +95,13 @@ function fleetBody(
               <ShipBlueprint layout={layout} equipped={ship.equipped} />
               {/* 60.8: PowerPipRow's bolt icon is unambiguous on its own —
                   no separate "Power" word label needed (same reasoning as
-                  FleetPanel's card). */}
+                  FleetPanel's card). The frame's own base power (folded
+                  into PowerPipRow as `base`, 2026-08-12) replaces what
+                  used to be a separate "(+N from reactors)" span — same
+                  fact, stated as the hull's structural number instead of
+                  a delta. */}
               <div className="blueprint__power">
-                <PowerPipRow used={power} budget={budget} />
-                {reactorGen > 0 && (
-                  <span className="blueprint__power-reactor">(+{reactorGen} from reactors)</span>
-                )}
+                <PowerPipRow used={power} budget={budget} base={budget - reactorGen} />
               </div>
             </details>
           </div>

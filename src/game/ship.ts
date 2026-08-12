@@ -598,11 +598,17 @@ export function equippedWeaponCount(equippedPartIds: PartId[]): number {
 // 47.3b: byte-identical copies used to live in RewardScreen.tsx and
 // InterludeScreen.tsx (plus a third, twice-inlined, in RepairScreen.tsx) —
 // every "attach a permanent upgrade to a ship" picker needs the same
-// warning. Addendum A.4: at most 1 permanent upgrade per ship — a second
-// pick replaces (destroys) the first, so say so before the click confirms
-// it.
-export function shipUpgradeNote(ship: PlayerShipState): string | null {
-  if (ship.upgrades.length === 0) return null;
+// warning. Addendum A.4: at most 1 permanent upgrade per ship (2026-08-12:
+// or 3, for the Warlord's Flagship — upgradeCapFor) — only a pick that
+// pushes a ship's own count OVER its own cap replaces (destroys) anything
+// (withUpgrade's `.slice(-cap)` only ever evicts once already at cap), so
+// say so only then. Bug fixed 2026-08-12: this used to check
+// `ship.upgrades.length === 0` regardless of cap — a Warlord's Flagship
+// with 1 of 3 augment slots filled was warned "replaces X" for a pick that
+// would actually just fill its 2nd slot.
+export function shipUpgradeNote(ship: PlayerShipState, commanderId?: CommanderId): string | null {
+  const cap = upgradeCapFor(ship, commanderId);
+  if (ship.upgrades.length < cap) return null;
   return `replaces ${getUpgrade(ship.upgrades[0]).name}`;
 }
 

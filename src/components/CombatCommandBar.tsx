@@ -73,6 +73,10 @@ interface CombatCommandBarProps {
   // theater click that completes a pick lives outside this bar.
   pickingOrder: FleetOrderId | null;
   onOrderTileClick: (order: FleetOrderId) => void;
+  // 2026-08-12: cancels whatever order is currently armed (combat.order-
+  // ThisRound), refunding its command point — see the armed tile's own
+  // onClick below.
+  onUnissueOrder: () => void;
 }
 
 export function CombatCommandBar({
@@ -85,6 +89,7 @@ export function CombatCommandBar({
   onUseActive,
   pickingOrder,
   onOrderTileClick,
+  onUnissueOrder,
 }: CombatCommandBarProps) {
   return (
     <div className={`combat-command-bar${handCollapsed ? ' combat-command-bar--collapsed' : ''}`}>
@@ -99,7 +104,17 @@ export function CombatCommandBar({
       </button>
       <div className="combat-command-bar__body" id="combat-command-bar-body">
         <div className="combat-hand combat-orders">
-          <h3>Fleet orders</h3>
+          <h3>
+            Fleet orders
+            {/* 2026-08-12 (player report): re-added after 60.2 cut it — a
+                tile disabling at 0 CP doesn't tell you a Brace you just
+                armed actually spent one, and cutting this made undoing a
+                misclick (below) impossible to reason about. Plain count,
+                not the old pip meter. */}
+            <span className="combat-orders__cp">
+              {combat.commandPoints} CP
+            </span>
+          </h3>
           <div className="combat-hand__cards">
             {ORDER_DISPLAY_ORDER.filter((order) => order !== 'exploit-weakness' || combat.exploitEnabled).map(
               (order) => {
@@ -107,19 +122,41 @@ export function CombatCommandBar({
                 const armed = combat.orderThisRound === order;
                 const picking = pickingOrder === order;
                 const available = orderAvailable(combat, order);
+                // 2026-08-12: an armed tile used to be permanently locked
+                // in for the round (`disabled` was true the instant
+                // `orderAvailable` returned false, which it always does
+                // once ANY order is armed) — a misclick (wrong ship
+                // braced, wrong order entirely) cost the command point
+                // with no way back. It's now clickable specifically to
+                // cancel, refunding the point via UNISSUE_ORDER.
+                const bracingIndex =
+                  order === 'brace' && armed ? combat.roundModifiers.bracingShipIndices[0] : undefined;
+                const kindLabel = armed
+                  ? order === 'brace'
+                    ? 'Bracing'
+                    : 'Armed'
+                  : picking
+                    ? 'Pick a target…'
+                    : info.needsTarget
+                      ? 'Pick a target'
+                      : '1 command point';
                 return (
                   <button
                     key={order}
                     type="button"
                     className={`card-tile${picking ? ' card-tile--picking' : ''}${armed ? ' card-tile--armed' : ''}`}
-                    disabled={!available && !picking}
-                    onClick={() => onOrderTileClick(order)}
-                    title={info.description}
+                    disabled={armed ? false : !available && !picking}
+                    onClick={() => (armed ? onUnissueOrder() : onOrderTileClick(order))}
+                    title={armed ? 'Tap to cancel — refunds the command point.' : info.description}
                   >
                     <span className="card-tile__kind">
-                      {armed ? 'Armed' : picking ? 'Pick a target…' : info.needsTarget ? 'Pick a target' : '1 command point'}
+                      {kindLabel}
+                      {bracingIndex !== undefined && playerLabels[bracingIndex]
+                        ? `: ${playerLabels[bracingIndex]}`
+                        : ''}
                     </span>
                     <span className="card-tile__name">{info.name}</span>
+                    <span className="card-tile__desc">{armed ? 'Tap to cancel.' : info.description}</span>
                   </button>
                 );
               },

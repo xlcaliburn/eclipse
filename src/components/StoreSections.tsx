@@ -2,9 +2,23 @@ import type { CommanderId } from '../game/commanders';
 import { getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import { COMMODITY_LOT_SELL_PRICE, MERCENARY_FIT, partCost } from '../game/reducer';
+import { slotKindForPartType } from '../game/ship';
 import type { PartId } from '../game/types';
 import { FitChips } from './FitChips';
 import { PartCard } from './PartCard';
+
+// 2026-08-12: offers grouped by the same weapon/defense/systems vocabulary
+// the blueprint UI already teaches (ship.ts's slotKindForPartType) — a flat
+// grid of 8 mixed cards made "what am I even comparing" harder to answer
+// than it needed to be. 'universal' is omitted: no PartType a shop can
+// actually offer maps there (only the commodity lot does, and that's its
+// own section below, never mixed into `offers`).
+const CATEGORY_LABEL: Record<'weapon' | 'defense' | 'systems', string> = {
+  weapon: 'Weapons',
+  defense: 'Defense',
+  systems: 'Systems',
+};
+const CATEGORY_ORDER: Array<'weapon' | 'defense' | 'systems'> = ['weapon', 'defense', 'systems'];
 
 // 47.4.2: extracted from ShopScreen — the store-only sections (parts for
 // sale, war assets). Iteration 33: a shipyard sells no parts or war
@@ -50,26 +64,42 @@ export function StoreSections({
       {offers.length === 0 ? (
         <p className="hint">Sold out.</p>
       ) : (
-        <div className="shop-screen__offers">
-          {offers.map((partId, i) => {
-            // A commander's signature part (always in stock — see
-            // reducer.ts's drawShopOffers) shows its discounted price
-            // here; everyone else's offers are unaffected. Overriding
-            // just the displayed cost on a copy of the Part reuses
-            // PartCard's existing rendering/disabled logic untouched.
-            const cost = partCost(partId, commanderId, protocols);
-            const part = { ...getPart(partId), cost };
-            return (
-              <PartCard
-                key={`${partId}-${i}`}
-                part={part}
-                showCost
-                onClick={credits >= cost ? () => onBuyPart(i) : undefined}
-                disabled={credits < cost}
-              />
-            );
-          })}
-        </div>
+        CATEGORY_ORDER.map((category) => {
+          // Offer index `i` (not position-within-category) is what
+          // onBuyPart needs — it identifies the offer slot in the
+          // reducer's own offers array, so it's captured per-item before
+          // filtering, not recomputed from the filtered list's position.
+          const items = offers
+            .map((partId, i) => ({ partId, i }))
+            .filter(({ partId }) => slotKindForPartType(getPart(partId).type) === category);
+          if (items.length === 0) return null;
+          return (
+            <div key={category}>
+              <h4 className="panel-subtitle">{CATEGORY_LABEL[category]}</h4>
+              <div className="shop-screen__offers">
+                {items.map(({ partId, i }) => {
+                  // A commander's signature part (always in stock — see
+                  // reducer.ts's drawShopOffers) shows its discounted
+                  // price here; everyone else's offers are unaffected.
+                  // Overriding just the displayed cost on a copy of the
+                  // Part reuses PartCard's existing rendering/disabled
+                  // logic untouched.
+                  const cost = partCost(partId, commanderId, protocols);
+                  const part = { ...getPart(partId), cost };
+                  return (
+                    <PartCard
+                      key={`${partId}-${i}`}
+                      part={part}
+                      showCost
+                      onClick={credits >= cost ? () => onBuyPart(i) : undefined}
+                      disabled={credits < cost}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })
       )}
 
       {/* Iteration 20 (the economy floor): two ways to spend credits that

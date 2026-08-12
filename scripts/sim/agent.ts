@@ -60,6 +60,10 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   // plans/iteration-48.md's "Determinism, auto-resolve, and the balance
   // floor" section) — accounted for here, not dispatched anywhere below.
   ISSUE_ORDER: true,
+  // 2026-08-12: UNISSUE_ORDER's undo — same "never touched by the floor
+  // agent" reasoning as ISSUE_ORDER immediately above (the agent never
+  // arms an order in the first place, so it never has one to cancel).
+  UNISSUE_ORDER: true,
   CONTINUE: true,
   PICK_UPGRADE: true,
   LEAVE_REWARD: true,

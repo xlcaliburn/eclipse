@@ -25,6 +25,7 @@ import { Starfield } from './components/Starfield';
 import { HudBar } from './components/HudBar';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TabBar } from './components/TabBar';
+import { BuildTag } from './components/BuildTag';
 import { Toast } from './components/Toast';
 import type { ToastMessage } from './components/Toast';
 import { TutorialOverlay } from './components/TutorialOverlay';
@@ -221,6 +222,7 @@ function App() {
           />
         </div>
         {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}
+        <BuildTag />
       </>
     );
   }
@@ -272,6 +274,7 @@ function App() {
           {chartSurface}
         </div>
         {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}
+        <BuildTag />
       </>
     );
   }
@@ -339,6 +342,7 @@ function App() {
               onUseActive={(shipIndex, abilityIndex) => dispatch({ type: 'USE_ACTIVE', shipIndex, abilityIndex })}
               onSelectEnemy={(index) => dispatch({ type: 'SET_PRIORITY_TARGET', index })}
               onIssueOrder={(order, targetIndex) => dispatch({ type: 'ISSUE_ORDER', order, targetIndex })}
+              onUnissueOrder={() => dispatch({ type: 'UNISSUE_ORDER' })}
             />
           )}
 
@@ -346,6 +350,7 @@ function App() {
             <RewardScreen
               reward={state.pendingReward}
               fleet={state.fleet}
+              commanderId={state.commanderId}
               onPickUpgrade={(upgradeId, shipIndex) => dispatch({ type: 'PICK_UPGRADE', upgradeId, shipIndex })}
               onLeave={() => dispatch({ type: 'LEAVE_REWARD' })}
             />
@@ -382,6 +387,7 @@ function App() {
           {state.phase === 'interlude' && (
             <InterludeScreen
               fleet={state.fleet}
+              commanderId={state.commanderId}
               onChoose={(shipIndex) => dispatch({ type: 'INTERLUDE_CHOOSE', shipIndex })}
             />
           )}
@@ -408,6 +414,7 @@ function App() {
               fleet={state.fleet}
               upgradeOptions={state.repairUpgradeOptions}
               summary={state.repairSummary}
+              commanderId={state.commanderId}
               onChooseFull={() => dispatch({ type: 'REPAIR_CHOOSE', choice: 'full' })}
               onChooseOverhaul={(upgradeId, shipIndex) =>
                 dispatch({ type: 'REPAIR_CHOOSE', choice: 'overhaul', shipIndex, upgradeId })
@@ -470,6 +477,7 @@ function App() {
     {isCompact && showHud && <TabBar surface={surface} onSelect={setSurface} />}
     {tutorialOpen && <TutorialOverlay onClose={() => setTutorialOpen(false)} />}
     <Toast toast={toast} />
+    <BuildTag />
     </>
   );
 }

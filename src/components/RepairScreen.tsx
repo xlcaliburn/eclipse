@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { shipUpgradeNote, upgradeRedundantOn } from '../game/ship';
+import type { CommanderId } from '../game/commanders';
+import { everyShipAtUpgradeCap, shipUpgradeNote, upgradeRedundantOn } from '../game/ship';
 import type { PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
@@ -9,6 +10,7 @@ interface RepairScreenProps {
   fleet: PlayerShipState[];
   upgradeOptions: UpgradeId[]; // drawn on arrival, whether or not overhaul ends up chosen
   summary?: string; // set once the choice has been resolved (either branch)
+  commanderId?: CommanderId;
   onChooseFull: () => void;
   onChooseOverhaul: (upgradeId: UpgradeId, shipIndex: number) => void;
   onContinue: () => void;
@@ -22,12 +24,20 @@ export function RepairScreen({
   fleet,
   upgradeOptions,
   summary,
+  commanderId,
   onChooseFull,
   onChooseOverhaul,
   onContinue,
 }: RepairScreenProps) {
   const [selectedUpgrade, setSelectedUpgrade] = useState<UpgradeId | null>(null);
-  const overhaulLocked = fleet.length > 0 && fleet.every((s) => s.upgrades.length >= 1);
+  // Bug fixed 2026-08-12: this used to hardcode `.upgrades.length >= 1`
+  // regardless of commander — a Warlord fleet was reported "Locked" the
+  // moment every ship held its FIRST augment, even though the Flagship
+  // alone has 3 slots. ship.ts's everyShipAtUpgradeCap already existed and
+  // is commander-aware (it's what the reducer itself would use to decide
+  // this) — this component had its own inline reimplementation instead of
+  // calling it.
+  const overhaulLocked = everyShipAtUpgradeCap(fleet, commanderId);
 
   if (summary !== undefined) {
     return (
@@ -84,12 +94,14 @@ export function RepairScreen({
                   <ShipPickRow
                     fleet={fleet}
                     onPick={(i) => onChooseOverhaul(selectedUpgrade, i)}
-                    noteFor={shipUpgradeNote}
+                    noteFor={(ship) => shipUpgradeNote(ship, commanderId)}
                     // 61.2: same redundancy guard as RewardScreen's picker —
                     // see its comment.
                     disabledFor={(ship) => upgradeRedundantOn(ship, selectedUpgrade)}
                     titleFor={(ship) =>
-                      upgradeRedundantOn(ship, selectedUpgrade) ? 'Already dodges the first hit' : (shipUpgradeNote(ship) ?? undefined)
+                      upgradeRedundantOn(ship, selectedUpgrade)
+                        ? 'Already dodges the first hit'
+                        : (shipUpgradeNote(ship, commanderId) ?? undefined)
                     }
                   />
                 </>

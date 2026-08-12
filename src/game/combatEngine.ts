@@ -1257,6 +1257,74 @@ export function issueOrder(state: CombatState, order: FleetOrderId, targetIndex?
   }
 }
 
+// 2026-08-12 (player report): once armed, an order was permanently locked
+// in for the round with no way back — a misclick (wrong ship braced, wrong
+// order entirely) cost the command point for nothing. This reverses
+// whatever `orderThisRound` currently holds, valid only up to the next
+// ADVANCE_ROUND (freshRoundModifiers() there wipes the round clean anyway,
+// so there's nothing to undo once a new round starts — canUnissueOrder
+// doesn't need its own round-boundary check beyond `orderThisRound` itself
+// being cleared by that same reset).
+export function canUnissueOrder(state: CombatState): boolean {
+  return !state.winner && state.orderThisRound !== null;
+}
+
+// Reverses issueOrder's per-case delta exactly. Safe unconditionally
+// because at most one order can ever be armed in a round (orderThisRound's
+// own lock) — so whatever's in roundModifiers attributable to THIS order
+// is exactly what issueOrder added a moment ago, nothing else has touched
+// it since, and resetting brace/exploit-weakness's fields outright (rather
+// than filtering/diffing) is equivalent to subtracting them.
+export function unissueOrder(state: CombatState): CombatState {
+  if (!canUnissueOrder(state)) return state;
+  const order = state.orderThisRound!;
+  const commandPoints = state.commandPoints + 1;
+  const logged = (text: string): CombatEvent[] => [...state.log, { kind: 'part-effect', text }];
+
+  switch (order) {
+    case 'attack-run':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Attack run.'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus - 1,
+          playerShieldBonus: state.roundModifiers.playerShieldBonus + 1,
+        },
+      };
+    case 'evasive-pattern':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Evasive pattern.'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus + 1,
+          playerShieldBonus: state.roundModifiers.playerShieldBonus - 1,
+        },
+      };
+    case 'brace':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Brace.'),
+        roundModifiers: { ...state.roundModifiers, bracingShipIndices: [] },
+      };
+    case 'exploit-weakness':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Exploit weakness.'),
+        roundModifiers: { ...state.roundModifiers, markedEnemyIndex: null },
+      };
+  }
+}
+
 export function runToEnd(state: CombatState): CombatState {
   let s = state;
   while (!s.winner) {

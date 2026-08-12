@@ -34,6 +34,7 @@ interface CombatScreenProps {
   onUseActive: (shipIndex: number, abilityIndex: number) => void;
   onSelectEnemy: (index: number) => void;
   onIssueOrder: (order: FleetOrderId, targetIndex?: number) => void;
+  onUnissueOrder: () => void;
 }
 
 export function CombatScreen({
@@ -46,6 +47,7 @@ export function CombatScreen({
   onUseActive,
   onSelectEnemy,
   onIssueOrder,
+  onUnissueOrder,
 }: CombatScreenProps) {
   const finished = Boolean(combat.winner);
   const won = combat.winner === 'player';
@@ -315,6 +317,7 @@ export function CombatScreen({
           onUseActive={onUseActive}
           pickingOrder={pickingOrder}
           onOrderTileClick={handleOrderTileClick}
+          onUnissueOrder={onUnissueOrder}
         />
       )}
       {/* 53.2: the tile that started this pick may now be scrolled out of

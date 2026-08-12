@@ -188,7 +188,8 @@ export function FleetPanel({
               // Iteration 58.3: budget is innate + whatever's equipped
               // generates — reading `getFrame(...).power` alone here would
               // silently hide a carried reactor's grant. reactorGen is
-              // split out just for the "(+N from reactors)" caption below.
+              // split out to recover the frame's own flat number
+              // (`budget - reactorGen`) for PowerPipRow's `base` prop.
               const budget = powerBudget(ship.frameId, ship.equipped);
               const reactorGen = equippedPowerGen(ship.equipped);
               const emptyAugmentSlots = upgradeCapFor(ship, commanderId) - ship.upgrades.length;
@@ -211,13 +212,12 @@ export function FleetPanel({
                       as dropping the pip meter itself (it kept reading as
                       a second HP bar). Bonus slots (bay/Lone flagship/
                       Warlord) never grant power — only equipped reactors
-                      do (58.3) — so this budget can exceed the frame's own
-                      flat number, captioned by the reactor suffix. */}
+                      do (58.3) — so this budget can exceed the frame's
+                      own flat number; PowerPipRow's `base` prop (2026-08-
+                      12) states that flat number directly instead of a
+                      "(+N from reactors)" delta. */}
                   <div className="blueprint__power">
-                    <PowerPipRow used={power} budget={budget} />
-                    {reactorGen > 0 && (
-                      <span className="blueprint__power-reactor">(+{reactorGen} from reactors)</span>
-                    )}
+                    <PowerPipRow used={power} budget={budget} base={budget - reactorGen} />
                   </div>
                 </>
               );
@@ -291,6 +291,7 @@ export function FleetPanel({
                 part={getPart(partId)}
                 onClick={blockReason ? undefined : () => onEquip(selectedShipIndex, partId)}
                 disabled={!!blockReason}
+                showPower
                 title={blockReason ?? undefined}
               />
               {/* A commodity lot has no half-cost salvage value (SELL_PART

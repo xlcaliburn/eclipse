@@ -1,13 +1,29 @@
+import { execSync } from 'node:child_process'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+
+// 2026-08-12: the corner build tag (BuildTag.tsx) needs a commit hash to
+// show. Read once at config time, not per-request — falls back to 'dev'
+// outside a git checkout (a sandboxed CI clone, a source zip) rather than
+// failing the build.
+function commitHash(): string {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim()
+  } catch {
+    return 'dev'
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
   // Relative asset paths so the build works at any URL depth —
   // GitHub Pages project sites (/<repo>/), Netlify, itch.io, or file://.
   base: './',
+  define: {
+    __COMMIT_HASH__: JSON.stringify(commitHash()),
+  },
   // Second page: the player wiki (wiki.html), a reference rendered from the
   // live game data — deployed alongside the game at <game-url>/wiki.html.
   build: {

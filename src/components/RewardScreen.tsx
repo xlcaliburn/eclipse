@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { CommanderId } from '../game/commanders';
 import { getPart } from '../game/parts';
 import type { PlayerShipState, RewardSummary } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
@@ -10,11 +11,12 @@ import { shipUpgradeNote, upgradeRedundantOn } from '../game/ship';
 interface RewardScreenProps {
   reward: RewardSummary;
   fleet: PlayerShipState[];
+  commanderId?: CommanderId;
   onPickUpgrade: (upgradeId: UpgradeId, shipIndex: number) => void;
   onLeave: () => void;
 }
 
-export function RewardScreen({ reward, fleet, onPickUpgrade, onLeave }: RewardScreenProps) {
+export function RewardScreen({ reward, fleet, commanderId, onPickUpgrade, onLeave }: RewardScreenProps) {
   const [selectedUpgrade, setSelectedUpgrade] = useState<UpgradeId | null>(null);
   const needsUpgradePick = Boolean(reward.upgradeOptions);
 
@@ -81,13 +83,15 @@ export function RewardScreen({ reward, fleet, onPickUpgrade, onLeave }: RewardSc
               <ShipPickRow
                 fleet={fleet}
                 onPick={(i) => onPickUpgrade(selectedUpgrade, i)}
-                noteFor={shipUpgradeNote}
+                noteFor={(ship) => shipUpgradeNote(ship, commanderId)}
                 // 61.2: a ship whose frame innately grants Jink (Interceptor,
                 // Valkyrie) can't take Emergency Vectoring — same redundancy
                 // guard the reducer itself rejects the pick with.
                 disabledFor={(ship) => upgradeRedundantOn(ship, selectedUpgrade)}
                 titleFor={(ship) =>
-                  upgradeRedundantOn(ship, selectedUpgrade) ? 'Already dodges the first hit' : (shipUpgradeNote(ship) ?? undefined)
+                  upgradeRedundantOn(ship, selectedUpgrade)
+                    ? 'Already dodges the first hit'
+                    : (shipUpgradeNote(ship, commanderId) ?? undefined)
                 }
               />
             </>

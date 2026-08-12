@@ -1,12 +1,18 @@
 import type { Part } from '../game/types';
 import { WeaponDie } from './Die';
-import { PartIcon } from './PartIcon';
+import { PartIcon, PowerBoltIcon } from './PartIcon';
 
 interface PartCardProps {
   part: Part;
   onClick?: () => void;
   disabled?: boolean;
   showCost?: boolean;
+  // 2026-08-12: power draw, independent of showCost — an inventory part
+  // being EQUIPPED has no relevant credit price (already bought), but the
+  // player choosing where to install it still needs to see what it costs
+  // in power before clicking a slot that might not have room. showCost
+  // implies this on too (the shop's buy-offer view wants both numbers).
+  showPower?: boolean;
   // 2026-08-12 (iteration 52.2): a disabled reason ("no free weapon slot")
   // — the shop/fleet callers pass this through equipBlockReason so a
   // disabled part explains itself instead of just dead-clicking.
@@ -30,7 +36,7 @@ const TYPE_LABEL: Record<Part['type'], string> = {
   reactor: 'Reactor',
 };
 
-export function PartCard({ part, onClick, disabled, showCost, title }: PartCardProps) {
+export function PartCard({ part, onClick, disabled, showCost, showPower, title }: PartCardProps) {
   return (
     <button
       type="button"
@@ -56,20 +62,24 @@ export function PartCard({ part, onClick, disabled, showCost, title }: PartCardP
         </span>
       )}
       <span className="part-card__desc">{part.description}</span>
-      {showCost && (
+      {(showCost || showPower) && (
         <span className="part-card__price-row">
-          <span className="part-card__cost">{part.cost} cr</span>
-          {/* Iteration 57.3: power draw next to the credit price — a
-              player needs both numbers to plan a purchase, not just the
-              one that was already here. Gated on the same `showCost`
-              (only the shop's offer draw passes it), not shown separately
-              — an already-equipped part's power is read off the ship
-              card's own meter instead.
+          {showCost && <span className="part-card__cost">{part.cost} cr</span>}
+          {/* Iteration 57.3: power draw next to the credit price, so a
+              shop buyer sees both numbers before purchasing.
+              2026-08-12: also shown (via showPower, cost omitted) on the
+              equip screens — FleetPanel's inventory grid — where a spare
+              part's power draw was previously invisible until you tried
+              (and failed) to install it. Bolt icon over plain "N pwr"
+              text (60.8's own reasoning for the ship-level meter applies
+              identically here: an unlabeled glyph reads as "power"
+              without a separate word).
               Iteration 58.2: a reactor GENERATES rather than draws — shown
-              as "+N power" in the same price-row slot instead of "N pwr"
-              so it doesn't read as a (false) 0-power freebie. */}
+              as "+N" instead of "N" so it doesn't read as a (false)
+              0-power freebie. */}
           <span className="part-card__power">
-            {part.type === 'reactor' ? `+${part.powerGen} power` : `${part.power} pwr`}
+            <PowerBoltIcon size={12} className="part-card__power-icon" />
+            {part.type === 'reactor' ? `+${part.powerGen}` : part.power}
           </span>
         </span>
       )}
