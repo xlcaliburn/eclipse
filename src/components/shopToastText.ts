@@ -1,4 +1,4 @@
-import { getFrame } from '../game/frames';
+import { frameDisplayName, getFrame } from '../game/frames';
 import { getPart } from '../game/parts';
 import type { RunAction } from '../game/reducer';
 import { playerShipLabel } from '../game/ship';
@@ -19,8 +19,14 @@ export function shopToastText(action: RunAction, state: RunState): string | null
       return `Bought ${getPart(state.shopOffers![action.offerIndex]).name}.`;
     case 'BUY_SHIP':
       return `${getFrame(action.frameId).name} added to the fleet.`;
-    case 'REFIT_SHIP':
-      return `${playerShipLabel(state.fleet, action.shipIndex)} refit into a ${getFrame(action.frameId).name}.`;
+    case 'UPGRADE_MARK': {
+      // Pre-dispatch: the ship's CURRENT mark is what's on state still —
+      // the toast names the mark it's about to become, one step up.
+      const ship = state.fleet[action.shipIndex];
+      if (!ship) return null;
+      const targetMark = ((ship.mark ?? 1) + 1) as 2 | 3;
+      return `${playerShipLabel(state.fleet, action.shipIndex)} upgraded to ${frameDisplayName(ship.frameId, targetMark)}.`;
+    }
     case 'BUY_COMMODITY_LOT':
       return 'Commodity lot bought.';
     case 'BUY_MERCENARY':

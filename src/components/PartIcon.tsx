@@ -56,12 +56,34 @@ const ACTIVE_SPARK_GLYPH = (
   <polygon points="50,6 59,38 92,50 59,62 50,94 41,62 8,50 41,38" />
 );
 
+// Iteration 60.8: a classic lightning-bolt zigzag, deliberately distinct
+// from the 8-point active-ability burst above — power and "has a
+// once-per-combat button" are different concepts and shouldn't share a
+// glyph. Used by PowerPipRow (now an icon + fraction, not a pip meter).
+const POWER_BOLT_GLYPH = <polygon points="56,4 22,54 46,54 40,96 82,40 54,40" />;
+
+// Iteration 58.2: a reactor core — concentric rings (the generator) with
+// four radiating spokes, distinct from the active-ability spark (a single
+// jagged burst) so "generates power" and "has a once-per-combat button"
+// never read as the same glyph.
+const REACTOR_GLYPH = (
+  <>
+    <circle cx="50" cy="50" r="34" />
+    <circle cx="50" cy="50" r="13" />
+    <line x1="50" y1="2" x2="50" y2="20" />
+    <line x1="50" y1="80" x2="50" y2="98" />
+    <line x1="2" y1="50" x2="20" y2="50" />
+    <line x1="80" y1="50" x2="98" y2="50" />
+  </>
+);
+
 const TYPE_GLYPHS: Record<Exclude<Part['type'], 'weapon'>, React.ReactNode> = {
   computer: COMPUTER_GLYPH,
   shield: SHIELD_GLYPH,
   hull: HULL_GLYPH,
   drive: DRIVE_GLYPH,
   cargo: CARGO_GLYPH,
+  reactor: REACTOR_GLYPH,
 };
 
 function glyphFor(part: Part): React.ReactNode {
@@ -131,6 +153,22 @@ export function ActiveSparkIcon({ size = 16, className }: { size?: number; class
       aria-hidden="true"
     >
       {ACTIVE_SPARK_GLYPH}
+    </svg>
+  );
+}
+
+// Iteration 60.8: the power meter's icon — standalone, like ActiveSparkIcon
+// above, since it labels a fraction rather than a specific part's type.
+export function PowerBoltIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      width={size}
+      height={size}
+      className={`part-icon${className ? ` ${className}` : ''}`}
+      aria-hidden="true"
+    >
+      {POWER_BOLT_GLYPH}
     </svg>
   );
 }

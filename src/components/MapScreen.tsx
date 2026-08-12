@@ -175,11 +175,24 @@ export function MapScreen({
   const act2LaneVisits = act === 2 ? visited.filter((p) => p.col < laneColumns(2)).length : 0;
   const pursuitThreshold = laneColumns(2) - 2;
   const pursuitWarning = act === 2 && act2LaneVisits >= pursuitThreshold - 2;
+  // 2026-08-12: this used to be a standing <p className="hint"> paragraph,
+  // read once and then re-read on every subsequent map visit for the rest
+  // of the run. Demoted to an info-dot (FleetPanel's existing pattern) —
+  // essential once, one hover/tap away after that. Still per-mode text
+  // (peek vs. live, interactive vs. not), just tooltip-carried now.
+  const instructions = onClose
+    ? 'Viewing the map — close it to get back to what you were doing.'
+    : interactive
+      ? "Pick your next stop. Only nearby columns, repair yards, and the boss are known up front — the rest is fog until you scout it or get there."
+      : 'Viewing the map — switch tabs to get back to what you were doing.';
 
   return (
     <div className="map-screen">
       <h2 className="map-screen__sector">
         SECTOR {act === 1 ? 'I' : 'II'} — {sectorName(map.seed + act)}
+        <button type="button" className="info-dot" title={instructions} aria-label={instructions}>
+          i
+        </button>
       </h2>
       {/* Credits/intel live in the persistent HUD bar — no per-screen copy. */}
       <div className="map-screen__header">
@@ -199,13 +212,6 @@ export function MapScreen({
           </button>
         )}
       </div>
-      <p className="hint">
-        {onClose
-          ? 'Viewing the map — close it to get back to what you were doing.'
-          : interactive
-            ? "Pick your next stop. Only nearby columns, repair yards, and the boss are known up front — the rest is fog until you scout it or get there."
-            : 'Viewing the map — switch tabs to get back to what you were doing.'}
-      </p>
       {/* Iteration 32.3: a deterministic tax the player can count on their
           fingers, never a surprise — shown 2 arrivals out from the
           threshold, whichever screen this is (peek or live). */}

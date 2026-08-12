@@ -27,6 +27,7 @@ const TYPE_LABEL: Record<Part['type'], string> = {
   hull: 'Hull',
   drive: 'Drive',
   cargo: 'Cargo',
+  reactor: 'Reactor',
 };
 
 export function PartCard({ part, onClick, disabled, showCost, title }: PartCardProps) {
@@ -63,8 +64,13 @@ export function PartCard({ part, onClick, disabled, showCost, title }: PartCardP
               one that was already here. Gated on the same `showCost`
               (only the shop's offer draw passes it), not shown separately
               — an already-equipped part's power is read off the ship
-              card's own meter instead. */}
-          <span className="part-card__power">{part.power} pwr</span>
+              card's own meter instead.
+              Iteration 58.2: a reactor GENERATES rather than draws — shown
+              as "+N power" in the same price-row slot instead of "N pwr"
+              so it doesn't read as a (false) 0-power freebie. */}
+          <span className="part-card__power">
+            {part.type === 'reactor' ? `+${part.powerGen} power` : `${part.power} pwr`}
+          </span>
         </span>
       )}
     </button>

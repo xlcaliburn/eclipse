@@ -890,36 +890,31 @@ h1, h2, h3 {
   background: var(--danger);
 }
 
-/* Power budget (iteration 57.3): same segmented-pip language as HP
-   (.hp-pips above) rather than a third visual system — one pip per point
-   of a frame's power budget, lit left-to-right as a build spends it
-   (PowerPipRow.tsx). Inverted from HP (which drains): lit here means
-   SPENT, not remaining. `--over` only ever renders defensively (see that
-   component's own comment) — canEquip/canRefit never let a live build get
-   there. */
-.power-pips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  max-width: 132px;
+/* Power budget (iteration 57.3, redesigned 60.8): a bolt icon + plain
+   fraction (PowerPipRow.tsx) — replaced the segmented-pip meter that lived
+   here, which kept reading as a second HP bar despite 57.3's own
+   relabelling attempt. `--over` only ever renders defensively (see that
+   component's own comment) — canEquip never lets a live build get there. */
+.power-fraction {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text);
 }
 
-.power-pips__pip {
-  width: 6px;
-  height: 8px;
-  flex-shrink: 0;
-  flex-grow: 0;
-  border-radius: 1px;
-  background: var(--border);
+.power-fraction__icon {
+  color: var(--accent);
 }
 
-.power-pips__pip--used {
-  background: var(--accent);
-  box-shadow: 0 0 3px var(--accent-glow);
+.power-fraction--over {
+  color: var(--danger);
 }
 
-.power-pips__pip--over {
-  background: var(--danger);
+.power-fraction--over .power-fraction__icon {
+  color: var(--danger);
 }
 
 /* Map screen */
@@ -1408,6 +1403,20 @@ h1, h2, h3 {
   text-transform: uppercase;
 }
 
+/* 2026-08-12: shared spacing for an info-dot folded inline into a heading
+   (the map's standing hint, the shop's mark-upgrade explainer) — its own
+   line would be exactly the clutter the dot exists to avoid. */
+h3 .info-dot,
+.map-screen__sector .info-dot {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.map-screen__sector .info-dot {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .map-screen__header {
   display: flex;
   align-items: center;
@@ -1748,19 +1757,15 @@ h1, h2, h3 {
   margin-top: 4px;
 }
 
-.blueprint__power-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-
-.blueprint__power-value {
+/* 60.8: the "(+N from reactors)" caption, now the only text sitting beside
+   the bolt+fraction — the "Power" word label and the duplicate fraction
+   span it used to sit next to are gone (PowerPipRow's icon carries that
+   meaning on its own now). */
+.blueprint__power-reactor {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  color: var(--text);
+  color: var(--text-dim);
 }
 
 .parts-fold__summary-detail {
@@ -2121,6 +2126,13 @@ h1, h2, h3 {
   border-color: var(--warning);
 }
 
+/* Iteration 58.2: reactors get their own border hue — distinct from every
+   other type's color (weapon/computer/shield/hull above) so a reactor
+   offer reads as its own thing at a glance in the shop's mixed offer grid. */
+.part-card--reactor {
+  border-color: var(--rarity-rare);
+}
+
 .part-card--active {
   border-style: double;
   box-shadow: 0 0 0 1px var(--accent) inset;
@@ -2416,33 +2428,6 @@ h1, h2, h3 {
   padding-top: 12px;
 }
 
-/* Fleet orders (iteration 48): the command-point readout sitting inline
-   in the "Fleet orders" heading — same segmented-pip language as HP
-   (.hp-pips), but its own class since it's a resource count, not a health
-   bar, and the row is always short (2-3 points) so no wrap/max-width
-   handling is needed. */
-.command-points {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.command-points__pip {
-  width: 8px;
-  height: 10px;
-  border-radius: 1px;
-  background: var(--accent);
-  box-shadow: 0 0 3px var(--accent-glow);
-}
-
-.command-points__count {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
 /* Collapse control: mobile-only, where the pinned dock costs ~280px of a
    phone screen. Above the breakpoint the bar is an in-flow strip inside the
    panel that costs nothing to leave open, so the control would be noise —
@@ -2479,17 +2464,19 @@ h1, h2, h3 {
        contents. Current budget, top to bottom:
          toggle strip           35px  (34px min-height + 1px border)
          bar padding             12px (6px top + 6px bottom)
-         orders section          76px (12px margin + ~18px heading incl.
-                                        the .command-points pip row, which
-                                        adds width not height — 2-3 short
-                                        pips never wraps the heading — +
-                                        ~46px card row: 53.3's compact
-                                        orders tile drops the description,
-                                        so it's just the kind+name lines)
+         orders section          76px (12px margin + ~18px heading + ~46px
+                                        card row: the order tile has no
+                                        description line at all now
+                                        (59.2 — tooltip-only on every
+                                        width), just the kind+name lines)
          ship-actives section   122px (12px margin + ~18px heading + ~92px
                                         card row: kind+name+2-line desc+
                                         ship-owner line, the tallest tile
-                                        in the bar)
+                                        in the bar; the section itself
+                                        doesn't render at all when there
+                                        are no active parts — 59.2 — so
+                                        this is the section's max, not a
+                                        floor)
                                 ------
                                 245px, + ~35px headroom for browser text-
                                         size scaling and a wrapped ship-
@@ -2610,9 +2597,6 @@ h1, h2, h3 {
   .combat-command-bar .combat-orders .card-tile {
     width: auto;
     min-height: 0;
-  }
-  .combat-command-bar .combat-orders .card-tile__desc {
-    display: none;
   }
 
   /* 53.4: the picking/armed states are box-shadow glows sized for a 150px
@@ -2835,42 +2819,74 @@ h1, h2, h3 {
   margin: 0;
 }
 
+/* 60.8: every shop card grid gets a 2-column floor, even at a 375px phone
+   width — the shipyard used to run as one long single-file column of
+   180px-fixed cards (`.frame-card` no longer fixes its own width; see
+   below, it now stretches to fill whatever column the grid gives it).
+   auto-fill with a 150px floor keeps 2 columns at the narrowest supported
+   width and grows to more as the viewport widens. */
 .shop-screen__offers,
 .shop-screen__frames {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
+  gap: 10px;
   margin-bottom: 12px;
 }
 
-/* Iteration 52.5 (the hull refit) — one row per eligible ship, its legal
-   targets laid out as the same .frame-card buttons the "Expand your
-   fleet" section already uses, so a refit target reads exactly like a
-   fresh-purchase hull card. */
-.shop-screen__refits {
-  display: flex;
-  flex-direction: column;
+/* Iteration 59.3/59.4 (hull marks, replaces 52.5's refit) — one row per
+   eligible ship: its name, then a single button naming the next mark, the
+   slot bonus, and the price. 60.8: same 2-column grid floor as the card
+   grids above — a mark row is essentially a card too. */
+.shop-screen__marks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
   gap: 10px;
   margin-bottom: 16px;
 }
 
-.refit-row {
+/* 60.8: stacked, not side-by-side — a grid cell as narrow as 150px has no
+   room for the ship name and the button on one line the way the old
+   full-width flex row did. */
+.mark-row {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.refit-row__ship {
+.mark-row__ship {
   font-weight: 600;
-  min-width: 120px;
-  padding-top: 8px;
 }
 
-.refit-row__targets {
+.mark-row__button {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mark-row__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mark-row__button-name {
+  font-weight: 600;
+}
+
+.mark-row__button-detail {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.mark-row__button-cost {
+  font-weight: 600;
 }
 
 .shop-button {
@@ -2896,8 +2912,11 @@ h1, h2, h3 {
   cursor: not-allowed;
 }
 
+/* 60.8: no more fixed width — stretches to fill whatever column its grid
+   parent (.shop-screen__frames, formerly .refit-row__targets) gives it,
+   which is what makes the 2-column floor actually 2 columns instead of a
+   fixed-180px card leaving a mostly-empty second column. */
 .frame-card {
-  width: 180px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--panel-2);
@@ -2998,11 +3017,6 @@ h1, h2, h3 {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2px 6px;
-}
-
-.frame-card__bonus {
-  font-size: 11px;
-  color: var(--accent);
 }
 
 .frame-card__cost,

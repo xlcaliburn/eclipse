@@ -16,17 +16,18 @@ import { deriveStats } from './ship';
 import { getUpgrade } from './upgrades';
 import {
   applyCargoReward,
-  canRefit,
+  canUpgradeMark,
   drawShopOffers,
   eliteReward,
   fleetCap,
   frameCost,
   initialRunState,
+  markUpgradeCost,
   partCost,
-  refitCost,
   rollRarity,
   runReducer,
   SHOP_OFFER_COUNT,
+  STARTING_FIT,
   winReward,
 } from './reducer';
 import { mulberry32 } from './rng';
@@ -98,16 +99,17 @@ describe('CHOOSE_COMMANDER — commander phase gate', () => {
   // Iteration 21: the free starting Interceptor moved from the Warlord to
   // the new Admiral (wide) when the Warlord was reworked to a tall,
   // one-capital-ship doctrine. Iteration 51.2: a second free Interceptor
-  // added — the fleet now begins at 3.
-  it('the Admiral starts with two free, ion-fitted Interceptors — fleet begins at 3', () => {
+  // added — the fleet now begins at 3. 61.3: the Interceptor's default
+  // fit flipped from ion to light-missile (speed-biased hulls).
+  it('the Admiral starts with two free, missile-fitted Interceptors — fleet begins at 3', () => {
     let state = initialRunState();
     state = { ...state, commanderChoices: ['admiral', 'merchant', 'engineer'] };
     const result = runReducer(state, { type: 'CHOOSE_COMMANDER', commanderId: 'admiral' });
     expect(result.fleet).toHaveLength(3);
     expect(result.fleet[1].frameId).toBe('interceptor');
-    expect(result.fleet[1].equipped).toEqual(['ion']);
+    expect(result.fleet[1].equipped).toEqual(STARTING_FIT.interceptor);
     expect(result.fleet[2].frameId).toBe('interceptor');
-    expect(result.fleet[2].equipped).toEqual(['ion']);
+    expect(result.fleet[2].equipped).toEqual(STARTING_FIT.interceptor);
     expect(result.fleet[1].name).not.toBe(result.fleet[2].name);
     expect(result.shipsCommissioned).toBe(3);
   });
@@ -390,16 +392,43 @@ describe('EQUIP/UNEQUIP — works in both prep and shop phases', () => {
     stateB = runReducer(stateB, { type: 'EQUIP', shipIndex: 0, partId: 'hull1' }); // -> 4/4
     expect(stateB.fleet[0].damage).toBe(0);
   });
+
+  // Iteration 58.3: the one genuinely new UNEQUIP guard — only ever binds
+  // for a reactor whose generation the rest of the loadout is relying on.
+  it("refuses to unequip a reactor that would strand the remaining loadout over budget (ship.ts's canUnequip)", () => {
+    // light-cruiser (Cruiser): innate 6, W W U U. Two Antimatter cannons
+    // (draw 4 each = 8) plus a Fusion reactor (+5, in a universal slot) is
+    // legal (draw 8 <= budget 11) — but the reducer must refuse removing
+    // the reactor, since 8 > the frame's own innate 6.
+    const fleet: PlayerShipState[] = [
+      { frameId: 'light-cruiser', equipped: ['antimatter', 'antimatter', 'reactor2'], damage: 0, upgrades: [] },
+    ];
+    let state: RunState = { ...initialRunState(), phase: 'prep', fleet, inventory: [] };
+    state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'reactor2' });
+    expect(state.fleet[0].equipped).toContain('reactor2'); // refused — no-op
+    expect(state.inventory).not.toContain('reactor2');
+  });
+
+  it("allows unequipping a reactor when the remaining loadout still fits the frame's own innate budget", () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'light-cruiser', equipped: ['ion', 'reactor2'], damage: 0, upgrades: [] }];
+    let state: RunState = { ...initialRunState(), phase: 'prep', fleet, inventory: [] };
+    state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'reactor2' });
+    expect(state.fleet[0].equipped).not.toContain('reactor2');
+    expect(state.inventory).toContain('reactor2');
+  });
 });
 
 describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasable', () => {
-  it('adds an Interceptor to the fleet, pre-fitted with an ion cannon', () => {
+  // 61.3: speed-biased hulls (baseInitiative >= 2) default to light-missile
+  // instead of ion — the Interceptor is one of the three.
+  it('adds an Interceptor to the fleet, pre-fitted with a light missile (61.3)', () => {
     let state = stateWithMap('shop', { phase: 'shop', credits: 20, shopFrameOffers: ['interceptor'] });
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'interceptor' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1].frameId).toBe('interceptor');
     expect(state.fleet[1].damage).toBe(0);
-    expect(state.fleet[1].equipped).toEqual(['ion']);
+    expect(state.fleet[1].equipped).toEqual(STARTING_FIT.interceptor);
+    expect(state.fleet[1].equipped).toEqual(['light-missile']);
     expect(state.credits).toBe(20 - 6); // interceptor cost (6 as of iteration 5)
   });
 
@@ -439,15 +468,9 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'dreadnought' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1].frameId).toBe('dreadnought');
-    // Iteration 52 stage (b): Dreadnought is epic now (level 2), not
-    // legendary (level 3) — a shipyard purchase arrives with the starting
-    // fit PLUS 2 bonus rare-tier items (2026-08-08 rework).
-    expect(state.fleet[1].equipped.slice(0, 3)).toEqual(['ion', 'ion', 'shield1']);
-    const bonusItems = state.fleet[1].equipped.slice(3);
-    expect(bonusItems).toHaveLength(2);
-    for (const id of bonusItems) {
-      expect(getPart(id).rarity).toBe('rare');
-    }
+    // 61.1: the shipyard rarity bonus is gone — a purchase (store or
+    // shipyard) arrives with exactly STARTING_FIT[frameId], nothing more.
+    expect(state.fleet[1].equipped).toEqual(['ion', 'ion', 'shield1']);
     expect(state.credits).toBe(0); // 30cr cost
   });
 
@@ -492,12 +515,14 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
   // any hull can carry. The Corvette replaces them as the one cheap
   // utility carrier. Iteration 41: it arrives with a Light missile (every
   // purchasable hull now has some starting weapon) and repriced accordingly.
-  it('the Corvette (iteration 41) arrives fitted with a light missile', () => {
+  // 61.3: the Corvette is a utility hull (evasion-flavored capacitor
+  // innate, not speed) — it flips to the ion default with the rest.
+  it('the Corvette (61.3: ion default) arrives fitted with an ion cannon', () => {
     let state = stateWithMap('shop', { phase: 'shop', credits: 20, shopFrameOffers: ['corvette'] });
     state = runReducer(state, { type: 'BUY_SHIP', frameId: 'corvette' });
     expect(state.fleet).toHaveLength(2);
     expect(state.fleet[1].frameId).toBe('corvette');
-    expect(state.fleet[1].equipped).toEqual(['light-missile']);
+    expect(state.fleet[1].equipped).toEqual(['ion']);
     expect(state.credits).toBe(20 - 8); // corvette cost (repriced iteration 41)
   });
 
@@ -621,27 +646,25 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
   });
 });
 
-describe('BUY_SHIP — store vs. shipyard (iteration 33; rarity bonus reworked iteration 39, reworked again 2026-08-08 to grant rare-tier items instead of fused HP/upgrades)', () => {
-  it('a store hull is 25% cheaper and always common-tier (no bonus); a shipyard hull is full price and arrives with bonus rare-tier item(s)', () => {
-    // Bastion is rare — a real contrast case, unlike a common-tier frame
-    // (interceptor/corvette/derelict) where store and shipyard would look
-    // identical on the bonus dimension.
+describe('BUY_SHIP — store vs. shipyard (iteration 33; 61.1 removed the rarity bonus entirely)', () => {
+  // 61.1: the shipyard's pristine-arrival rarity bonus (hullRarityBonus) is
+  // gone. The only remaining store/shipyard difference on a purchase is
+  // price and rarity-tier eligibility (checked elsewhere) — a bought hull
+  // arrives with exactly STARTING_FIT[frameId], full stop, either way.
+  it('a store hull is 25% cheaper; a shipyard hull is full price — both arrive with exactly STARTING_FIT, no bonus items', () => {
     const store = stateWithMap('shop', { phase: 'shop', shopKind: 'store', credits: 20, shopFrameOffers: ['bastion'] });
     const storeResult = runReducer(store, { type: 'BUY_SHIP', frameId: 'bastion' });
     expect(storeResult.credits).toBe(20 - Math.floor(12 * 0.75)); // bastion 12cr (iteration 41) -> floor(9) = 9
     expect(storeResult.fleet[1].damage).toBe(0); // no more arrival damage, store or shipyard
     expect(storeResult.fleet[1].upgrades).toEqual([]);
-    expect(storeResult.fleet[1].equipped).toEqual(['ion']); // iteration 41 starting fit — no bonus items
+    expect(storeResult.fleet[1].equipped).toEqual(STARTING_FIT.bastion);
 
     const shipyard = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 20, shopFrameOffers: ['bastion'] });
     const shipyardResult = runReducer(shipyard, { type: 'BUY_SHIP', frameId: 'bastion' });
     expect(shipyardResult.credits).toBe(20 - 12); // full price (iteration 41)
     expect(shipyardResult.fleet[1].damage).toBe(0);
     expect(shipyardResult.fleet[1].upgrades).toEqual([]); // no slotless upgrade grant any more
-    expect(shipyardResult.fleet[1].equipped).toHaveLength(2); // starting fit (1) + 1 bonus rare item (rare = level 1)
-    expect(shipyardResult.fleet[1].equipped[0]).toBe('ion');
-    const bonusItemId = shipyardResult.fleet[1].equipped[1];
-    expect(getPart(bonusItemId).rarity).toBe('rare');
+    expect(shipyardResult.fleet[1].equipped).toEqual(STARTING_FIT.bastion); // same as store — no bonus item
   });
 
   it('every purchasable frame arrives at 0 damage, store or shipyard', () => {
@@ -653,23 +676,14 @@ describe('BUY_SHIP — store vs. shipyard (iteration 33; rarity bonus reworked i
     }
   });
 
-  it('a shipyard purchase grants a bonus item count that scales with the frame\'s rarity level: common=0, rare=1, epic=2, legendary=3', () => {
-    const cases: [Exclude<FrameId, 'cruiser'>, number][] = [
-      ['interceptor', 0], // common
-      ['bastion', 1], // rare
-      ['light-cruiser', 2], // epic
-    ];
-    for (const [frameId, level] of cases) {
+  // 61.1: the new invariant — no rarity-scaled bonus, store or shipyard,
+  // regardless of the frame's own rarity tier.
+  it('a purchase (any rarity tier, store or shipyard) grants exactly STARTING_FIT[frameId] and nothing else', () => {
+    const cases: Exclude<FrameId, 'cruiser'>[] = ['interceptor', 'bastion', 'light-cruiser'];
+    for (const frameId of cases) {
       const state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 999, shopFrameOffers: [frameId] });
       const result = runReducer(state, { type: 'BUY_SHIP', frameId });
-      const ship = result.fleet[1];
-      const startingFitLength = ship.equipped.length - level;
-      expect(startingFitLength).toBeGreaterThanOrEqual(0);
-      const bonusItems = ship.equipped.slice(startingFitLength);
-      expect(bonusItems).toHaveLength(level);
-      for (const id of bonusItems) {
-        expect(getPart(id).rarity).toBe('rare');
-      }
+      expect(result.fleet[1].equipped).toEqual(STARTING_FIT[frameId]);
     }
   });
 
@@ -687,142 +701,109 @@ describe('BUY_SHIP — store vs. shipyard (iteration 33; rarity bonus reworked i
   });
 });
 
-describe('REFIT_SHIP (iteration 52.5, the hull refit)', () => {
-  it('canRefit rejects a store visit — refit is shipyard-only', () => {
+describe('UPGRADE_MARK (iteration 59.3, hull marks — replaces 52.5\'s REFIT_SHIP)', () => {
+  it('canUpgradeMark rejects a store visit — marks are shipyard-only', () => {
     const ship: PlayerShipState = { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] };
-    expect(canRefit({ shopKind: 'store', shopFrameOffers: ['bastion'], act: 1 }, ship, 'bastion')).toBe(false);
+    expect(canUpgradeMark('store', ship)).toBe(false);
+    expect(canUpgradeMark(undefined, ship)).toBe(false);
   });
 
-  it('canRefit rejects the Flagship and a mercenary', () => {
-    const flagship: PlayerShipState = { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] };
+  it('canUpgradeMark rejects a mercenary', () => {
     const merc: PlayerShipState = { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [], mercenary: true };
-    const ctx = { shopKind: 'shipyard' as const, shopFrameOffers: ['light-cruiser' as const], act: 1 as const };
-    expect(canRefit(ctx, flagship, 'light-cruiser')).toBe(false);
-    expect(canRefit(ctx, merc, 'light-cruiser')).toBe(false);
+    expect(canUpgradeMark('shipyard', merc)).toBe(false);
   });
 
-  it('canRefit rejects a target that is not strictly more expensive (sidegrade/downgrade)', () => {
-    // Interceptor (6cr) -> Corvette (8cr, an upgrade) is legal; Corvette -> Interceptor is not.
-    const corvette: PlayerShipState = { frameId: 'corvette', equipped: [], damage: 0, upgrades: [] };
-    const ctx = { shopKind: 'shipyard' as const, shopFrameOffers: ['interceptor' as const], act: 1 as const };
-    expect(canRefit(ctx, corvette, 'interceptor')).toBe(false);
+  it('canUpgradeMark rejects a ship already at mark III (the cap), accepts mark I/II', () => {
+    const markI: PlayerShipState = { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] };
+    const markII: PlayerShipState = { ...markI, mark: 2 };
+    const markIII: PlayerShipState = { ...markI, mark: 3 };
+    expect(canUpgradeMark('shipyard', markI)).toBe(true);
+    expect(canUpgradeMark('shipyard', markII)).toBe(true);
+    expect(canUpgradeMark('shipyard', markIII)).toBe(false);
   });
 
-  it('canRefit rejects a target whose layout cannot hold the ship\'s current equipped set', () => {
-    // Frigate (7cr, `weapon, weapon, universal`) legally carries 3 weapons
-    // today; Bastion (12cr, a real upgrade by cost) is `weapon, defense,
-    // defense` — 1 dedicated weapon slot, no universal overflow — so the
-    // same 3 weapons don't fit it all at once.
-    const ship: PlayerShipState = { frameId: 'frigate', equipped: ['ion', 'ion', 'ion'], damage: 0, upgrades: [] };
-    const ctx = { shopKind: 'shipyard' as const, shopFrameOffers: ['bastion' as const], act: 1 as const };
-    expect(canRefit(ctx, ship, 'bastion')).toBe(false);
+  // Interceptor 6cr: II = ceil(6*0.5)=3, III = ceil(6*0.75)=4.5->5 — the
+  // spec's own worked example.
+  it('markUpgradeCost is ceil(discounted frame cost * 0.5) for mark II, * 0.75 for mark III', () => {
+    expect(markUpgradeCost('interceptor', 2)).toBe(3);
+    expect(markUpgradeCost('interceptor', 3)).toBe(5);
   });
 
-  it('canRefit rejects a legendary target outside act 2, accepts a non-legendary target in act 1', () => {
-    const ship: PlayerShipState = { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] };
-    const act1 = { shopKind: 'shipyard' as const, shopFrameOffers: ['titan' as const, 'gunboat' as const], act: 1 as const };
-    expect(canRefit(act1, ship, 'titan')).toBe(false);
-    expect(canRefit(act1, ship, 'gunboat')).toBe(true);
-    const act2 = { ...act1, act: 2 as const };
-    expect(canRefit(act2, ship, 'titan')).toBe(true);
+  // 2026-08-12 precedent (commit 55e2375): commander hull discounts reach
+  // hull-improvement prices. No shopKind/store multiplier ever applies —
+  // markUpgradeCost never takes one; marks are shipyard-only, full stop.
+  it('markUpgradeCost honours commander hull discounts', () => {
+    // Corvette 8cr -> Admiral's discounted base floor(8*0.75)=6; II = ceil(6*0.5)=3.
+    expect(markUpgradeCost('corvette', 2, 'admiral')).toBe(3);
+    expect(markUpgradeCost('corvette', 2, 'merchant')).toBe(4); // ceil(8*0.5) — no hull discount
   });
 
-  it('canRefit requires the target to actually be in shopFrameOffers, same as BUY_SHIP', () => {
-    const ship: PlayerShipState = { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] };
-    const ctx = { shopKind: 'shipyard' as const, shopFrameOffers: ['gunboat' as const], act: 1 as const };
-    expect(canRefit(ctx, ship, 'bastion')).toBe(false); // not offered, even though it would otherwise be legal
-  });
-
-  it('refitCost is the target frame cost less a trade-in on the current hull (hullScrapValue)', () => {
-    const ship: PlayerShipState = { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] }; // 6cr, scrap 3
-    expect(refitCost(ship, 'corvette')).toBe(8 - 3); // corvette 8cr
-  });
-
-  // 2026-08-12: a refit is a hull acquisition, so commander/protocol hull
-  // pricing applies to it exactly as it does to BUY_SHIP. Before this, the
-  // Admiral paid full list price to refit — making his own commander-screen
-  // line ("Every hull costs 25% less") false on that one path.
-  it('refitCost honours commander hull discounts; the trade-in stays on raw value', () => {
-    const ship: PlayerShipState = { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] }; // scrap 3 either way
-    // Corvette 8cr -> Admiral pays floor(8 * 0.75) = 6, less the 3 trade-in.
-    expect(refitCost(ship, 'corvette', 'admiral')).toBe(6 - 3);
-    expect(refitCost(ship, 'corvette', 'merchant')).toBe(8 - 3); // no hull discount — unchanged
-  });
-
-  it('REFIT_SHIP charges the discounted price for a commander with a hull discount', () => {
+  it('UPGRADE_MARK charges the right price and steps mark 2, then mark 3', () => {
     const fleet: PlayerShipState[] = [
       { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
       { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] },
     ];
-    let state = stateWithMap('shop', {
-      phase: 'shop',
-      shopKind: 'shipyard',
-      credits: 20,
-      fleet,
-      shopFrameOffers: ['corvette'],
-      commanderId: 'admiral',
-    });
-    state = runReducer(state, { type: 'REFIT_SHIP', shipIndex: 1, frameId: 'corvette' });
-    expect(state.fleet[1].frameId).toBe('corvette');
-    expect(state.credits).toBe(20 - (6 - 3)); // discounted, matching what the UI shows
+    let state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 20, fleet });
+    state = runReducer(state, { type: 'UPGRADE_MARK', shipIndex: 1 });
+    expect(state.fleet[1].mark).toBe(2);
+    expect(state.credits).toBe(20 - 3); // interceptor mark II
+    state = runReducer(state, { type: 'UPGRADE_MARK', shipIndex: 1 });
+    expect(state.fleet[1].mark).toBe(3);
+    expect(state.credits).toBe(20 - 3 - 5); // interceptor mark III
   });
 
-  it('REFIT_SHIP applies the refit: new frameId, deducts refitCost, consumes the shipyard offer', () => {
+  it('UPGRADE_MARK refuses at the mark-III cap', () => {
     const fleet: PlayerShipState[] = [
       { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
-      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [], name: 'ISV Test', kills: 2, fightsSurvived: 1 },
+      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [], mark: 3 },
     ];
-    let state = stateWithMap('shop', {
-      phase: 'shop',
-      shopKind: 'shipyard',
-      credits: 20,
-      fleet,
-      shopFrameOffers: ['corvette'],
-    });
-    state = runReducer(state, { type: 'REFIT_SHIP', shipIndex: 1, frameId: 'corvette' });
-    expect(state.fleet[1].frameId).toBe('corvette');
-    expect(state.fleet[1].equipped).toEqual(['ion']); // kept
-    expect(state.fleet[1].name).toBe('ISV Test'); // kept
-    expect(state.fleet[1].kills).toBe(2); // kept
-    expect(state.fleet[1].fightsSurvived).toBe(1); // kept
-    expect(state.credits).toBe(20 - (8 - 3)); // refitCost
-    expect(state.shopFrameOffers).not.toContain('corvette'); // offer consumed, same as BUY_SHIP
+    const state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 999, fleet });
+    const result = runReducer(state, { type: 'UPGRADE_MARK', shipIndex: 1 });
+    expect(result.fleet[1].mark).toBe(3);
+    expect(result.credits).toBe(999);
   });
 
-  it('REFIT_SHIP refuses when credits are short', () => {
+  it('UPGRADE_MARK refuses in a store', () => {
     const fleet: PlayerShipState[] = [
       { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
       { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] },
     ];
-    const state = stateWithMap('shop', {
-      phase: 'shop',
-      shopKind: 'shipyard',
-      credits: 0,
-      fleet,
-      shopFrameOffers: ['corvette'],
-    });
-    const result = runReducer(state, { type: 'REFIT_SHIP', shipIndex: 1, frameId: 'corvette' });
-    expect(result.fleet[1].frameId).toBe('interceptor'); // unchanged
+    const state = stateWithMap('shop', { phase: 'shop', shopKind: 'store', credits: 999, fleet });
+    const result = runReducer(state, { type: 'UPGRADE_MARK', shipIndex: 1 });
+    expect(result.fleet[1].mark).toBeUndefined();
+    expect(result.credits).toBe(999);
+  });
+
+  it('UPGRADE_MARK refuses on a mercenary', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [], mercenary: true },
+    ];
+    const state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 999, fleet });
+    const result = runReducer(state, { type: 'UPGRADE_MARK', shipIndex: 1 });
+    expect(result.fleet[1].mark).toBeUndefined();
+    expect(result.credits).toBe(999);
+  });
+
+  it('UPGRADE_MARK refuses when credits are short', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] },
+    ];
+    const state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 0, fleet });
+    const result = runReducer(state, { type: 'UPGRADE_MARK', shipIndex: 1 });
+    expect(result.fleet[1].mark).toBeUndefined();
     expect(result.credits).toBe(0);
   });
 
-  it('REFIT_SHIP clamps damage so a lower-HP target never kills the ship outright', () => {
-    // Bastion (6 HP) carrying 5 damage, refitting into a Freighter (3 HP,
-    // an upgrade by cost — 18cr > 12cr — despite the lower HP ceiling).
-    const fleet: PlayerShipState[] = [
-      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
-      { frameId: 'bastion', equipped: ['ion'], damage: 5, upgrades: [] },
-    ];
-    const state = stateWithMap('shop', {
-      phase: 'shop',
-      shopKind: 'shipyard',
-      credits: 999,
-      fleet,
-      shopFrameOffers: ['freighter'],
-    });
-    const result = runReducer(state, { type: 'REFIT_SHIP', shipIndex: 1, frameId: 'freighter' });
-    expect(result.fleet[1].frameId).toBe('freighter');
-    expect(result.fleet[1].damage).toBe(2); // clamped to newMaxHp(3) - 1, not the carried-over 5
+  // Unlike the old refit, marks never change frameId — none of the
+  // invariants that forbade refitting the Flagship apply to a field that
+  // doesn't touch frameId at all.
+  it('the Flagship can be marked', () => {
+    const state = stateWithMap('shop', { phase: 'shop', shopKind: 'shipyard', credits: 999 });
+    const result = runReducer(state, { type: 'UPGRADE_MARK', shipIndex: 0 }); // fleet[0] is the Flagship
+    expect(result.fleet[0].frameId).toBe('cruiser');
+    expect(result.fleet[0].mark).toBe(2);
   });
 });
 
@@ -1318,6 +1299,46 @@ describe('reward phase — upgrade pick and LEAVE_REWARD', () => {
     const upgradeId = state.pendingReward!.upgradeOptions!.find((u) => u !== 'spine')!;
     const picked = runReducer(state, { type: 'PICK_UPGRADE', upgradeId, shipIndex: 1 });
     expect(picked.fleet[1].upgrades).toEqual([upgradeId]); // replaced, not stacked
+  });
+});
+
+describe('PICK_UPGRADE — 61.2 Emergency Vectoring redundancy guard', () => {
+  it("rejects 'vectoring' onto an Interceptor (innate jink) — the dispatch is a no-op", () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] }];
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'reward',
+      fleet,
+      pendingReward: { credits: 0, creditsTotal: 0, salvagedParts: [], lostShips: [], upgradeOptions: ['vectoring'] },
+    };
+    const result = runReducer(state, { type: 'PICK_UPGRADE', upgradeId: 'vectoring', shipIndex: 0 });
+    expect(result).toBe(state); // rejected — same state reference, same convention every other guard uses
+    expect(result.fleet[0].upgrades).toEqual([]);
+  });
+
+  it("accepts 'vectoring' onto a Frigate (no innate jink)", () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'frigate', equipped: [], damage: 0, upgrades: [] }];
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'reward',
+      fleet,
+      pendingReward: { credits: 0, creditsTotal: 0, salvagedParts: [], lostShips: [], upgradeOptions: ['vectoring'] },
+    };
+    const result = runReducer(state, { type: 'PICK_UPGRADE', upgradeId: 'vectoring', shipIndex: 0 });
+    expect(result.fleet[0].upgrades).toEqual(['vectoring']);
+  });
+
+  it("REPAIR_CHOOSE overhaul rejects 'vectoring' onto a Valkyrie (innate jink) the same way", () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'valkyrie', equipped: [], damage: 0, upgrades: [] }];
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'repair',
+      fleet,
+      repairUpgradeOptions: ['vectoring'],
+    };
+    const result = runReducer(state, { type: 'REPAIR_CHOOSE', choice: 'overhaul', shipIndex: 0, upgradeId: 'vectoring' });
+    expect(result).toBe(state);
+    expect(result.fleet[0].upgrades).toEqual([]);
   });
 });
 
@@ -2292,13 +2313,15 @@ describe('intel currency income (iteration 7)', () => {
 describe('shop rework (iteration 7): stratified draw + selling', () => {
   // Iteration 41: 6 -> 8 offers (3 weapon / 3 defense / 1 computer-drive /
   // 1 active), keeping pace with the growing weapon/defense pools.
-  it('PICK_NODE into a shop draws exactly 8 offers: 3 weapon, 3 defense (shield/hull), 1 computer-or-drive, 1 active', () => {
+  it('PICK_NODE into a shop draws exactly 8 offers: 3 weapon, 3 defense (shield/hull), 1 systems (computer/drive/reactor), 1 active', () => {
     const state = runReducer(stateWithMap('shop'), { type: 'PICK_NODE', row: 0 });
     const offers = state.shopOffers!.map((id) => getPart(id));
     expect(offers).toHaveLength(8);
     expect(offers.slice(0, 3).every((p) => p.type === 'weapon')).toBe(true);
     expect(offers.slice(3, 6).every((p) => p.type === 'shield' || p.type === 'hull')).toBe(true);
-    expect(offers[6].type === 'computer' || offers[6].type === 'drive').toBe(true);
+    // Iteration 58.4: reactors joined this stratum (renamed SYSTEMS_POOL in
+    // reducer/shop.ts) — 'reactor' is now a third legal type here.
+    expect(['computer', 'drive', 'reactor']).toContain(offers[6].type);
     expect(offers[7].active).toBe(true);
   });
 
@@ -2318,7 +2341,9 @@ describe('shop rework (iteration 7): stratified draw + selling', () => {
       const parts = offers.map((id) => getPart(id));
       expect(parts.slice(0, 3).every((p) => p.type === 'weapon')).toBe(true);
       expect(parts.slice(3, 6).every((p) => p.type === 'shield' || p.type === 'hull')).toBe(true);
-      expect(parts[6].type === 'computer' || parts[6].type === 'drive').toBe(true);
+      // Iteration 58.4: reactors joined this stratum too — see the sibling
+      // test above.
+      expect(['computer', 'drive', 'reactor']).toContain(parts[6].type);
       expect(parts[7].active).toBe(true);
     }
   });
@@ -2546,6 +2571,23 @@ describe('shop ship offers are a random draw (iteration 22.x; store/shipyard spl
       for (const id of store.shopFrameOffers!) {
         expect(getFrame(id).rarity === 'epic' || getFrame(id).rarity === 'legendary').toBe(false);
       }
+    }
+  });
+
+  // Iteration 59.1: the shipyard's own tier identity — "quality hulls"
+  // (rare+epic, legendary in act 2) mirroring the store's "cheap hulls"
+  // (common+rare) exclusion above. Swept across both acts since the
+  // legendary-eligibility gate also touches the pool this filter runs on.
+  it('a shipyard never offers a common hull, across many seeds and both acts', () => {
+    const base = stateWithMap('shipyard');
+    for (let seed = 1; seed <= 30; seed++) {
+      const act1 = runReducer({ ...base, map: { ...base.map, seed } }, { type: 'PICK_NODE', row: 0 });
+      for (const id of act1.shopFrameOffers!) expect(getFrame(id).rarity).not.toBe('common');
+
+      const act2Map = forceNodeType(initialRunState().map, 0, 0, 'shipyard', 2);
+      const act2State: RunState = { ...initialRunState(), phase: 'map', act: 2, map: { ...act2Map, seed } };
+      const act2 = runReducer(act2State, { type: 'PICK_NODE', row: 0 });
+      for (const id of act2.shopFrameOffers!) expect(getFrame(id).rarity).not.toBe('common');
     }
   });
 

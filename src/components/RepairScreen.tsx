@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { shipUpgradeNote } from '../game/ship';
+import { shipUpgradeNote, upgradeRedundantOn } from '../game/ship';
 import type { PlayerShipState } from '../game/types';
 import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
@@ -85,7 +85,12 @@ export function RepairScreen({
                     fleet={fleet}
                     onPick={(i) => onChooseOverhaul(selectedUpgrade, i)}
                     noteFor={shipUpgradeNote}
-                    titleFor={(ship) => shipUpgradeNote(ship) ?? undefined}
+                    // 61.2: same redundancy guard as RewardScreen's picker —
+                    // see its comment.
+                    disabledFor={(ship) => upgradeRedundantOn(ship, selectedUpgrade)}
+                    titleFor={(ship) =>
+                      upgradeRedundantOn(ship, selectedUpgrade) ? 'Already dodges the first hit' : (shipUpgradeNote(ship) ?? undefined)
+                    }
                   />
                 </>
               )}

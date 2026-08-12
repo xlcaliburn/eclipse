@@ -68,12 +68,17 @@ export interface Frame {
   // changes. A trait needing a new engine hook would be a separate,
   // called-out addition, not something to smuggle in here.
   innate?: { name: string; description: string; grants: Partial<ShipStats> };
-  // Iteration 57.1 (ship power budgets): the hull's own generation budget —
-  // a loadout is legal only if sum(part.power) <= this. Values are 52's own
-  // roster table (plans/iteration-52.md's 52.4), reproduced as the
-  // implementation source of truth in plans/iteration-57.md. Enforced in
-  // ship.ts's canEquip/layoutCanHold, never in deriveStats — build-time
-  // only, like slot count.
+  // Iteration 57.1 (ship power budgets): the hull's own INNATE generation
+  // budget — a loadout is legal only if sum(part.power) <= this PLUS
+  // whatever equipped reactors generate (ship.ts's powerBudget, iteration
+  // 58.3). Enforced in ship.ts's canEquip/layoutCanHold, never in
+  // deriveStats — build-time only, like slot count.
+  // Iteration 58.1: standardized to `slotCount + TIER_INDEX[rarity]`
+  // (types.ts) for every frame except Bastion and the Flagship (both
+  // documented exceptions at their own entries below) — replaces 57's 18
+  // hand-tuned numbers (which ran roughly `slots + 2*tier`) now that
+  // reactors (58.2) make up the difference and more for a hull that
+  // chooses to spend a slot on one.
   power: number;
 }
 
@@ -105,8 +110,14 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 4,
     cost: 14,
     rarity: 'common', // never sold — the starting ship, rarity is unused but required
-    power: 10, // plans/iteration-57.md's 57.1 table — the one flat-listed exception, not derived from a tier
-    blurb: 'Roomy workhorse. 6 slots (2 dedicated weapon), slow.',
+    // Iteration 58.1: the Flagship is the roster's OTHER documented
+    // exception (with Bastion below) — formula would say 6+0=6 (its
+    // `rarity` field is a placeholder, "unused but required", so the
+    // formula can't even resolve a tier for it), but it keeps a flat,
+    // hand-set 8 for the same "never sold, not really a tier" reason 57.1
+    // originally flat-listed 10 here.
+    power: 8,
+    blurb: 'Roomy workhorse, slow.',
   },
   interceptor: {
     id: 'interceptor',
@@ -116,7 +127,7 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 2,
     cost: 6,
     rarity: 'common',
-    power: 3,
+    power: 3, // 58.1: slots(3) + TIER_INDEX.common(0) — unchanged by the formula cut
     // 52.3: formalizes what was already a one-off hardcoded check in
     // deriveStats (`if (frameId === 'interceptor') stats.jink = true`) —
     // the zero-behavior-change proof the innate-trait pattern works.
@@ -125,7 +136,7 @@ export const FRAMES: Record<FrameId, Frame> = {
       description: 'Once per combat, the first hit that would land on this ship misses instead.',
       grants: { jink: true },
     },
-    blurb: 'Fast and fragile. 1 weapon, 1 systems, 1 universal slot. Dodges the first hit of each fight.',
+    blurb: 'Fast and fragile — dodges the first hit of each fight.',
   },
   // Iteration 36: reprice 12 -> 9cr. Used to arrive pre-fitted with the
   // lure beacon (a bundled 5cr identity part) — now hulls are pure bases
@@ -153,13 +164,20 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 6,
     cost: 12,
     rarity: 'rare',
+    // Iteration 58.1: Bastion is the ONE frame that deviates from the
+    // `slots + TIER_INDEX[rarity]` formula (which would give 3+1=4) — it
+    // keeps its full pre-58 5, on the same "sealed hull, oversized stock
+    // plant" reasoning that already justifies its zero-universal-slot
+    // exception above: with no systems/universal slots at all, Bastion can
+    // never host a reactor (58.2), so it would otherwise be the one hull
+    // permanently worse off from the innate cut with no way to compensate.
     power: 5,
     innate: {
       name: 'Reactive plating',
       description: 'Negates the first hit this ship takes each combat.',
       grants: { reactiveArmor: 1 },
     },
-    blurb: 'Durable protector. 1 weapon, 2 defense slots, no universal (can\'t carry cargo). Innately shrugs off the first hit each fight.',
+    blurb: 'Durable protector — innately shrugs off the first hit each fight.',
   },
   // 2026-08-06: repriced as the top of a deliberate 3-step progression —
   // "interceptors, then something more midrange, then finally Dreadnoughts
@@ -188,13 +206,13 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 8,
     cost: 30,
     rarity: 'epic',
-    power: 12,
+    power: 10, // 58.1: slots(8) + TIER_INDEX.epic(2)
     innate: {
       name: 'Siege plating',
       description: 'This ship\'s attacks ignore 1 point of enemy piloting.',
       grants: { shieldPierce: 1 },
     },
-    blurb: 'One giant instead of Flagship-plus-escorts. 4 weapon, 2 defense, 2 universal slots. Innately pierces 1 point of enemy piloting.',
+    blurb: 'One giant instead of Flagship-plus-escorts — innately pierces 1 point of enemy piloting.',
   },
   // The midrange step: no gimmick, no cap, priced as the real "second
   // ship" investment between a cheap Interceptor and a premium Dreadnought.
@@ -208,8 +226,8 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 4,
     cost: 22,
     rarity: 'epic',
-    power: 9,
-    blurb: 'No gimmick — the only escort-tier hull that can carry a real multi-weapon loadout. 2 weapon, 2 universal slots.',
+    power: 6, // 58.1: slots(4) + TIER_INDEX.epic(2)
+    blurb: 'No gimmick — the only escort-tier hull that can carry a real multi-weapon loadout.',
   },
   // 5 slots for less than a 3-slot Bastion used to be the exact
   // underpricing this pass corrects — still cheaper than the Cruiser (its
@@ -224,11 +242,12 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 3,
     cost: 18,
     rarity: 'rare',
-    power: 7,
-    blurb: 'Built for freight, not fighting. 1 weapon, 1 systems, 3 universal slots. Arrives fitted with an ion cannon.',
+    power: 6, // 58.1: slots(5) + TIER_INDEX.rare(1)
+    blurb: 'Built for freight, not fighting. Arrives fitted with an ion cannon.',
   },
-  // Iteration 41: 3 -> 4cr, arrives with a Light missile — even the
-  // cheapest hull in the yard can throw one punch.
+  // Iteration 41: 3 -> 4cr, arrives with a weapon — even the cheapest hull
+  // in the yard can throw one punch. 61.3: flipped from light-missile to
+  // ion, the roster's new non-speed-biased default.
   derelict: {
     id: 'derelict',
     name: 'Derelict',
@@ -237,14 +256,20 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 2,
     cost: 4,
     rarity: 'common',
-    power: 2,
-    blurb: 'Barely flight-worthy. 2 universal slots — no dedicated weapon slot at all, the weakest hull in the yard. Arrives fitted with a light missile.',
+    power: 2, // 58.1: slots(2) + TIER_INDEX.common(0) — unchanged by the formula cut
+    blurb: 'Barely flight-worthy — no dedicated weapon slot at all, the weakest hull in the yard. Arrives fitted with an ion cannon.',
   },
 
   // Iteration 36: replaces the five retired support hulls below as the
   // roster's one cheap utility carrier — the natural home for an aura or
   // active part now that those parts are player-assembled, not bundled.
-  // Iteration 41: 6 -> 8cr, a Light missile bundled in.
+  // Iteration 41: 6 -> 8cr, a weapon bundled in. 61.3: the Corvette's
+  // baseInitiative (1) is below the speed-biased threshold, and its
+  // capacitor innate is evasion flavor, not speed — a judgment call
+  // (recorded in plans/iteration-61.md) to flip it to the ion default with
+  // the rest rather than treat it as speed-biased. The old weapon mention
+  // is dropped from the blurb below (60's declutter trimmed to flavor-only
+  // lines; the starting fit is already previewed in the shop card itself).
   // Iteration 52: innate capacitorShield:1 — a free taste of the Piloting
   // capacitor's "cheap, temporary evasion" identity on the roster's own
   // cheap utility hull.
@@ -256,13 +281,13 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 2,
     cost: 8,
     rarity: 'common',
-    power: 4,
+    power: 3, // 58.1: slots(3) + TIER_INDEX.common(0)
     innate: {
       name: 'Piloting capacitor (innate)',
       description: '+1 piloting during the missile phase and the first cannon round only.',
       grants: { capacitorShield: 1 },
     },
-    blurb: 'A cheap, thin utility hull. 2 universal, 1 systems slot. Innate opening-round evasion. Arrives fitted with a light missile.',
+    blurb: 'A cheap, thin utility hull. Innate opening-round evasion.',
   },
 
   // --- Iteration 52: revived (see the FrameId union's own comment) -------
@@ -274,8 +299,8 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 3,
     cost: 7,
     rarity: 'common',
-    power: 3,
-    blurb: 'Twin-gun common escort. 2 weapon, 1 universal slot — more raw guns than an Interceptor, no systems slot at all.',
+    power: 3, // 58.1: slots(3) + TIER_INDEX.common(0) — unchanged by the formula cut
+    blurb: 'Twin-gun common escort — more raw guns than an Interceptor, no systems slot at all.',
   },
   // Legendary — promoted from common (see the FrameId union's own comment).
   // Taunt is normally reserved for the Lure beacon part (52.3's design rule:
@@ -291,13 +316,13 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 10,
     cost: 42,
     rarity: 'legendary',
-    power: 15,
+    power: 10, // 58.1: slots(7) + TIER_INDEX.legendary(3)
     innate: {
       name: 'Aegis field',
       description: 'While this ship is alive, all enemy weapons target it.',
       grants: { taunt: true },
     },
-    blurb: 'The roster\'s wall. 3 defense, 1 weapon, 2 universal, 1 systems slot. Innately draws every enemy shot.',
+    blurb: 'The roster\'s wall — innately draws every enemy shot.',
   },
   tender: {
     id: 'tender',
@@ -307,8 +332,8 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 3,
     cost: 9,
     rarity: 'common',
-    power: 4,
-    blurb: 'Fully universal — 3 slots, build it as anything. No innate; the flexibility is the whole pitch.',
+    power: 3, // 58.1: slots(3) + TIER_INDEX.common(0)
+    blurb: 'Fully universal — build it as anything. No innate; the flexibility is the whole pitch.',
   },
   'ew-cutter': {
     id: 'ew-cutter',
@@ -318,8 +343,8 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 2,
     cost: 8,
     rarity: 'common',
-    power: 4,
-    blurb: 'A computer/drive specialist. 2 systems, 1 universal slot — no dedicated weapon slot.',
+    power: 3, // 58.1: slots(3) + TIER_INDEX.common(0)
+    blurb: 'A computer/drive specialist — no dedicated weapon slot.',
   },
   'disruptor-cutter': {
     id: 'disruptor-cutter',
@@ -329,13 +354,13 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 3,
     cost: 13,
     rarity: 'rare',
-    power: 6,
+    power: 5, // 58.1: slots(4) + TIER_INDEX.rare(1)
     innate: {
       name: 'Point defense (innate)',
       description: 'Cancels 1 enemy missile die each combat.',
       grants: { flak: 1 },
     },
-    blurb: 'EW support hull. 2 systems, 1 defense, 1 universal slot. Innately cancels 1 enemy missile die per fight.',
+    blurb: 'EW support hull. Innately cancels 1 enemy missile die per fight.',
   },
 
   // --- Iteration 52: genuinely new frames ---------------------------------
@@ -347,8 +372,8 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 3,
     cost: 14,
     rarity: 'rare',
-    power: 6,
-    blurb: 'All guns. 3 weapon, 1 universal slot — the roster\'s highest weapon density for its cost.',
+    power: 5, // 58.1: slots(4) + TIER_INDEX.rare(1)
+    blurb: 'All guns — the roster\'s highest weapon density for its cost.',
   },
   destroyer: {
     id: 'destroyer',
@@ -358,8 +383,8 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 5,
     cost: 24,
     rarity: 'epic',
-    power: 10,
-    blurb: 'Fast epic striker. 2 weapon, 1 systems, 2 universal slots, the highest base initiative below Valkyrie.',
+    power: 7, // 58.1: slots(5) + TIER_INDEX.epic(2)
+    blurb: 'Fast epic striker — the highest base initiative below Valkyrie.',
   },
   battleship: {
     id: 'battleship',
@@ -369,8 +394,8 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 7,
     cost: 28,
     rarity: 'epic',
-    power: 11,
-    blurb: 'Heavy epic — 3 weapon, 2 defense, 1 universal slot. No innate; differentiated from the Dreadnought by layout alone.',
+    power: 8, // 58.1: slots(6) + TIER_INDEX.epic(2)
+    blurb: 'Heavy epic. No innate; differentiated from the Dreadnought by layout alone.',
   },
   valkyrie: {
     id: 'valkyrie',
@@ -380,13 +405,13 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 6,
     cost: 38,
     rarity: 'legendary',
-    power: 14,
+    power: 9, // 58.1: slots(6) + TIER_INDEX.legendary(3)
     innate: {
       name: 'Jink',
       description: 'Once per combat, the first hit that would land on this ship misses instead.',
       grants: { jink: true },
     },
-    blurb: 'Legendary striker. 3 weapon, 1 systems, 2 universal slots, the roster\'s fastest base initiative. Innately dodges the first hit each fight.',
+    blurb: 'Legendary striker — the roster\'s fastest base initiative. Innately dodges the first hit each fight.',
   },
   titan: {
     id: 'titan',
@@ -396,13 +421,13 @@ export const FRAMES: Record<FrameId, Frame> = {
     baseHp: 12,
     cost: 48,
     rarity: 'legendary',
-    power: 18,
+    power: 12, // 58.1: slots(9) + TIER_INDEX.legendary(3)
     innate: {
       name: 'Ablative plating (innate)',
       description: '+3 temporary HP each combat, absorbed before real HP.',
       grants: { ablative: 3 },
     },
-    blurb: 'The roster\'s largest hull. 4 weapon, 2 defense, 3 universal slots. Innately shrugs off 3 damage every fight.',
+    blurb: 'The roster\'s largest hull. Innately shrugs off 3 damage every fight.',
   },
 };
 
@@ -440,4 +465,18 @@ export const PURCHASABLE_FRAME_IDS: Exclude<FrameId, 'cruiser'>[] = [
 
 export function getFrame(id: FrameId): Frame {
   return FRAMES[id];
+}
+
+// Iteration 59.3 (hull marks): the class designation a player sees, not the
+// ship's own christened name ("ISV Resolute" — shipNames.ts, untouched by
+// this). Mark I (mark absent/undefined) is the plain frame name; II/III
+// append the roman numeral. One source of truth for every display call site
+// that used to read `getFrame(id).name` directly for a real fleet ship (a
+// frame CARD in a shop offer, which previews a hull nobody owns yet, has no
+// mark to show and keeps reading `.name` directly).
+export function frameDisplayName(frameId: FrameId, mark?: 2 | 3): string {
+  const name = getFrame(frameId).name;
+  if (mark === 2) return `${name} II`;
+  if (mark === 3) return `${name} III`;
+  return name;
 }

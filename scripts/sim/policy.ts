@@ -39,9 +39,16 @@ export interface PolicyConfig {
 // recorded in plans/iteration-52.md's status notes. Interleaving the
 // categories means whatever hull the agent ends up with, the next buy on
 // the list has somewhere to sit.
+// Iteration 58.6: 'reactor2' (Fusion reactor, +5 power for one slot)
+// inserted right after the opening weapon+computer combo, ahead of the
+// epic/legendary buys (comp3/init3/antimatter) further down this list that
+// the shrunk innate budgets (58.1) now actually have to pay for. Kept dumb
+// and honest, per the spec's own instruction — no lookahead, just "buy a
+// reactor early, once, like everything else on this list."
 const BASE_PART_PRIORITY: PartId[] = [
   'plasma',
   'comp2',
+  'reactor2',
   'hull1',
   'plasma',
   'comp3',
@@ -79,7 +86,11 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   },
   'tank-taunt': {
     label: 'Tank-taunt (Bastion + lure)',
-    partPriority: ['lure', 'hull2', 'shield2', 'reactive', 'plasma', 'hull2', 'shield2', 'hull3', 'shield3', 'plasma'],
+    // 58.6: reactor2 after the first 'plasma' — Bastion itself has no
+    // systems/universal slot to carry one (frames.ts's documented
+    // exception), so this only ever lands on Interceptor/Aegis, but the
+    // list stays honest about wanting one when a hull can take it.
+    partPriority: ['lure', 'hull2', 'shield2', 'reactive', 'plasma', 'reactor2', 'hull2', 'shield2', 'hull3', 'shield3', 'plasma'],
     // Aegis (legendary, innate taunt) is this archetype's own doctrine
     // taken to its logical endpoint — added last since it's only ever
     // reachable act-2-shipyard, late.
@@ -90,7 +101,9 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   },
   'alpha-missile': {
     label: 'Alpha-missile (racks + flak)',
-    partPriority: ['missile', 'torpedo', 'flak', 'missile', 'comp2', 'torpedo', 'hull1', 'comp3', 'flak2', 'torpedo'],
+    // 58.6: reactor2 after the opening torpedo — this archetype buys epic
+    // torpedoes/comp3 down the list, same reasoning as BASE_PART_PRIORITY.
+    partPriority: ['missile', 'torpedo', 'reactor2', 'flak', 'missile', 'comp2', 'torpedo', 'hull1', 'comp3', 'flak2', 'torpedo'],
     // Gunboat's 3 dedicated weapon slots are a direct fit for a
     // volume-of-fire doctrine, missile or cannon alike.
     framePriority: ['interceptor', 'corvette', 'gunboat'],
@@ -100,7 +113,9 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   },
   outspeed: {
     label: 'Outspeed (init ladder + drives)',
-    partPriority: ['init3', 'ion', 'comp2', 'init2', 'plasma', 'hull1', 'shield1', 'comp3', 'init2', 'plasma'],
+    // 58.6: reactor2 after the first 'plasma' — same reasoning as the other
+    // epic-buying archetypes above (this one also reaches comp3).
+    partPriority: ['init3', 'ion', 'comp2', 'init2', 'plasma', 'reactor2', 'hull1', 'shield1', 'comp3', 'init2', 'plasma'],
     // Destroyer (epic, base initiative 3 — the highest below Valkyrie) is
     // this archetype's doctrine as a hull identity, not just a part stack.
     framePriority: ['interceptor', 'corvette', 'destroyer'],
@@ -110,6 +125,9 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   },
   wide: {
     label: 'Wide (hull count first)',
+    // 58.6: no reactor2 — this archetype's whole doctrine is cheap common
+    // hulls stacked with ion cannons (power 1 each), never reaching the
+    // epic tier a reactor's headroom would actually be for.
     partPriority: ['ion', 'ion', 'ion', 'ion', 'ion', 'ion', 'comp1', 'hull1', 'comp1', 'hull1'],
     // Derelict (4cr, the cheapest hull in the yard) and Frigate (7cr, twin
     // guns) both fit "as many bodies as credits allow" better than a 2nd
@@ -125,6 +143,11 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
     // game entirely; this archetype's identity is now just "one hull,
     // everything into it," same doctrine minus that one purchase option.
     label: 'Tall (Flagship, single hull)',
+    // 58.6: deliberately no reactor2, per the spec's own naming of this
+    // archetype as a skip — the Flagship's own 4 universal slots are
+    // already the whole budget this doctrine has to spend on real stat
+    // items across its one hull; diverting one to a reactor competes
+    // directly with the items this list is built around, not around it.
     partPriority: ['plasma', 'comp2', 'hull2', 'shield1', 'plasma', 'comp3', 'antimatter', 'init3', 'hull3', 'shield2'],
     framePriority: [], // never buys an escort — everything into the Flagship
     fleetCap: 1,

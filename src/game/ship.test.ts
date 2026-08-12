@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { qualifiesForOutspeed } from './combatEngine';
-import { FRAMES, getFrame } from './frames';
+import { FRAMES, frameDisplayName, getFrame } from './frames';
 import type { FrameId } from './frames';
 import { PARTS, STARTING_LOADOUT } from './parts';
-import { canRefit, STARTING_FIT } from './reducer/shop';
+import { STARTING_FIT } from './reducer/shop';
 import {
   applyRepairBanking,
   canEquip,
+  canUnequip,
   deriveFleetForCombat,
   deriveFleetStats,
   deriveStats,
@@ -14,9 +15,15 @@ import {
   effectiveSlots,
   equipBlockReason,
   equippedPower,
+  equippedPowerGen,
+  powerBudget,
+  unequipBlockReason,
+  upgradeRedundantOn,
+  weaponCeiling,
+  withUpgrade,
 } from './ship';
 import type { PartId, PlayerShipState } from './types';
-import { RARITY_POWER } from './types';
+import { RARITY_POWER, TIER_INDEX } from './types';
 
 function ship(overrides: Partial<PlayerShipState> = {}): PlayerShipState {
   return { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [], ...overrides };
@@ -310,14 +317,72 @@ describe('iteration 52.6 — starting-loadout legality guard', () => {
 
 // --- Iteration 57 (ship power budgets, the "minimal" version) ------------
 describe('iteration 57.1 — part power is rarity-derived', () => {
-  it('every PARTS entry has a power value matching RARITY_POWER[rarity] — table-driven, so a new part cannot be added without one', () => {
+  it('every non-reactor PARTS entry has a power value matching RARITY_POWER[rarity] — table-driven, so a new part cannot be added without one', () => {
+    // Iteration 58.2: reactors are the one deliberate exception (their own
+    // `power` is an explicit 0 override, not rarity-derived) — see the
+    // dedicated table-driven check below for their own invariant.
     for (const part of PARTS) {
+      if (part.type === 'reactor') continue;
       expect(part.power).toBe(RARITY_POWER[part.rarity]);
     }
   });
 });
 
-describe('iteration 57.2 — canEquip/canRefit fold in the power budget', () => {
+// --- Iteration 58.2 (the reactor ladder) — table-driven, so a future
+// reactor addition or accidental powerGen on a non-reactor part fails loud
+// rather than silently. ---
+describe('iteration 58.2 — reactors: power: 0 draw, powerGen set; every other part the reverse', () => {
+  it('every reactor has power: 0 and a positive powerGen', () => {
+    const reactors = PARTS.filter((p) => p.type === 'reactor');
+    expect(reactors).toHaveLength(4);
+    for (const reactor of reactors) {
+      expect(reactor.power).toBe(0);
+      expect(reactor.powerGen).toBeGreaterThan(0);
+    }
+  });
+
+  it('every non-reactor part has powerGen undefined', () => {
+    for (const part of PARTS) {
+      if (part.type === 'reactor') continue;
+      expect(part.powerGen).toBeUndefined();
+    }
+  });
+
+  it('the four reactor ids/rarities/gen values match the spec ladder', () => {
+    const byId = Object.fromEntries(PARTS.filter((p) => p.type === 'reactor').map((p) => [p.id, p]));
+    expect(byId['reactor1']).toMatchObject({ rarity: 'common', powerGen: 3 });
+    expect(byId['reactor2']).toMatchObject({ rarity: 'rare', powerGen: 5 });
+    expect(byId['reactor3']).toMatchObject({ rarity: 'epic', powerGen: 7 });
+    expect(byId['reactor4']).toMatchObject({ rarity: 'legendary', powerGen: 9 });
+  });
+});
+
+// --- Iteration 58.1 (the innate-power formula) ----------------------------
+describe('iteration 58.1 — innate power is slots + TIER_INDEX[rarity], except Bastion and the Flagship', () => {
+  it('every frame matches the formula except the two documented exceptions', () => {
+    for (const frame of Object.values(FRAMES)) {
+      const expected = frame.slotLayout.length + TIER_INDEX[frame.rarity];
+      if (frame.id === 'bastion') {
+        // Reason: zero systems/universal slots (see frames.ts's own
+        // comment) means Bastion can never host a reactor (58.2), so it
+        // keeps its full pre-58 5 rather than the formula's 4 — the one
+        // hull that would otherwise have no way to compensate for the cut.
+        expect(frame.power).toBe(5);
+        expect(frame.power).not.toBe(expected);
+      } else if (frame.id === 'cruiser') {
+        // Reason: the Flagship's `rarity` field is a placeholder ("never
+        // sold... unused but required"), so the formula can't even resolve
+        // a tier for it — it keeps a flat, hand-set 8, same "not really a
+        // tier" exception 57.1 already carved out for this one frame.
+        expect(frame.power).toBe(8);
+      } else {
+        expect(frame.power).toBe(expected);
+      }
+    }
+  });
+});
+
+describe('iteration 57.2 — canEquip folds in the power budget', () => {
   it('rejects an over-budget part and accepts an at-budget one', () => {
     // Derelict: 2 universal slots, power budget 2 (frames.ts). Plasma
     // (rare, power 2) lands exactly on budget; Siege cannon (epic, power 3)
@@ -369,25 +434,6 @@ describe('iteration 57.2 — canEquip/canRefit fold in the power budget', () => 
     expect(canEquip('interceptor', atBudget, 'hull1', ['bay'])).toBe(false);
     expect(equipBlockReason('interceptor', atBudget, 'hull1', ['bay'])).toBe('Not enough power for this part.');
   });
-
-  it('canRefit rejects a target whose power budget cannot run the current loadout, even when the target has room in its slots', () => {
-    // A hand-built ship carrying 2 Antimatter cannons (legendary, power 4
-    // each = 8) — illegal on its own current frame, but canRefit only cares
-    // about the TARGET, so this is a clean way to isolate the power gate.
-    const ship: PlayerShipState = { frameId: 'derelict', equipped: ['antimatter', 'antimatter'], damage: 0, upgrades: [] };
-    const stateBase = { shopKind: 'shipyard' as const, act: 1 as const, protocols: undefined, commanderId: undefined };
-
-    // Corvette (rare... no, common, cost 8, power 4): plenty of SLOT room
-    // (2 weapon-type items overflow into its 2 universal slots cleanly),
-    // but its power budget (4) can't cover the loadout's 8.
-    expect(canRefit({ ...stateBase, shopFrameOffers: ['corvette'] }, ship, 'corvette')).toBe(false);
-
-    // Dreadnought (epic, cost 30, power 12): both slots (4 dedicated weapon
-    // slots) and power (12 >= 8) cover the same loadout — the only
-    // difference from the corvette case above is the power budget, so this
-    // proves the corvette refusal was the power gate, not the slot one.
-    expect(canRefit({ ...stateBase, shopFrameOffers: ['dreadnought'] }, ship, 'dreadnought')).toBe(true);
-  });
 });
 
 describe('iteration 57.5 — starting-loadout power-budget guard (extends 52.6)', () => {
@@ -404,5 +450,162 @@ describe('iteration 57.5 — starting-loadout power-budget guard (extends 52.6)'
 
   it("STARTING_LOADOUT is within the Flagship's power budget", () => {
     expect(equippedPower(STARTING_LOADOUT)).toBeLessThanOrEqual(getFrame('cruiser').power);
+  });
+});
+
+// --- Iteration 58.3 (reactors: the power budget helper + the new UNEQUIP
+// guard) ---------------------------------------------------------------
+describe('iteration 58.3 — powerBudget: innate + equipped reactor generation', () => {
+  it('innate only, no reactors equipped', () => {
+    expect(powerBudget('interceptor', [])).toBe(getFrame('interceptor').power);
+    expect(powerBudget('interceptor', ['ion', 'comp1'])).toBe(getFrame('interceptor').power);
+  });
+
+  it('one reactor adds its own powerGen on top of innate', () => {
+    expect(powerBudget('interceptor', ['reactor1'])).toBe(getFrame('interceptor').power + 3);
+    expect(equippedPowerGen(['reactor1'])).toBe(3);
+  });
+
+  it('stacked reactors add cumulatively (pure arithmetic — slot legality is a separate question)', () => {
+    expect(powerBudget('interceptor', ['reactor1', 'reactor2'])).toBe(getFrame('interceptor').power + 3 + 5);
+    expect(equippedPowerGen(['reactor1', 'reactor2'])).toBe(8);
+  });
+
+  it('bonus slots (bay/Lone flagship/Warlord) still grant slots, not power — re-asserted under the 58 budgets', () => {
+    // Same interceptor-at-budget setup as the 57.2 test above, restated
+    // directly against powerBudget rather than getFrame(...).power, so this
+    // holds independently of that test's internals.
+    const atBudget: PartId[] = ['ion', 'comp1', 'shield1'];
+    expect(powerBudget('interceptor', atBudget)).toBe(getFrame('interceptor').power);
+    expect(canEquip('interceptor', atBudget, 'hull1', ['bay'])).toBe(false);
+  });
+});
+
+describe('iteration 58.2/58.3 — canEquip: a part illegal on innate alone becomes legal once a reactor is equipped', () => {
+  it('Antimatter cannon (legendary, draw 4) fails on a bare Interceptor (innate budget 3) but fits once a Fission reactor is equipped', () => {
+    expect(canEquip('interceptor', [], 'antimatter', [])).toBe(false);
+    expect(canEquip('interceptor', ['reactor1'], 'antimatter', [])).toBe(true);
+  });
+
+  it('reactors are accepted in systems and universal slots', () => {
+    expect(canEquip('interceptor', [], 'reactor1', [])).toBe(true); // systems slot
+    expect(canEquip('derelict', [], 'reactor1', [])).toBe(true); // universal-only layout
+  });
+
+  it('reactors are rejected on a W/D-only layout — Bastion (no systems or universal slot) cannot host one', () => {
+    expect(canEquip('bastion', [], 'reactor1', [])).toBe(false);
+    expect(equipBlockReason('bastion', [], 'reactor1', [])).toBe('No free systems slot for this part.');
+  });
+});
+
+describe('iteration 58.3 — the UNEQUIP guard (canUnequip / unequipBlockReason)', () => {
+  it('refuses to remove a reactor whose generation the remaining loadout is relying on', () => {
+    // light-cruiser (Cruiser): innate 6, layout W W U U. Two Antimatter
+    // cannons (draw 4 each = 8) plus a Fusion reactor (+5) in a universal
+    // slot is legal (draw 8 <= budget 11) — but the loadout alone needs
+    // more than the frame's own innate 6, so pulling the reactor back out
+    // would strand it.
+    const equipped: PartId[] = ['reactor2', 'antimatter', 'antimatter'];
+    expect(equippedPower(equipped)).toBe(8);
+    expect(powerBudget('light-cruiser', equipped)).toBe(11);
+    expect(canUnequip('light-cruiser', equipped, 'reactor2')).toBe(false);
+    expect(unequipBlockReason('light-cruiser', equipped, 'reactor2')).toBe(
+      'Shut down equipment first — removing this reactor would leave the ship over budget.',
+    );
+  });
+
+  it('allows removing a reactor when the remaining draw still fits the frame\'s own innate budget', () => {
+    const equipped: PartId[] = ['reactor2', 'ion'];
+    expect(canUnequip('light-cruiser', equipped, 'reactor2')).toBe(true);
+    expect(unequipBlockReason('light-cruiser', equipped, 'reactor2')).toBeNull();
+  });
+
+  it('never blocks removing a NON-reactor part on power grounds — only a reactor\'s own removal can shrink the budget', () => {
+    const equipped: PartId[] = ['reactor2', 'antimatter', 'antimatter'];
+    expect(canUnequip('light-cruiser', equipped, 'antimatter')).toBe(true);
+  });
+});
+
+// --- Iteration 59.3 (hull marks, replacing 52.5's refit) ------------------
+describe('iteration 59.3 — hull marks: +1 universal slot per mark, stacking, no power', () => {
+  it('effectiveSlotLayout grows by one universal slot per mark, cumulative (II = +1, III = +2)', () => {
+    const markI = effectiveSlotLayout('interceptor', []);
+    const markII = effectiveSlotLayout('interceptor', [], undefined, undefined, 2);
+    const markIII = effectiveSlotLayout('interceptor', [], undefined, undefined, 3);
+    expect(markII.length).toBe(markI.length + 1);
+    expect(markIII.length).toBe(markI.length + 2);
+    expect(markII.filter((k) => k === 'universal').length).toBe(
+      markI.filter((k) => k === 'universal').length + 1,
+    );
+  });
+
+  it('stacks with bay/Lone-flagship/Warlord bonus slots', () => {
+    const withoutMark = effectiveSlotLayout('cruiser', ['bay'], ['lone-flagship'], 'warlord');
+    const withMark = effectiveSlotLayout('cruiser', ['bay'], ['lone-flagship'], 'warlord', 2);
+    expect(withMark.length).toBe(withoutMark.length + 1);
+  });
+
+  it('raises the weapon ceiling by 1 per mark, same mechanism a bay does — no special-casing', () => {
+    const base = weaponCeiling(effectiveSlotLayout('interceptor', []));
+    const marked = weaponCeiling(effectiveSlotLayout('interceptor', [], undefined, undefined, 2));
+    expect(marked).toBe(base + 1);
+  });
+
+  it('a mark slot carries no power (58\'s granted-slot rule): the block reason shifts from "no slots" to "no power" once marked, never to a legal equip', () => {
+    // Interceptor (power budget 3): ion + comp1 + shield1 fills all 3 base
+    // slots AND the power budget at once.
+    const atBudget: PartId[] = ['ion', 'comp1', 'shield1'];
+    expect(equipBlockReason('interceptor', atBudget, 'hull1', [])).toBe('Ship is full — no empty slots.');
+    // Marked: the 4th (universal) slot is real — the reason shifts to power,
+    // proving the slot itself is usable — but the mark grants no power of
+    // its own, so a 4th part (even a cheap common) is still refused.
+    expect(equipBlockReason('interceptor', atBudget, 'hull1', [], undefined, undefined, 2)).toBe(
+      'Not enough power for this part.',
+    );
+    expect(powerBudget('interceptor', atBudget)).toBe(getFrame('interceptor').power); // unmoved by the mark
+  });
+
+  it('the Flagship can be marked — a mark never changes frameId, so none of the old refit\'s Flagship invariants apply', () => {
+    const base = effectiveSlots('cruiser', []);
+    const marked = effectiveSlots('cruiser', [], undefined, undefined, 2);
+    expect(marked).toBe(base + 1);
+  });
+});
+
+describe('iteration 59.3 — frameDisplayName', () => {
+  it('mark I (absent) is the plain frame name; II/III append the roman numeral', () => {
+    expect(frameDisplayName('interceptor')).toBe('Interceptor');
+    expect(frameDisplayName('interceptor', 2)).toBe('Interceptor II');
+    expect(frameDisplayName('interceptor', 3)).toBe('Interceptor III');
+    expect(frameDisplayName('cruiser', 3)).toBe('Flagship III'); // the Flagship's display name is "Flagship", not "Cruiser"
+  });
+});
+
+// 61.2: Emergency Vectoring — the augment that grants `jink` to a hull
+// that doesn't already have it innately.
+describe('iteration 61.2 — Emergency Vectoring (the "vectoring" augment)', () => {
+  it("deriveStats grants jink from the 'vectoring' upgrade", () => {
+    expect(deriveStats('cruiser', [], []).jink).toBeFalsy();
+    expect(deriveStats('cruiser', [], ['vectoring']).jink).toBe(true);
+    // A non-jink hull with an unrelated upgrade stays without jink.
+    expect(deriveStats('frigate', [], ['spine']).jink).toBeFalsy();
+  });
+
+  it('upgradeRedundantOn flags vectoring on an innate-jink hull (Interceptor, Valkyrie) and only vectoring', () => {
+    expect(upgradeRedundantOn(ship({ frameId: 'interceptor' }), 'vectoring')).toBe(true);
+    expect(upgradeRedundantOn(ship({ frameId: 'valkyrie' }), 'vectoring')).toBe(true);
+    // Bastion has an innate (reactive plating), but not jink specifically —
+    // not redundant.
+    expect(upgradeRedundantOn(ship({ frameId: 'bastion' }), 'vectoring')).toBe(false);
+    expect(upgradeRedundantOn(ship({ frameId: 'frigate' }), 'vectoring')).toBe(false);
+    // Any OTHER upgrade is never flagged redundant, even on a jink hull.
+    expect(upgradeRedundantOn(ship({ frameId: 'interceptor' }), 'spine')).toBe(false);
+  });
+
+  it('withUpgrade no-ops (does not add the upgrade) when the target is redundant; applies normally otherwise', () => {
+    const interceptor = ship({ frameId: 'interceptor' });
+    expect(withUpgrade(interceptor, 'vectoring').upgrades).toEqual([]);
+    const frigate = ship({ frameId: 'frigate' });
+    expect(withUpgrade(frigate, 'vectoring').upgrades).toEqual(['vectoring']);
   });
 });

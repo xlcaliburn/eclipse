@@ -18,7 +18,12 @@ import type { UpgradeId } from './upgrades';
 // but never a runtime one.
 export type { PartId };
 
-export type PartType = 'weapon' | 'computer' | 'shield' | 'hull' | 'drive' | 'cargo';
+// Iteration 58.2: 'reactor' joins the roster — a part that GENERATES power
+// (Part.powerGen) instead of drawing it, routed into systems/universal
+// slots like any other part (ship.ts's slotKindForPartType), deliberately
+// not a dedicated slot kind of its own — see frames.ts/ship.ts for the
+// full reasoning.
+export type PartType = 'weapon' | 'computer' | 'shield' | 'hull' | 'drive' | 'cargo' | 'reactor';
 
 export type WeaponKind = 'cannon' | 'missile';
 
@@ -34,6 +39,14 @@ export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
 // ship.test.ts's table-driven check that every part's power matches its own
 // rarity.
 export const RARITY_POWER: Record<Rarity, number> = { common: 1, rare: 2, epic: 3, legendary: 4 };
+
+// Iteration 58.1: a frame's standardized INNATE power budget is
+// `slotCount + TIER_INDEX[rarity]` (Bastion and the Flagship are the two
+// documented exceptions — see frames.ts). Shared here (not just inlined in
+// frames.ts's literals) so ship.test.ts's formula-guard test has one source
+// of truth to check every frame against, independent of the literals it's
+// verifying.
+export const TIER_INDEX: Record<Rarity, number> = { common: 0, rare: 1, epic: 2, legendary: 3 };
 
 export interface Part {
   id: PartId;
@@ -52,6 +65,14 @@ export interface Part {
   // Never read by deriveStats/the combat engine — power is a build-time
   // constraint only, same as slot count.
   power: number;
+  // Iteration 58.2: what this part GENERATES, added to its ship's power
+  // budget (ship.ts's powerBudget) — the mirror of `power` above. Only the
+  // four reactor parts (parts.ts) set this; every other part leaves it
+  // undefined (asserted table-driven in ship.test.ts). A reactor's own
+  // `power` (draw) is explicitly 0 — it's a producer, not a consumer, the
+  // same override precedent the commodity lot already established for
+  // "this part doesn't compete for the budget it also isn't part of."
+  powerGen?: number;
   // Weapon parts fire `diceCount` dice of `damage` each, in the given phase.
   // `selfDamageOnNatOne` (rift cannon): a natural 1 does not miss — it deals
   // that much direct damage to the firing ship instead. `shieldPierce` here
@@ -234,6 +255,19 @@ export interface PlayerShipState {
   // fight (deriveFleetForCombat) and cleared the moment that fight starts
   // (reducer.ts's ENGAGE), so it can never carry into a second fight.
   overRepairBank?: number;
+  // Iteration 59.3 (hull marks, replacing 52.5's refit): absent means mark
+  // I (a plain ship) — the common case, so no pre-59 save or fixture needs
+  // touching. Set only by UPGRADE_MARK (shipyard-only, reducer/shop.ts),
+  // I -> II -> III, III is the cap. Each step grants +1 universal slot,
+  // folded into ship.ts's effectiveSlotLayout alongside the bay/Lone-
+  // flagship/Warlord bonus slots — and, per iteration 58's granted-slot
+  // rule, no power of its own (a marked-up ship wants a reactor to fill
+  // what the extra slot buys). Mercenaries are never marked (BUY_MERCENARY
+  // never sets this, UPGRADE_MARK refuses a mercenary ship). frameId is
+  // untouched by a mark, so the Flagship CAN be marked ("Flagship II") —
+  // none of the old refit's Flagship invariants applied to a field that
+  // never changes frameId.
+  mark?: 2 | 3;
 }
 
 // Iteration 18: run-wide counters for the end-screen summary and the daily
@@ -405,13 +439,6 @@ export interface RunState {
   pendingReward?: RewardSummary;
   shopOffers?: PartId[]; // parts currently for sale — a shipyard visit sets this to [] (no parts, still "present")
   shopFrameOffers?: Exclude<FrameId, 'cruiser'>[]; // ships currently for sale — a random subset, drawn per visit
-  // 2026-08-07: each shipyard offer's rarity bonus (bonus rare-tier
-  // items), pre-rolled the same moment as shopFrameOffers rather than at
-  // purchase time — so ShopScreen can show the ACTUAL item(s) a purchase
-  // will grant, not just a count, with no chance the preview drifts from
-  // what BUY_SHIP later applies. Absent for a store visit (always common,
-  // no bonus — nothing to preview).
-  shopFrameBonusPreview?: Partial<Record<FrameId, { items: PartId[] }>>;
   // Iteration 33 (2026-08-07): which trade-station flavor this shop visit
   // is — set in PICK_NODE from the node's type ('shop' -> 'store',
   // 'shipyard' -> 'shipyard'), cleared on LEAVE_SHOP. Absent means a save

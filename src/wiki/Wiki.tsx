@@ -164,8 +164,11 @@ function PartsTable({ parts }: { parts: Part[] }) {
               <td className="wiki-num">{p.cost}cr</td>
               {/* Iteration 57.1: rarity-derived (common 1 / rare 2 / epic 3
                   / legendary 4) — shown alongside cost, same pairing
-                  PartCard uses in the shop. */}
-              <td className="wiki-num">{p.power}</td>
+                  PartCard uses in the shop. Iteration 58.2: a reactor
+                  GENERATES rather than draws (its own `power` is an
+                  explicit 0 override) — shown as "+N" here too, same
+                  distinction PartCard's price row makes. */}
+              <td className="wiki-num">{p.type === 'reactor' ? `+${p.powerGen}` : p.power}</td>
               <td>{p.description}</td>
             </tr>
           ))}
@@ -232,6 +235,9 @@ const PART_TYPE_SECTIONS: { title: string; types: Part['type'][] }[] = [
   { title: 'Piloting & defenses', types: ['shield'] },
   { title: 'Hull', types: ['hull'] },
   { title: 'Drives', types: ['drive'] },
+  // Iteration 58.2: reactors — the shop's systems stratum, generation not
+  // draw (see PartsTable's own comment on the Power column above).
+  { title: 'Reactors', types: ['reactor'] },
 ];
 
 export function Wiki() {
@@ -286,6 +292,19 @@ export function Wiki() {
               beacon) overrides everything; cloaked ships can't be targeted while a non-cloaked ally lives.
             </li>
             <li>
+              <strong>Power:</strong> every equipped part except a reactor draws power (rarity-derived: common 1 /
+              rare 2 / epic 3 / legendary 4); a loadout is legal only while its total draw stays within the hull's
+              budget. That budget starts at the hull's own innate generation (the Hulls table's "Power (innate)"
+              column) and grows by whatever's equipped in a systems or universal slot from the Reactors section
+              below — a reactor is a slot that isn't a gun, not a separate mandatory fitting.
+            </li>
+            <li>
+              <strong>Hull marks:</strong> at a shipyard, a ship (any hull, including the Flagship — mercenaries
+              excluded) can be permanently upgraded a mark, I to II to III, each step granting +1 universal slot (no
+              extra power — bring a reactor to actually fill it). Priced off the hull's own cost, escalating: mark
+              II costs half, mark III three-quarters.
+            </li>
+            <li>
               <strong>Fleet cap:</strong> {MAX_FLEET_SIZE} ships. Your starting Flagship is the only hull that can
               never be re-bought — protect it (if it dies while the fleet survives, one paid recovery is offered).
             </li>
@@ -316,7 +335,7 @@ export function Wiki() {
                   <th>Rarity</th>
                   <th>Cost</th>
                   <th>Slots</th>
-                  <th>Power</th>
+                  <th>Power (innate)</th>
                   <th>HP</th>
                   <th>INIT</th>
                   <th>Weapon cap</th>
@@ -351,7 +370,11 @@ export function Wiki() {
                           bare number here (not the pip meter, which reads
                           as "used/budget" for a specific loadout) since
                           there's no specific build to show usage against
-                          in a reference table. */}
+                          in a reference table. Iteration 58.1: relabeled
+                          "Power (innate)" — this column is now only HALF
+                          the story (a reactor in a systems/universal slot
+                          adds to it, see the Reactors section and the note
+                          below), so the header says so explicitly. */}
                       <td className="wiki-num">{f.power}</td>
                       <td className="wiki-num">{f.baseHp}</td>
                       <td className="wiki-num">{f.baseInitiative}</td>

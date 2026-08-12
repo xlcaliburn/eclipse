@@ -5,7 +5,7 @@ import { getUpgrade } from '../game/upgrades';
 import type { UpgradeId } from '../game/upgrades';
 import { PartCard } from './PartCard';
 import { ShipPickRow } from './ShipPickRow';
-import { shipUpgradeNote } from '../game/ship';
+import { shipUpgradeNote, upgradeRedundantOn } from '../game/ship';
 
 interface RewardScreenProps {
   reward: RewardSummary;
@@ -82,7 +82,13 @@ export function RewardScreen({ reward, fleet, onPickUpgrade, onLeave }: RewardSc
                 fleet={fleet}
                 onPick={(i) => onPickUpgrade(selectedUpgrade, i)}
                 noteFor={shipUpgradeNote}
-                titleFor={(ship) => shipUpgradeNote(ship) ?? undefined}
+                // 61.2: a ship whose frame innately grants Jink (Interceptor,
+                // Valkyrie) can't take Emergency Vectoring — same redundancy
+                // guard the reducer itself rejects the pick with.
+                disabledFor={(ship) => upgradeRedundantOn(ship, selectedUpgrade)}
+                titleFor={(ship) =>
+                  upgradeRedundantOn(ship, selectedUpgrade) ? 'Already dodges the first hit' : (shipUpgradeNote(ship) ?? undefined)
+                }
               />
             </>
           )}

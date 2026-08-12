@@ -1,4 +1,4 @@
-export type UpgradeId = 'spine' | 'reactor' | 'lattice' | 'drives' | 'autoloader' | 'regen' | 'bay';
+export type UpgradeId = 'spine' | 'reactor' | 'lattice' | 'drives' | 'autoloader' | 'regen' | 'bay' | 'vectoring';
 
 export interface Upgrade {
   id: UpgradeId;
@@ -25,6 +25,17 @@ export const UPGRADES: Upgrade[] = [
   { id: 'autoloader', name: 'Autoloader', description: '+1 cannon die (1 dmg)' },
   { id: 'regen', name: 'Regenerative plating', description: 'Repairs 1 damage after each fight won' },
   { id: 'bay', name: 'Expansion bay', description: '+1 part slot on this ship (stacks, capped at 8 total)' },
+  // 61.2 (user direction): the dodge, standardized into an earnable augment
+  // for hulls that don't already have it innately (Interceptor, Valkyrie
+  // keep innate Jink verbatim — see frames.ts). Named "Emergency Vectoring"
+  // rather than "Evasive Maneuvers" specifically to avoid blurring with the
+  // existing Evasive pattern (fleet order), Evasion suite (part), and
+  // Evasive doctrine (counter-protocol) — a deliberate naming choice, not
+  // an oversight. jink is a boolean (ship.ts's deriveStats upgrade loop),
+  // so this is a dead pick on a hull whose frame already grants it —
+  // ship.ts's `upgradeRedundantOn` is the one shared guard every
+  // withUpgrade call site (and the UI pickers) check against.
+  { id: 'vectoring', name: 'Emergency Vectoring', description: 'Once per combat, the first hit that would land on this ship misses instead.' },
 ];
 
 const UPGRADES_BY_ID: Record<UpgradeId, Upgrade> = Object.fromEntries(

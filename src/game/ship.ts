@@ -1,6 +1,6 @@
 import type { CommanderId } from './commanders';
 import type { PlayerFleetInput } from './combatEngine';
-import { getFrame } from './frames';
+import { frameDisplayName, getFrame } from './frames';
 import type { FrameId, SlotKind } from './frames';
 import { getPart } from './parts';
 import { hasProtocol } from './protocols';
@@ -8,18 +8,27 @@ import type { ProtocolId } from './protocols';
 import type { PartId, PartType, PlayerShipState, ShipStats } from './types';
 import { getUpgrade } from './upgrades';
 import type { UpgradeId } from './upgrades';
+import { removeOnce } from './util';
 
 // --- Iteration 52.1: typed slots ------------------------------------------
 // Which slot kind a given PartType is accepted by. 'cargo' (the commodity
 // lot) is deliberately absent — it's universal-only (see countParts below),
 // never mapped to a dedicated kind, so it always draws from the shared
 // universal pool.
+// Iteration 58.2: reactors route into 'systems' — deliberately NOT a
+// dedicated 'reactor' slot kind (57's own parenthetical sketched one, but
+// that would re-layout all 18 hulls and make a reactor a mandatory fill
+// rather than a real choice against computer/drive parts for the same
+// socket). A reactor competing with a computer/drive for the same slot is
+// exactly the Eclipse tension the user asked for — a reactor is a slot
+// that isn't a gun.
 const PART_TYPE_SLOT_KIND: Partial<Record<PartType, Exclude<SlotKind, 'universal'>>> = {
   weapon: 'weapon',
   shield: 'defense',
   hull: 'defense',
   computer: 'systems',
   drive: 'systems',
+  reactor: 'systems',
 };
 
 // Exported for the UI (SlotRow.tsx greedily assigns each equipped part to
@@ -161,6 +170,14 @@ export function deriveStats(
       case 'autoloader':
         stats.cannons.push({ diceCount: 1, damage: 1 });
         break;
+      // 61.2: Emergency Vectoring — the combat engine already consumes
+      // `jink` (Interceptor/Valkyrie's innate), so this is the entire
+      // engine-facing change; the redundancy guard (upgradeRedundantOn,
+      // below) is what keeps it from ever landing on a hull that already
+      // has jink innately.
+      case 'vectoring':
+        stats.jink = true;
+        break;
       // 'regen' is reducer-level (applied when a reward is computed) — it
       // has no combat-stat effect.
       default:
@@ -290,7 +307,27 @@ export function upgradeCapFor(ship: PlayerShipState, commanderId: CommanderId | 
   return commanderId === 'warlord' && ship.frameId === 'cruiser' ? 3 : 1;
 }
 
+// 61.2: the one shared place every 'vectoring' redundancy check goes
+// through — jink is a boolean, so granting it a second time (via the
+// augment) to a hull whose frame innate already grants it (Interceptor,
+// Valkyrie — frames.ts) is a dead pick. Exported so PICK_UPGRADE/
+// REPAIR_CHOOSE's overhaul branch (reducer.ts) can reject the dispatch
+// outright (a real "invalid pick," same as any other guard in this
+// codebase) and the UI target pickers (RewardScreen, RepairScreen) can
+// disable the option before it's ever dispatched — same predicate, not
+// three reimplementations of "does this frame innately grant jink."
+export function upgradeRedundantOn(ship: PlayerShipState, upgradeId: UpgradeId): boolean {
+  return upgradeId === 'vectoring' && getFrame(ship.frameId).innate?.grants.jink === true;
+}
+
 export function withUpgrade(ship: PlayerShipState, upgradeId: UpgradeId, commanderId?: CommanderId): PlayerShipState {
+  // 61.2: a no-op safety net for the withUpgrade paths that draw the
+  // upgrade randomly (INTERLUDE_CHOOSE, the Warlord's CHOOSE_COMMANDER
+  // pick) rather than the player choosing 'vectoring' outright — those
+  // can't "reject the dispatch" the way PICK_UPGRADE/REPAIR_CHOOSE do
+  // (the player already committed to a ship, not an upgrade), so the
+  // redundant grant is simply skipped rather than applied uselessly.
+  if (upgradeRedundantOn(ship, upgradeId)) return ship;
   const cap = upgradeCapFor(ship, commanderId);
   return { ...ship, upgrades: [...ship.upgrades, upgradeId].slice(-cap) };
 }
@@ -335,17 +372,28 @@ export function formatStatLine(stats: ShipStats, damage?: number): string {
 // appended as 'universal'. `effectiveSlots` below stays a thin `.length`
 // wrapper so every "how many empty slots" call site keeps compiling
 // unchanged.
+// Iteration 59.3 (hull marks, replacing 52.5's refit): `mark` (2 | 3,
+// absent = mark I) adds its own bonus slots on top of bay/Lone-flagship/
+// Warlord — `mark - 1` universal slots, so mark II is +1 and mark III is
+// +2 (cumulative: going I -> II -> III grants +1 each step). Marks don't
+// change frameId, so a marked Flagship stacks with Lone-flagship/Warlord's
+// own frameId==='cruiser' bonuses same as any other bonus source here —
+// no special-casing needed. Threaded as a trailing optional param (not a
+// full ship object) so every existing positional call site keeps compiling
+// unchanged; only the few that actually have a marked ship in hand pass it.
 export function effectiveSlotLayout(
   frameId: FrameId,
   upgrades: UpgradeId[],
   protocols?: ProtocolId[],
   commanderId?: CommanderId,
+  mark?: 2 | 3,
 ): SlotKind[] {
   const frame = getFrame(frameId);
   const bayCount = upgrades.filter((u) => u === 'bay').length;
   const lonelyFlagshipBonus = frameId === 'cruiser' && hasProtocol(protocols, 'lone-flagship') ? 2 : 0;
   const warlordBonus = frameId === 'cruiser' && commanderId === 'warlord' ? 1 : 0;
-  const bonusSlots = bayCount + lonelyFlagshipBonus + warlordBonus;
+  const markBonus = mark ? mark - 1 : 0;
+  const bonusSlots = bayCount + lonelyFlagshipBonus + warlordBonus + markBonus;
   return [...frame.slotLayout, ...(Array(bonusSlots).fill('universal') as SlotKind[])];
 }
 
@@ -354,8 +402,9 @@ export function effectiveSlots(
   upgrades: UpgradeId[],
   protocols?: ProtocolId[],
   commanderId?: CommanderId,
+  mark?: 2 | 3,
 ): number {
-  return effectiveSlotLayout(frameId, upgrades, protocols, commanderId).length;
+  return effectiveSlotLayout(frameId, upgrades, protocols, commanderId, mark).length;
 }
 
 // The most weapons a layout can ever carry — its dedicated weapon slots
@@ -371,11 +420,34 @@ export function weaponCeiling(layout: SlotKind[]): number {
 
 // Iteration 57.2: total power drawn by an equipped set — the sum of each
 // part's rarity-derived Part.power (types.ts). Exported for the UI's power
-// meter (ship cards) alongside `getFrame(frameId).power` for the budget
-// half of "used / budget". Never reaches deriveStats/the combat engine —
-// power is a build-time constraint only, same as slot count.
+// meter (ship cards) alongside `powerBudget` (58.3) for the budget half of
+// "used / budget". Never reaches deriveStats/the combat engine — power is a
+// build-time constraint only, same as slot count. Reactors draw 0 (their
+// `power` override, parts.ts), so they never count against this sum.
 export function equippedPower(equipped: PartId[]): number {
   return equipped.reduce((sum, id) => sum + getPart(id).power, 0);
+}
+
+// Iteration 58.3: the portion of a budget contributed by equipped reactors
+// specifically — split out from powerBudget below so the UI can show "+N
+// from reactors" without re-deriving the frame's own innate number a
+// second time (FleetPanel/FleetOverlay/ShipyardMarkSection all want both
+// halves separately, not just the sum).
+export function equippedPowerGen(equipped: PartId[]): number {
+  return equipped.reduce((sum, id) => sum + (getPart(id).powerGen ?? 0), 0);
+}
+
+// Iteration 58.3: `frame.power` (innate) is no longer the whole budget —
+// equipped reactors add to it. Every budget consumer, build-time gate
+// (layoutFeasibility below) and UI display alike, must call this rather
+// than reading `getFrame(id).power` directly, or a reactor's grant would
+// silently not display/enforce. Deliberately NOT `effectiveSlotLayout`'s
+// bonus-slot-aware layout — a bay/Lone-flagship/Warlord bonus slot could
+// itself HOLD a reactor (ordinary equip legality), but the bonus slot's
+// mere existence grants no power of its own, same asymmetry
+// effectiveSlotLayout's own comment already documents for the slot side.
+export function powerBudget(frameId: FrameId, equipped: PartId[]): number {
+  return getFrame(frameId).power + equippedPowerGen(equipped);
 }
 
 interface LayoutFeasibility {
@@ -393,8 +465,9 @@ function layoutFeasibility(
   upgrades: UpgradeId[],
   protocols?: ProtocolId[],
   commanderId?: CommanderId,
+  mark?: 2 | 3,
 ): LayoutFeasibility {
-  const slots = countSlotLayout(effectiveSlotLayout(frameId, upgrades, protocols, commanderId));
+  const slots = countSlotLayout(effectiveSlotLayout(frameId, upgrades, protocols, commanderId, mark));
   const parts = countParts(equipped);
   const overflow =
     Math.max(0, parts.weapon - slots.weapon) +
@@ -403,19 +476,20 @@ function layoutFeasibility(
     parts.cargo;
   return {
     slotOk: overflow <= slots.universal,
-    // 57.2: the power budget is the frame's own flat `power` field only —
+    // 57.2/58.3: the power budget is the frame's own innate `power` field
+    // PLUS whatever's equipped in `equipped` generates (powerBudget) —
     // deliberately NOT effectiveSlotLayout's bonus-slot-inflated layout.
-    // Bonus slots (bay upgrades, Lone flagship, Warlord) grant room but not
-    // generation capacity; see effectiveSlotLayout's own comment for the
-    // matching asymmetry on the slot side. Someone will eventually read
-    // "a bay upgrade doesn't add power" as a bug — it isn't.
-    powerOk: equippedPower(equipped) <= getFrame(frameId).power,
+    // Bonus slots (bay upgrades, Lone flagship, Warlord, and — 59.3 — a
+    // hull mark) grant room but not generation capacity of their own; see
+    // effectiveSlotLayout's own comment for the matching asymmetry on the
+    // slot side. Someone will eventually read "a bay upgrade doesn't add
+    // power" as a bug — it isn't; a marked-up ship wants a reactor.
+    powerOk: equippedPower(equipped) <= powerBudget(frameId, equipped),
   };
 }
 
 // Iteration 52.1: the one feasibility predicate every "can this part go on
-// this ship" call site now shares — EQUIP (reducer.ts), the shop's
-// bonus-item fitting (hullRarityBonus, reducer/shop.ts), scripts/sim's
+// this ship" call site now shares — EQUIP (reducer.ts), scripts/sim's
 // agent.canFit and budget.hasRoom. Replaces the old pair of checks
 // (`equipped.length >= effectiveSlots(...)` and a separate `maxWeapons`
 // cap) with the single overflow condition 52.1 derives: each category
@@ -432,27 +506,28 @@ export function canEquip(
   upgrades: UpgradeId[],
   protocols?: ProtocolId[],
   commanderId?: CommanderId,
+  mark?: 2 | 3,
 ): boolean {
-  return layoutCanHold(frameId, [...equipped, partId], upgrades, protocols, commanderId);
+  return layoutCanHold(frameId, [...equipped, partId], upgrades, protocols, commanderId, mark);
 }
 
-// 52.5 (the hull refit): whether a WHOLE equipped set — not one candidate
-// item added to what's already there — fits a frame's typed-slot layout
-// all at once. `canEquip` above is this with the candidate folded into
-// `equipped` first; `canRefit` (reducer/shop.ts) uses this directly, since
-// a refit target must hold everything the ship already carries
-// simultaneously, not one part at a time — including, since 57.2, the
-// target's power budget covering that same loadout (a refit can legally
-// move a ship DOWN in power, since cost and power aren't perfectly
-// correlated — this is a real gate, not just belt-and-suspenders).
+// Whether a WHOLE equipped set — not one candidate item added to what's
+// already there — fits a frame's typed-slot layout all at once. `canEquip`
+// above is this with the candidate folded into `equipped` first.
+// (52.5's hull refit used to be this function's other direct caller,
+// checking a ship's current loadout against a prospective new frame; 59.2
+// removed the refit outright, in favor of 59.3's hull marks, which never
+// change frameId and so never need this "whole set against a NEW frame"
+// check — only canEquip's own single-candidate path.)
 export function layoutCanHold(
   frameId: FrameId,
   equipped: PartId[],
   upgrades: UpgradeId[],
   protocols?: ProtocolId[],
   commanderId?: CommanderId,
+  mark?: 2 | 3,
 ): boolean {
-  const { slotOk, powerOk } = layoutFeasibility(frameId, equipped, upgrades, protocols, commanderId);
+  const { slotOk, powerOk } = layoutFeasibility(frameId, equipped, upgrades, protocols, commanderId, mark);
   return slotOk && powerOk;
 }
 
@@ -480,17 +555,40 @@ export function equipBlockReason(
   upgrades: UpgradeId[],
   protocols?: ProtocolId[],
   commanderId?: CommanderId,
+  mark?: 2 | 3,
 ): string | null {
-  if (canEquip(frameId, equipped, partId, upgrades, protocols, commanderId)) return null;
-  const { slotOk } = layoutFeasibility(frameId, [...equipped, partId], upgrades, protocols, commanderId);
+  if (canEquip(frameId, equipped, partId, upgrades, protocols, commanderId, mark)) return null;
+  const { slotOk } = layoutFeasibility(frameId, [...equipped, partId], upgrades, protocols, commanderId, mark);
   if (!slotOk) {
-    const layout = effectiveSlotLayout(frameId, upgrades, protocols, commanderId);
+    const layout = effectiveSlotLayout(frameId, upgrades, protocols, commanderId, mark);
     if (equipped.length >= layout.length) return 'Ship is full — no empty slots.';
     const bucket = PART_TYPE_SLOT_KIND[getPart(partId).type];
     const label = bucket ? SLOT_KIND_LABEL[bucket] : 'universal';
     return `No free ${label} slot for this part.`;
   }
   return 'Not enough power for this part.';
+}
+
+// Iteration 58.3: the one genuinely new guard — until reactors existed,
+// UNEQUIP could never make a ship illegal (removing a part can only free a
+// slot and can only reduce draw), so it had no legality check of its own.
+// A reactor breaks that: removing IT can shrink the budget out from under
+// whatever's still equipped. Slot legality is never a concern on removal
+// (freeing a slot can't make a layout MORE illegal), so this only ever has
+// to check power, and — since the frame's own innate power never changes —
+// this only ever refuses when `partId` is itself a reactor whose gen the
+// rest of the loadout was actually relying on.
+export function canUnequip(frameId: FrameId, equipped: PartId[], partId: PartId): boolean {
+  const remaining = removeOnce(equipped, partId);
+  return equippedPower(remaining) <= powerBudget(frameId, remaining);
+}
+
+// Same no-dead-click discipline as equipBlockReason — the reducer's UNEQUIP
+// refuses silently (a no-op dispatch), so the UI needs its own stated
+// reason to avoid a dead click on the unequip control.
+export function unequipBlockReason(frameId: FrameId, equipped: PartId[], partId: PartId): string | null {
+  if (canUnequip(frameId, equipped, partId)) return null;
+  return 'Shut down equipment first — removing this reactor would leave the ship over budget.';
 }
 
 export function equippedWeaponCount(equippedPartIds: PartId[]): number {
@@ -513,7 +611,10 @@ export function playerShipLabel(fleet: PlayerShipState[], index: number): string
   if (!ship) return 'your ship';
   // Iteration 18: named ships ("ISV Resolute"). The frame-#N fallback keeps
   // pre-18 saves (whose ships have no name) rendering exactly as before.
-  return ship.name ?? `${getFrame(ship.frameId).name} #${index + 1}`;
+  // 59.3: frameDisplayName, not a bare getFrame(...).name — an unnamed
+  // marked ship (rare; almost every fixture/save's ships are named) should
+  // still read "Interceptor II #2", not silently drop its mark.
+  return ship.name ?? `${frameDisplayName(ship.frameId, ship.mark)} #${index + 1}`;
 }
 
 export function hasWeapon(stats: ShipStats): boolean {

@@ -356,9 +356,7 @@ function App() {
               credits={state.credits}
               offers={state.shopOffers}
               frameOffers={state.shopFrameOffers}
-              frameBonusPreview={state.shopFrameBonusPreview}
               kind={state.shopKind}
-              act={state.act}
               fleet={state.fleet}
               inventory={state.inventory}
               commanderId={state.commanderId}
@@ -368,7 +366,7 @@ function App() {
               onBuyPart={(offerIndex) => dispatchWithToast({ type: 'BUY_PART', offerIndex })}
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}
               onBuyShip={(frameId) => dispatchWithToast({ type: 'BUY_SHIP', frameId })}
-              onRefitShip={(shipIndex, frameId) => dispatchWithToast({ type: 'REFIT_SHIP', shipIndex, frameId })}
+              onUpgradeMark={(shipIndex) => dispatchWithToast({ type: 'UPGRADE_MARK', shipIndex })}
               onScuttle={(shipIndex) => dispatch({ type: 'SCUTTLE_SHIP', shipIndex })}
               onBuyCommodityLot={() => dispatchWithToast({ type: 'BUY_COMMODITY_LOT' })}
               onSellCommodityLot={() => dispatch({ type: 'SELL_COMMODITY_LOT' })}

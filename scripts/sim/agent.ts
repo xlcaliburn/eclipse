@@ -11,30 +11,29 @@
 // error the moment a new RunAction variant isn't classified.
 import type { CommanderId } from '../../src/game/commanders';
 import { getFrame, PURCHASABLE_FRAME_IDS } from '../../src/game/frames';
-import type { FrameId } from '../../src/game/frames';
 import { getEvent, meetsRequirement } from '../../src/game/events';
 import { actColumns, bossColumn, getNode, globalColumn, reachableNodes } from '../../src/game/map';
 import type { MapNode } from '../../src/game/map';
 import { COMMODITY_LOT_PART_ID } from '../../src/game/parts';
 import { hasProtocol } from '../../src/game/protocols';
 import {
-  canRefit,
+  canUpgradeMark,
   commodityLotBuyCost,
   commodityLotCap,
   eliteReward,
   fleetCap as commanderFleetCap,
   frameCost,
   initialRunState,
+  markUpgradeCost,
   mercenaryCost,
   partCost,
-  refitCost,
   REPAIR_COST_PER_HP,
   runReducer,
   winReward,
 } from '../../src/game/reducer';
 import type { RunAction } from '../../src/game/reducer';
 import { mulberry32 } from '../../src/game/rng';
-import { canEquip, deriveStats } from '../../src/game/ship';
+import { canEquip, deriveStats, upgradeRedundantOn } from '../../src/game/ship';
 import type { PartId, PlayerShipState, RunState } from '../../src/game/types';
 import type { PolicyConfig } from './policy';
 import { COMMANDER_ROUTE_BIAS, DEFAULT_PROTOCOL_INDEX } from './policy';
@@ -70,7 +69,7 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   BUY_PART: true,
   SELL_PART: true,
   BUY_SHIP: true,
-  REFIT_SHIP: true,
+  UPGRADE_MARK: true,
   SCUTTLE_SHIP: true,
   SET_TARGETING_STANCE: true,
   BUY_COMMODITY_LOT: true,
@@ -198,7 +197,7 @@ function pickNode(state: RunState, config: PolicyConfig, commanderId: CommanderI
 // typed-slot math; it's just never allowed to, same as EQUIP's own guard).
 function canFit(ship: PlayerShipState, partId: PartId, protocols: RunState['protocols'], commanderId: CommanderId | undefined): boolean {
   if (ship.mercenary && partId === COMMODITY_LOT_PART_ID) return false;
-  return canEquip(ship.frameId, ship.equipped, partId, ship.upgrades, protocols, commanderId);
+  return canEquip(ship.frameId, ship.equipped, partId, ship.upgrades, protocols, commanderId, ship.mark);
 }
 
 function buyAndEquipFromOffers(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
@@ -251,34 +250,29 @@ function buyHull(state: RunState, config: PolicyConfig, commanderId: CommanderId
   return s;
 }
 
-// Iteration 52.5 (the hull refit): a simple heuristic so the sink is
-// measured rather than invisible — at fleet cap (buyHull above already
-// covers "grow the fleet" when there's room), refit the cheapest hull
-// aboard into the best affordable legal target this visit's shipyard
-// offers. "Cheapest hull" (by frame cost) is the one with the least sunk
-// investment, so it's the natural one to trade up first; "best" is the
-// most expensive (highest-tier) legal, affordable target, not just the
-// first one found.
-function refitHull(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
+// Iteration 59.5 (hull marks, replacing 52.5's refitHull): a simple
+// heuristic so the sink is measured rather than invisible — at fleet cap
+// (buyHull above already covers "grow the fleet" when there's room) with
+// spare credits, upgrade the mark of the cheapest hull aboard that still
+// has room to grow (mark < III). "Cheapest hull" (by frame cost) is the
+// one with the least sunk investment, so it's the natural one to spend a
+// mark on first — same ordering refitHull used, kept dumb and honest per
+// the spec's own instruction (no lookahead on which hull most benefits
+// from the extra universal slot; the agent already buys parts into
+// whatever room it has, so a filled slot is its normal follow-on
+// behavior regardless of which ship got it).
+function upgradeMark(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
   const cap = Math.min(config.fleetCap, commanderFleetCap(commanderId, state.protocols));
   if (state.fleet.length < cap) return state; // buyHull already covers this case
-  if (!state.shopFrameOffers || state.shopFrameOffers.length === 0) return state;
   const candidates = state.fleet
     .map((ship, index) => ({ ship, index }))
-    .filter(({ ship }) => ship.frameId !== 'cruiser' && !ship.mercenary)
+    .filter(({ ship }) => canUpgradeMark(state.shopKind, ship))
     .sort((a, b) => getFrame(a.ship.frameId).cost - getFrame(b.ship.frameId).cost);
   for (const { ship, index } of candidates) {
-    let best: Exclude<FrameId, 'cruiser'> | null = null;
-    let bestCost = -1;
-    for (const frameId of state.shopFrameOffers) {
-      if (!canRefit(state, ship, frameId)) continue;
-      if (refitCost(ship, frameId) > state.credits) continue;
-      if (getFrame(frameId).cost > bestCost) {
-        bestCost = getFrame(frameId).cost;
-        best = frameId;
-      }
-    }
-    if (best) return dispatch(state, { type: 'REFIT_SHIP', shipIndex: index, frameId: best }, tracker);
+    const targetMark = ((ship.mark ?? 1) + 1) as 2 | 3;
+    const cost = markUpgradeCost(ship.frameId, targetMark, commanderId, state.protocols);
+    if (cost > state.credits) continue;
+    return dispatch(state, { type: 'UPGRADE_MARK', shipIndex: index }, tracker);
   }
   return state;
 }
@@ -336,13 +330,13 @@ function buyMercenary(state: RunState, config: PolicyConfig, commanderId: Comman
 // 2026-08-08: `fuseForFoundry`/`buyShipyardUpgrade` removed — the Foundry
 // (permanent stat fuses) and the shipyard's separate purchasable upgrade
 // were both removed from the game entirely. A shipyard visit now means a
-// (better-odds) hull purchase — see `buyHull` below — a refit (52.5, when
-// there's no room to grow) — and repairs.
+// (rare-or-better, 59.1) hull purchase — see `buyHull` below — a mark
+// upgrade (59.5, when there's no room to grow) — and repairs.
 function runShop(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
   let s = sellCommodityLots(state, tracker);
   if (s.shopKind === 'shipyard') {
     s = buyHull(s, config, commanderId, tracker);
-    s = refitHull(s, config, commanderId, tracker);
+    s = upgradeMark(s, config, commanderId, tracker);
     s = buyRepairs(s, config, tracker);
   } else {
     s = buyAndEquipFromOffers(s, config, commanderId, tracker);
@@ -409,8 +403,19 @@ function step(state: RunState, config: PolicyConfig, commanderId: CommanderId | 
       return dispatch(state, { type: 'AUTO_RESOLVE' }, tracker);
     case 'reward': {
       if (state.pendingReward?.upgradeOptions) {
-        const upgradeId = state.pendingReward.upgradeOptions[Math.floor(rng() * state.pendingReward.upgradeOptions.length)];
-        return dispatch(state, { type: 'PICK_UPGRADE', upgradeId, shipIndex: flagshipIndex(state.fleet) }, tracker);
+        // PICK_UPGRADE always targets the Flagship here, which never has an
+        // innate-jink frame, so 61.2's redundancy guard is unreachable in
+        // practice today — filtered anyway (rather than relying on that
+        // staying true) so this policy can't silently start tripping
+        // rejectedDispatch if the target ever changes. Falls back to the
+        // full option list only in the impossible case every option is
+        // somehow redundant on this ship.
+        const shipIndex = flagshipIndex(state.fleet);
+        const ship = state.fleet[shipIndex];
+        const options = state.pendingReward.upgradeOptions.filter((id) => !ship || !upgradeRedundantOn(ship, id));
+        const pool = options.length > 0 ? options : state.pendingReward.upgradeOptions;
+        const upgradeId = pool[Math.floor(rng() * pool.length)];
+        return dispatch(state, { type: 'PICK_UPGRADE', upgradeId, shipIndex }, tracker);
       }
       return dispatch(state, { type: 'LEAVE_REWARD' }, tracker);
     }

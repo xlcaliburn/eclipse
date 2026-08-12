@@ -40,12 +40,14 @@ import type { RngFn } from './rng';
 import {
   applyRepairBanking,
   canEquip,
+  canUnequip,
   deriveFleetForCombat,
   deriveFleetStats,
   deriveStats,
   everyShipAtUpgradeCap,
   fleetHasWeapon,
   playerShipLabel,
+  upgradeRedundantOn,
   withUpgrade,
 } from './ship';
 // 47.6: upgradeCapFor moved to ship.ts — re-exported here so
@@ -72,21 +74,21 @@ import type { CombatEvent, EnemyDef, PartId, PlayerShipState, RewardSummary, Run
 // reference — everything else re-exported below is re-exported straight
 // from the module (no local binding needed), same reasoning `export {
 // upgradeCapFor } from './ship'` above doesn't repeat it in a value import.
-import { drawFrameOffers, drawShopOffers, handleShopAction, hullRarityBonus, hullScrapValue } from './reducer/shop';
+import { drawFrameOffers, drawShopOffers, handleShopAction, hullScrapValue, STARTING_FIT } from './reducer/shop';
 export {
-  canRefit,
+  canUpgradeMark,
   commodityLotBuyCost,
   commodityLotCap,
   COMMODITY_LOT_SELL_PRICE,
   drawShopOffers,
   fleetCap,
   frameCost,
+  markUpgradeCost,
   MERCENARY_FIT,
   mercenaryCost,
   partCost,
   partSellPrice,
   RARITY_ORDER,
-  refitCost,
   REPAIR_COST_PER_HP,
   rollRarity,
   SHOP_OFFER_COUNT,
@@ -123,13 +125,12 @@ export type RunAction =
   | { type: 'BUY_PART'; offerIndex: number }
   | { type: 'SELL_PART'; partId: PartId }
   | { type: 'BUY_SHIP'; frameId: Exclude<FrameId, 'cruiser'> } // the Flagship is never purchasable
-  // Iteration 52.5 (the hull refit): trade shipIndex's ship up into
-  // frameId — must be an offer this shipyard actually has in stock (same
-  // rule as BUY_SHIP), strictly more expensive than the ship's current
-  // frame, and able to legally carry the ship's current `equipped` (see
-  // canRefit in reducer/shop.ts). The Flagship and mercenaries can never
-  // be refit.
-  | { type: 'REFIT_SHIP'; shipIndex: number; frameId: Exclude<FrameId, 'cruiser'> }
+  // Iteration 59.3 (hull marks — replaces 52.5's REFIT_SHIP, removed by
+  // 59.2): upgrades shipIndex's ship one mark (I -> II -> III, cap III),
+  // shipyard-only, mercenaries excluded (see canUpgradeMark in
+  // reducer/shop.ts). Unlike the old refit this never changes frameId, so
+  // the Flagship CAN be marked.
+  | { type: 'UPGRADE_MARK'; shipIndex: number }
   | { type: 'SCUTTLE_SHIP'; shipIndex: number }
   | { type: 'SET_TARGETING_STANCE'; stance: TargetingStance }
   // Iteration 20 (commodity runs): buy adds a lot to inventory, same as any
@@ -675,16 +676,19 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
       // The Admiral (wide, iteration 21) inherits the old Warlord's free
       // starting Interceptor — the fleet begins at 3 ships now (51.2: a
-      // second free, ion-fitted Interceptor added on top of the original
-      // one — the simplest available lever on the worst-measuring
-      // commander's numbers, see plans/iteration-51.md's 51.2).
+      // second free Interceptor added on top of the original one — the
+      // simplest available lever on the worst-measuring commander's
+      // numbers, see plans/iteration-51.md's 51.2). 61.3: fitted with a
+      // light missile now, matching STARTING_FIT.interceptor's new
+      // speed-biased default (reducer/shop.ts) rather than a hardcoded
+      // 'ion'.
       const fleet =
         action.commanderId === 'admiral'
           ? [
               ...state.fleet,
               {
                 frameId: 'interceptor' as const,
-                equipped: ['ion'] as PartId[],
+                equipped: [...STARTING_FIT.interceptor] as PartId[],
                 damage: 0,
                 upgrades: [],
                 name: shipName(state.map.seed, commissioned, 'interceptor'),
@@ -693,7 +697,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
               },
               {
                 frameId: 'interceptor' as const,
-                equipped: ['ion'] as PartId[],
+                equipped: [...STARTING_FIT.interceptor] as PartId[],
                 damage: 0,
                 upgrades: [],
                 name: shipName(state.map.seed, commissioned + 1, 'interceptor'),
@@ -848,23 +852,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // isValidRunState's `!!state.shopOffers` check still passes).
         const shopKind: 'store' | 'shipyard' = node.type === 'shipyard' ? 'shipyard' : 'store';
         const shopFrameOffers = drawFrameOffers(rng, state.act, shopKind);
-        // 2026-08-07: pre-roll each shipyard offer's rarity bonus at DRAW
-        // time, not purchase time — so the card can show the actual
-        // item(s) a purchase will grant, not just a count, with no chance
-        // of the preview drifting from what BUY_SHIP later grants. A
-        // store's hulls are always common (no bonus) — nothing to pre-roll
-        // there.
-        const shopFrameBonusPreview: Partial<Record<FrameId, { items: PartId[] }>> | undefined =
-          shopKind === 'shipyard'
-            ? Object.fromEntries(shopFrameOffers.map((id) => [id, hullRarityBonus(id, getFrame(id).rarity, rng)]))
-            : undefined;
         return {
           ...base,
           phase: 'shop',
           shopKind,
           shopOffers: shopKind === 'shipyard' ? [] : drawShopOffers(rng, state.commanderId, state.protocols),
           shopFrameOffers,
-          shopFrameBonusPreview,
           heat,
           rngCounter: nextCounter(),
         };
@@ -926,8 +919,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // action with no feedback.
       // Iteration 52.1: canEquip subsumes both the old separate checks
       // here (slot-count room AND the frame's weapon cap) into the one
-      // typed-slot feasibility predicate — see ship.ts.
-      if (!canEquip(ship.frameId, ship.equipped, action.partId, ship.upgrades, state.protocols, state.commanderId)) return state;
+      // typed-slot feasibility predicate — see ship.ts. 59.3: ship.mark
+      // threaded through so a marked ship's bonus universal slot is
+      // actually usable, not just displayed.
+      if (!canEquip(ship.frameId, ship.equipped, action.partId, ship.upgrades, state.protocols, state.commanderId, ship.mark))
+        return state;
       // 2026-08-06: a commodity lot bought to inventory still can't ride on
       // a mercenary — it would be lost with the ship after one fight, same
       // guard BUY_COMMODITY_LOT used to carry when buy and equip were one
@@ -951,6 +947,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (action.partId === COMMODITY_LOT_PART_ID) return state; // sold via SELL_COMMODITY_LOT, never unequipped to inventory
       const ship = state.fleet[action.shipIndex];
       if (!ship || !ship.equipped.includes(action.partId)) return state;
+      // Iteration 58.3: the one genuinely new UNEQUIP guard — only ever
+      // binds when action.partId is a reactor the rest of the loadout was
+      // relying on (ship.ts's canUnequip). Every other removal was already
+      // guaranteed legal (freeing a slot/draw can't make a layout worse).
+      if (!canUnequip(ship.frameId, ship.equipped, action.partId)) return state;
       const equipped = removeOnce(ship.equipped, action.partId);
       // Re-tuned 2026-08-04: removing a hull part should cost max HP, not
       // current HP — a ship sitting on damage should absorb the reduction
@@ -1277,6 +1278,10 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (!state.pendingReward.upgradeOptions.includes(action.upgradeId)) return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
+      // 61.2: reject 'vectoring' onto a ship whose frame innate already
+      // grants jink (Interceptor, Valkyrie) — a dead pick, same shared
+      // guard withUpgrade itself no-ops on (ship.ts's upgradeRedundantOn).
+      if (upgradeRedundantOn(ship, action.upgradeId)) return state;
       const fleet = mapShip(state.fleet, action.shipIndex, (s) => withUpgrade(s, action.upgradeId, state.commanderId));
       return {
         ...state,
@@ -1419,12 +1424,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     // 47.6: the shop actions all delegate to reducer/shop.ts's single
     // handleShopAction dispatcher — see that file's header for why this
-    // split exists and what stays here vs. there. 52.5 added REFIT_SHIP to
-    // the set.
+    // split exists and what stays here vs. there. 59.2/59.3 replaced
+    // 52.5's REFIT_SHIP with UPGRADE_MARK in the set.
     case 'BUY_PART':
     case 'SELL_PART':
     case 'BUY_SHIP':
-    case 'REFIT_SHIP':
+    case 'UPGRADE_MARK':
     case 'SCUTTLE_SHIP':
     case 'BUY_COMMODITY_LOT':
     case 'SELL_COMMODITY_LOT':
@@ -1472,6 +1477,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (everyShipAtUpgradeCap(state.fleet, state.commanderId)) return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
+      // 61.2: same reject as PICK_UPGRADE above — see its comment.
+      if (upgradeRedundantOn(ship, action.upgradeId)) return state;
       const fleet = mapShip(state.fleet, action.shipIndex, (s) => withUpgrade(s, action.upgradeId, state.commanderId));
       const label = playerShipLabel(state.fleet, action.shipIndex);
       return {

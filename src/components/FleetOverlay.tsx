@@ -1,10 +1,17 @@
 import type { CommanderId } from '../game/commanders';
 import type { CounterProtocolId } from '../game/counterProtocols';
-import { getFrame } from '../game/frames';
 import { getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import { upgradeCapFor } from '../game/reducer';
-import { deriveStats, effectiveSlotLayout, equippedPower, formatStatLine, playerShipLabel } from '../game/ship';
+import {
+  deriveStats,
+  effectiveSlotLayout,
+  equippedPower,
+  equippedPowerGen,
+  formatStatLine,
+  playerShipLabel,
+  powerBudget,
+} from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { AdaptivePanel } from './AdaptivePanel';
 import { PartCard } from './PartCard';
@@ -50,45 +57,69 @@ function fleetBody(
 
       {fleet.map((ship, shipIndex) => {
         const stats = deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols);
+        const layout = effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId, ship.mark);
+        const power = equippedPower(ship.equipped);
+        // 58.3: powerBudget (innate + any carried reactor's grant) —
+        // getFrame(...).power alone would silently hide a reactor's
+        // contribution here, same reasoning as FleetPanel's card.
+        const budget = powerBudget(ship.frameId, ship.equipped);
+        const reactorGen = equippedPowerGen(ship.equipped);
         return (
           <div key={shipIndex} className="ship-card">
             <div className="ship-card__header">
               <span className="ship-card__name">{playerShipLabel(fleet, shipIndex)}</span>
               <span className="ship-card__stats">{formatStatLine(stats, ship.damage)}</span>
             </div>
-            <UpgradeBadgeRow
-              upgrades={ship.upgrades}
-              emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
-            />
-            {/* 2026-08-12: the same one-blueprint view FleetPanel uses —
-                this surface had the identical duplication (a slot row AND
-                a parts grid showing the same loadout twice). Read-only
-                here, so no onUnequip: the overlay is for looking at the
-                fleet, and refitting happens on the prep/shop screens. */}
-            <ShipBlueprint
-              layout={effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId)}
-              equipped={ship.equipped}
-            />
-            <div className="blueprint__power">
-              <span className="blueprint__power-label">Power</span>
-              <PowerPipRow used={equippedPower(ship.equipped)} budget={getFrame(ship.frameId).power} />
-              <span className="blueprint__power-value">
-                {equippedPower(ship.equipped)} / {getFrame(ship.frameId).power}
-              </span>
-            </div>
+            {/* 2026-08-12: the same collapsed Items fold FleetPanel's prep
+                screen uses — this surface used to render the blueprint,
+                power meter, and augment badges always-open, which is
+                exactly the "item slots and power in the middle of a fight"
+                clutter the fold exists to hide. Read-only here, so no
+                onUnequip: the overlay is for looking at the fleet, and
+                refitting happens on the prep/shop screens. */}
+            <details className="parts-fold">
+              <summary className="parts-fold__summary">
+                Items
+                <span className="parts-fold__summary-detail">
+                  {ship.equipped.length}/{layout.length} slots · {power}/{budget} power
+                  {ship.upgrades.length > 0 &&
+                    ` · ${ship.upgrades.length} augment${ship.upgrades.length === 1 ? '' : 's'}`}
+                </span>
+              </summary>
+              <UpgradeBadgeRow
+                upgrades={ship.upgrades}
+                emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
+              />
+              <ShipBlueprint layout={layout} equipped={ship.equipped} />
+              {/* 60.8: PowerPipRow's bolt icon is unambiguous on its own —
+                  no separate "Power" word label needed (same reasoning as
+                  FleetPanel's card). */}
+              <div className="blueprint__power">
+                <PowerPipRow used={power} budget={budget} />
+                {reactorGen > 0 && (
+                  <span className="blueprint__power-reactor">(+{reactorGen} from reactors)</span>
+                )}
+              </div>
+            </details>
           </div>
         );
       })}
 
-      <h3>Inventory</h3>
-      {inventory.length === 0 ? (
-        <p className="hint">No spare parts.</p>
-      ) : (
-        <div className="inventory-grid">
-          {inventory.map((partId, i) => (
-            <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
-          ))}
-        </div>
+      {/* 2026-08-12: same collapsed fold as FleetPanel's prep screen —
+          and, per the declutter pass, an empty inventory renders NOTHING
+          rather than a "No spare parts." hint: an empty section needs no
+          explanation. */}
+      {inventory.length > 0 && (
+        <details className="parts-fold parts-fold--inventory">
+          <summary className="parts-fold__summary">
+            Inventory · {inventory.length} spare part{inventory.length === 1 ? '' : 's'}
+          </summary>
+          <div className="inventory-grid">
+            {inventory.map((partId, i) => (
+              <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
+            ))}
+          </div>
+        </details>
       )}
     </>
   );

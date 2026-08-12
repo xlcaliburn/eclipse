@@ -11,15 +11,14 @@ import {
   fleetCap,
   frameCost,
   mercenaryCost,
-  RARITY_ORDER,
   STARTING_FIT,
 } from '../game/reducer';
-import { commissionedFleetSize, equippedPower } from '../game/ship';
+import { commissionedFleetSize, equippedPower, powerBudget } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { FitChips } from './FitChips';
 import { FleetPanel } from './FleetPanel';
 import { PowerPipRow } from './PowerPipRow';
-import { ShipyardRefitSection } from './ShipyardRefitSection';
+import { ShipyardMarkSection } from './ShipyardMarkSection';
 import { FrameSilhouette } from './ShipSilhouette';
 import { SlotRow } from './SlotRow';
 import { StoreSections } from './StoreSections';
@@ -32,20 +31,12 @@ interface ShopScreenProps {
   // (see reducer.ts's drawFrameOffers). Undefined only for a save from
   // before this field existed; treated as "nothing to offer."
   frameOffers?: Exclude<FrameId, 'cruiser'>[];
-  // 2026-08-07: each shipyard offer's pre-rolled rarity bonus — lets the
-  // card show the actual item(s) a purchase grants instead of just a
-  // count. Undefined for a store visit (always common, no bonus).
-  frameBonusPreview?: Partial<Record<FrameId, { items: PartId[] }>>;
   // Iteration 33 (2026-08-07): which trade-station flavor this is —
   // 'store' (parts + war assets + 2 hulls, common/rare only) or 'shipyard'
   // (5 pristine hulls of any rarity, no parts/war assets). Defaults to
   // 'store' for a save from before this field existed (that's what every
   // shop visit was, back then).
   kind?: 'store' | 'shipyard';
-  // 52.5 (the hull refit): legendary-target eligibility needs the act, same
-  // gate BUY_SHIP itself checks — canRefit needs it to render the same
-  // legal-target list the reducer would actually accept.
-  act: 1 | 2;
   fleet: PlayerShipState[];
   inventory: PartId[];
   commanderId?: CommanderId;
@@ -58,7 +49,7 @@ interface ShopScreenProps {
   onBuyPart: (offerIndex: number) => void;
   onSellPart: (partId: PartId) => void;
   onBuyShip: (frameId: Exclude<FrameId, 'cruiser'>) => void;
-  onRefitShip: (shipIndex: number, frameId: Exclude<FrameId, 'cruiser'>) => void;
+  onUpgradeMark: (shipIndex: number) => void;
   onScuttle: (shipIndex: number) => void;
   // 2026-08-06: no longer takes a shipIndex — buys to inventory like any
   // other part; equipping it onto a ship is the normal EQUIP flow below.
@@ -76,9 +67,7 @@ export function ShopScreen({
   credits,
   offers,
   frameOffers,
-  frameBonusPreview,
   kind = 'store',
-  act,
   fleet,
   inventory,
   commanderId,
@@ -88,7 +77,7 @@ export function ShopScreen({
   onBuyPart,
   onSellPart,
   onBuyShip,
-  onRefitShip,
+  onUpgradeMark,
   onScuttle,
   onBuyCommodityLot,
   onSellCommodityLot,
@@ -172,18 +161,13 @@ export function ShopScreen({
             const cost = frameCost(frame.cost, frameId, commanderId, protocols, kind);
             const disabled = fleetFull || credits < cost;
             // Iteration 39: a store's rack is cheaper but always treated as
-            // common tier (no bonus) — 2026-08-08: no longer framed as
-            // "second-hand" (the store's real distinction is now that it
-            // never stocks epic/legendary hulls at all, see drawFrameOffers).
-            // A shipyard's arrive pristine AND fitted with bonus rare-tier
-            // gear to match the frame's real rarity. The actual item(s) are
-            // pre-rolled at PICK_NODE time and shown by name
-            // (frameBonusPreview) — no longer just a count with the specific
-            // gear a surprise until bought. bonusLevel stays as a fallback
-            // for the rare case the preview is unavailable (an old save
-            // resuming mid-shop-visit).
-            const bonusLevel = isShipyard ? RARITY_ORDER.indexOf(frame.rarity) : 0;
-            const preview = isShipyard ? frameBonusPreview?.[frameId] : undefined;
+            // common tier — 2026-08-08: no longer framed as "second-hand"
+            // (the store's real distinction is now that it never stocks
+            // epic/legendary hulls at all, see drawFrameOffers). 61.1: the
+            // shipyard's pristine-arrival bonus item(s) are gone — every
+            // purchase, store or shipyard, arrives with exactly
+            // STARTING_FIT and nothing else; the rarity label below is now
+            // purely a tier indicator, not a promise of bonus gear.
             // Iteration 41: preview what the hull arrives fitted with — every
             // purchasable frame carries at least one weapon now, and this is
             // the only place that was previously invisible until after buying.
@@ -218,24 +202,15 @@ export function ShopScreen({
                 <SlotRow layout={frame.slotLayout} />
                 {/* Iteration 57.3: the budget alongside the slot layout —
                     "used" is what this hull will actually arrive carrying
-                    (starting fit + any pre-rolled bonus items), the same
-                    thing FitChips below previews, so the meter and the
-                    chips never disagree about what's included. */}
-                <PowerPipRow used={equippedPower([...startingFit, ...(preview?.items ?? [])])} budget={frame.power} />
+                    (STARTING_FIT — 61.1 removed the bonus items that used
+                    to sit alongside it), the same thing FitChips below
+                    previews, so the meter and the chips never disagree
+                    about what's included. */}
+                <PowerPipRow
+                  used={equippedPower(startingFit)}
+                  budget={powerBudget(frameId, startingFit)}
+                />
                 {startingFit.length > 0 && <FitChips partIds={startingFit} />}
-                {preview && preview.items.length > 0 && (
-                  // 2026-08-08: the actual bonus item(s), same chip row the
-                  // starting fit above already uses — one consistent way to
-                  // preview "what this hull arrives carrying."
-                  <FitChips partIds={preview.items} />
-                )}
-                {!preview && bonusLevel > 0 && (
-                  // No real item ids in this fallback path (see the comment
-                  // above) — just say how many.
-                  <span className="frame-card__bonus">
-                    Arrives with {bonusLevel} bonus rare item{bonusLevel > 1 ? 's' : ''}.
-                  </span>
-                )}
                 <span className="frame-card__cost">{cost} cr</span>
               </button>
             );
@@ -243,17 +218,16 @@ export function ShopScreen({
         </div>
       )}
 
-      {/* Iteration 52.5: shipyard-only (canRefit itself enforces this) —
-          renders nothing if no ship currently has a legal target. */}
+      {/* Iteration 59.3/59.4: shipyard-only (canUpgradeMark itself enforces
+          this) — renders nothing if no ship is currently eligible. */}
       {isShipyard && (
-        <ShipyardRefitSection
+        <ShipyardMarkSection
           fleet={fleet}
           credits={credits}
-          shopFrameOffers={frameOffers}
-          act={act}
+          shopKind={kind}
           protocols={protocols}
           commanderId={commanderId}
-          onRefit={onRefitShip}
+          onUpgradeMark={onUpgradeMark}
         />
       )}
 

@@ -71,7 +71,7 @@ export const COMMANDERS: Record<CommanderId, Commander> = {
     description: 'Starts wide with extra hulls already in formation — more ships, cheaper ships, and veterans who only get sharper.',
     bullets: [
       'Fleet cap 5 instead of 4',
-      'Starts with two free, ion-fitted Interceptors — the fleet begins at 3 ships',
+      'Starts with two free, missile-fitted Interceptors — the fleet begins at 3 ships',
       'Every hull costs 25% less',
       'Any ship with 3+ kills gains +1 initiative',
     ],

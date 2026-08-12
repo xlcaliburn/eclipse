@@ -95,19 +95,11 @@ export function CombatCommandBar({
         aria-controls="combat-command-bar-body"
         onClick={onToggleCollapsed}
       >
-        {handCollapsed ? `Show actives (${activeAbilities.length})` : 'Hide actives'}
+        {handCollapsed ? 'Orders & actives' : 'Hide orders & actives'}
       </button>
       <div className="combat-command-bar__body" id="combat-command-bar-body">
         <div className="combat-hand combat-orders">
-          <h3>
-            Fleet orders{' '}
-            <span className="command-points" title="Command points remaining this fight">
-              {Array.from({ length: combat.commandPoints }, (_, i) => (
-                <span key={i} className="command-points__pip" />
-              ))}
-              <span className="command-points__count">{combat.commandPoints}</span>
-            </span>
-          </h3>
+          <h3>Fleet orders</h3>
           <div className="combat-hand__cards">
             {ORDER_DISPLAY_ORDER.filter((order) => order !== 'exploit-weakness' || combat.exploitEnabled).map(
               (order) => {
@@ -128,18 +120,20 @@ export function CombatCommandBar({
                       {armed ? 'Armed' : picking ? 'Pick a target…' : info.needsTarget ? 'Pick a target' : '1 command point'}
                     </span>
                     <span className="card-tile__name">{info.name}</span>
-                    <span className="card-tile__desc">{info.description}</span>
                   </button>
                 );
               },
             )}
           </div>
         </div>
-        <div className="combat-hand">
-          <h3>Ship actives</h3>
-          {activeAbilities.length === 0 ? (
-            <p className="hint">No active parts equipped.</p>
-          ) : (
+        {/* 2026-08-12: an empty "Ship actives" section (no active parts
+            equipped this run) used to render a heading plus a "No active
+            parts equipped." placeholder — an empty section needs no
+            explanation, same rule as the fold changes elsewhere this
+            pass. */}
+        {activeAbilities.length > 0 && (
+          <div className="combat-hand">
+            <h3>Ship actives</h3>
             <div className="combat-hand__cards">
               {activeAbilities.map(({ shipIndex, abilityIndex, partId }) => {
                 const part = getPart(partId);
@@ -169,8 +163,8 @@ export function CombatCommandBar({
                 );
               })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

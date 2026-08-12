@@ -27,10 +27,9 @@ import { globalColumn } from '../map';
 import { COMMODITY_LOT_PART_ID, getPart, isSalvageablePart, PARTS } from '../parts';
 import { hasProtocol } from '../protocols';
 import type { ProtocolId } from '../protocols';
-import { runRng } from '../rng';
 import type { RngFn } from '../rng';
 import type { RunAction } from '../reducer';
-import { canEquip, commissionedFleetSize, deriveStats, layoutCanHold } from '../ship';
+import { commissionedFleetSize } from '../ship';
 import { shipName } from '../shipNames';
 import type { PartId, PlayerShipState, Rarity, RunState } from '../types';
 import { mapShip, removeOnce } from '../util';
@@ -45,19 +44,24 @@ export const SHOP_OFFER_COUNT = 8;
 // (Bastion's lure beacon, the support hulls' signature actives) as their
 // whole role — identity now lives entirely on the part, which any hull can
 // carry. What's left here is pure "arrives combat-ready" QoL: an
-// Interceptor with an ion cannon, a Dreadnought/Cruiser with a fuller
+// Interceptor with a light missile, a Dreadnought/Cruiser with a fuller
 // starting fit matching their frames.ts blurb.
 // Iteration 41: every purchasable hull now arrives with at least one
-// weapon — an unarmed ship in the shop read wrong, however cheap. Bastion
-// and Freighter get an Ion cannon (each frame's own cost bumped to match,
-// see frames.ts); Derelict and Corvette get the new Light missile instead
-// (cheaper, and a missile still fits a hull too thin to reliably trade
-// blows). Frame prices are the single source of truth for what a starting
-// fit is "worth" — see frames.ts's own per-frame reprice notes.
+// weapon — an unarmed ship in the shop read wrong, however cheap.
+// 61.3 (user direction): standardized on ion as the default weapon —
+// "everything should default to ion, however the speed-biased ships like
+// interceptor should be missile based." Speed-biased = baseInitiative >= 2
+// (frames.ts): Interceptor (2), Destroyer (3), Valkyrie (4) carry
+// light-missile; every other hull, including the Corvette (init 1 — its
+// capacitor innate is evasion flavor, not speed, a judgment call recorded
+// in plans/iteration-61.md), carries ion. Frame prices are the single
+// source of truth for what a starting fit is "worth" — see frames.ts's own
+// per-frame reprice notes; 61.3 made no repricing changes (ion 3cr vs.
+// light-missile 2cr is within noise).
 // Exported so ShopScreen's frame cards can preview what a hull arrives
 // fitted with — see the "Expand your fleet" section, iteration 41.
 export const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
-  interceptor: ['ion'],
+  interceptor: ['light-missile'],
   bastion: ['ion'],
   dreadnought: ['ion', 'ion', 'shield1'],
   // 2026-08-06 (the same midrange-progression repricing): now arrives with
@@ -65,22 +69,22 @@ export const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   // a bare identity part, matching the Dreadnought's fuller fit above.
   'light-cruiser': ['ion', 'shield1'],
   freighter: ['ion'],
-  derelict: ['light-missile'],
-  corvette: ['light-missile'],
+  derelict: ['ion'],
+  corvette: ['ion'],
   // Iteration 52 STAGE (b): the 10 new/revived purchasable hulls' arrival
   // fits — every one legal against its own frame's slotLayout (see the
   // guard test in ship.test.ts).
   frigate: ['ion'],
-  // No dedicated weapon slot (S S U) — the missile rides in the universal
+  // No dedicated weapon slot (S S U) — the weapon rides in the universal
   // slot, same pattern as Derelict/Corvette above.
-  'ew-cutter': ['light-missile'],
-  tender: ['light-missile'],
+  'ew-cutter': ['ion'],
+  tender: ['ion'],
   'disruptor-cutter': ['ion'],
   aegis: ['ion', 'shield1'],
   gunboat: ['ion'],
-  destroyer: ['ion'],
+  destroyer: ['light-missile'],
   battleship: ['ion'],
-  valkyrie: ['ion'],
+  valkyrie: ['light-missile'],
   titan: ['ion', 'ion', 'shield1'],
 };
 
@@ -188,54 +192,6 @@ export function frameCost(
   return cost;
 }
 
-// A pool of RARE-tier parts only — the ship-purchase rarity bonus below
-// draws from here, never epic/legendary (those stay exclusive to shop
-// offers and elite drops, not folded into every shipyard hull).
-const RARE_PARTS_POOL = PARTS.filter((p) => p.rarity === 'rare');
-
-// Iteration 39, reworked 2026-08-08: replaces the old arrival-damage
-// mechanic (a second-hand hull no longer arrives pre-damaged — its whole
-// discount lives in price now, via SECOND_HAND_MULTIPLIER above). A
-// PRISTINE (shipyard) purchase arrives with N bonus RARE-tier items,
-// auto-equipped, N = rarity level above common (rare=1, epic=2,
-// legendary=3; common itself = 0, no bonus). Was a flat HP bump plus
-// random slotless upgrades (via the Foundry's `fusions.hp` and the
-// upgrade-bay grant) — both removed 2026-08-08 (the slotless upgrade is
-// now Elite-drop-only, and the Foundry mechanic is gone entirely), so the
-// bonus is now purely "extra gear," same flavor as everything else a hull
-// can carry. A second-hand (store) purchase is always treated as common
-// regardless of the frame's real rarity — buying a Bastion second-hand is
-// cheap and plain; buying it from a shipyard is full price but arrives
-// battle-ready.
-// Exported — PICK_NODE (reducer.ts, a non-shop case) calls this directly
-// to pre-roll each shipyard offer's bonus for shopFrameBonusPreview, same
-// "one-directional import back into reducer.ts" pattern as
-// drawShopOffers/drawFrameOffers/hullScrapValue below.
-// `frameId` (2026-08-08, updated 52.1): needed to respect the frame's typed
-// slot layout — the bonus is spread straight into `equipped` at purchase
-// time (below), bypassing EQUIP's own canEquip check, so a hull with a
-// tight weapon-slot budget (e.g. Bastion, 1 dedicated weapon slot and no
-// universal overflow) must not be handed a 2nd weapon-type bonus item and
-// quietly end up over its own typed-slot capacity. Iteration 52.1: rather
-// than re-deriving "is there room for one more weapon," this now just asks
-// canEquip directly against the hull's real starting fit — one source of
-// truth, same as every other equip-legality call site.
-export function hullRarityBonus(frameId: Exclude<FrameId, 'cruiser'>, rarity: Rarity, rng: RngFn): { items: PartId[] } {
-  const level = RARITY_ORDER.indexOf(rarity);
-  const equipped = [...STARTING_FIT[frameId]];
-  const taken = new Set<PartId>();
-  const items: PartId[] = [];
-  for (let i = 0; i < level; i++) {
-    const candidates = RARE_PARTS_POOL.filter((p) => !taken.has(p.id) && canEquip(frameId, equipped, p.id, []));
-    if (candidates.length === 0) break; // defensive: pool exhausted, or no typed-slot room left
-    const id = candidates[Math.floor(rng() * candidates.length)].id;
-    taken.add(id);
-    items.push(id);
-    equipped.push(id);
-  }
-  return { items };
-}
-
 // Iteration 7: a flat uniform draw over ~30 parts can no longer reliably
 // surface an answer to a given threat. The 6 offers are drawn stratified
 // instead — 2 weapons, 2 defense (shield/hull), 1 computer-or-drive, 1
@@ -245,7 +201,12 @@ export function hullRarityBonus(frameId: Exclude<FrameId, 'cruiser'>, rarity: Ra
 // duplicates were possible too, not just the double weapon/defense draws.
 const WEAPON_POOL = PARTS.filter((p) => p.type === 'weapon');
 const DEFENSE_POOL = PARTS.filter((p) => p.type === 'shield' || p.type === 'hull');
-const COMPUTER_DRIVE_POOL = PARTS.filter((p) => p.type === 'computer' || p.type === 'drive');
+// Iteration 58.4: reactors join the computer/drive stratum (renamed from
+// COMPUTER_DRIVE_POOL) — that slot is 1-of-8 shop offers, unchanged this
+// iteration (58.4's own "do NOT change stratum counts" instruction); how
+// often that's enough exposure for a reactor specifically is 58's own open
+// question #1, not something to fix here.
+const SYSTEMS_POOL = PARTS.filter((p) => p.type === 'computer' || p.type === 'drive' || p.type === 'reactor');
 const ACTIVE_POOL = PARTS.filter((p) => p.active);
 
 // Iteration 36 (rarity): shop odds per offer slot — legendary finds are
@@ -258,9 +219,7 @@ const RARITY_WEIGHTS: Record<Rarity, number> = {
   legendary: 0.02,
 };
 // Ordered low -> high; index doubles as "distance from common" for the
-// fallback walk below.
-// Exported (iteration 39) so ShopScreen can preview a shipyard hull's
-// rarity-bonus level (hullRarityBonus above) without duplicating this list.
+// fallback walk below. Exported for drawRarityWeighted's tier-walk tests.
 export const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
 
 // Exported for a direct unit test of the tier-boundary math (same
@@ -367,67 +326,49 @@ export function hullScrapValue(frameId: FrameId): number {
   return Math.floor(getFrame(frameId).cost / 2);
 }
 
-// Iteration 52.5 (the hull refit): the new hull's price less a trade-in on
-// the old one — reuses hullScrapValue above, the game's existing "what is
-// a used hull worth" answer (already relied on by Lone flagship's scrap).
-// Floored at 0 — a refit is a purchase, never a payout, even if scrap
-// value alone would exceed the target's list price (a cheap enough target
-// relative to an expensive current hull, in principle).
-// 2026-08-12: the target's price now goes through `frameCost`, not its raw
-// list price. A refit is a hull acquisition, so every discount that applies
-// to BUYING a hull applies to trading into one — the Admiral's 25%, the
-// Warlord's Dreadnought cut, Armada mandate, the store's second-hand
-// multiplier. Without this the Admiral's own commander-screen promise
-// ("Every hull costs 25% less") was simply false on this one path; 52.5's
-// spec named the raw cost only because it never considered commander
-// pricing. The trade-in stays on the RAW value of the old hull — what a
-// used hull is worth doesn't depend on who is selling it.
-export function refitCost(
-  current: PlayerShipState,
-  targetFrameId: Exclude<FrameId, 'cruiser'>,
+// Iteration 59.2: 52.5's hull refit (a shipyard trade-up into a bigger
+// frame) is REMOVED — `canRefit`/`refitCost` and the REFIT_SHIP action are
+// gone outright, superseded by 59.3's hull marks below (see PLAN.md's
+// iteration-52 row for the pointer). Hull progression without a refit is
+// "buy the bigger hull" (shipyards now stock rare-or-better, 59.1) or
+// scuttle-and-replace; marks are for deepening a ship you're keeping.
+
+// Iteration 59.3 (hull marks, Twilight-Imperium style — replaces the
+// refit): a ship's mark (types.ts's PlayerShipState.mark, absent = I) can
+// be upgraded I -> II -> III at a shipyard, each step granting +1
+// universal slot (ship.ts's effectiveSlotLayout) for a price escalating
+// off the frame's own (commander-discounted) cost. No `shopKind` param —
+// unlike the old refit's `frameCost` call, a mark upgrade is ALWAYS a
+// shipyard action (canUpgradeMark below enforces it), so the store's
+// second-hand multiplier can never apply here, full stop.
+const MARK_II_MULTIPLIER = 0.5;
+const MARK_III_MULTIPLIER = 0.75;
+export function markUpgradeCost(
+  frameId: FrameId,
+  targetMark: 2 | 3,
   commanderId?: CommanderId,
   protocols?: ProtocolId[],
-  shopKind?: 'store' | 'shipyard',
 ): number {
-  const price = frameCost(getFrame(targetFrameId).cost, targetFrameId, commanderId, protocols, shopKind);
-  return Math.max(0, price - hullScrapValue(current.frameId));
+  const discounted = frameCost(getFrame(frameId).cost, frameId, commanderId, protocols);
+  const multiplier = targetMark === 2 ? MARK_II_MULTIPLIER : MARK_III_MULTIPLIER;
+  return Math.ceil(discounted * multiplier);
 }
 
-// Iteration 52.5: every rule a legal refit target must hold —
-//   1. a SHIPYARD visit, specifically — "At a shipyard, trade a ship up"
-//      (plans/iteration-52.md's 52.5); a store never offers a refit;
-//   2. in stock this shipyard visit (shopFrameOffers), same as BUY_SHIP;
-//   3. strictly more expensive than the ship's current frame — an upgrade,
-//      never a sidegrade or downgrade;
-//   4. legendary targets keep the same act-2 + shipyard gate as BUY_SHIP;
-//   5. the ship's CURRENT equipped set is legal against the target's whole
-//      slotLayout AND power budget at once (layoutCanHold, not the
-//      incremental canEquip — every part must fit simultaneously, not one
-//      at a time). Iteration 57.2: layoutCanHold now also checks power, so
-//      this one call covers both without a second gate here — a refit can
-//      legally move a ship DOWN in power (cost and power aren't perfectly
-//      correlated), which is a real, intended way for this rule to bite;
-//   6. the Flagship can never be refit — load-bearing for
-//      withFlagshipRecoveryGate, Lone flagship's +2 slots/HP, and
-//      SCUTTLE_SHIP's "the fleet can never be emptied" guarantee;
-//   7. mercenaries can never be refit — a one-fight rental takes no
-//      permanent investment, the rule augments already follow.
-// Typed as a Pick, not the full RunState, so the shipyard UI (which only
-// ever holds a handful of RunState's fields as discrete props, not the
-// whole object) can call this directly without reconstructing one.
-export function canRefit(
-  state: Pick<RunState, 'shopKind' | 'shopFrameOffers' | 'act' | 'protocols' | 'commanderId'>,
-  ship: PlayerShipState,
-  targetFrameId: Exclude<FrameId, 'cruiser'>,
-): boolean {
-  if (state.shopKind !== 'shipyard') return false; // point 1
-  if (ship.frameId === 'cruiser') return false; // point 6
-  if (ship.mercenary) return false; // point 7
-  if (!state.shopFrameOffers?.includes(targetFrameId)) return false; // point 2
-  const targetFrame = getFrame(targetFrameId);
-  if (targetFrame.cost <= getFrame(ship.frameId).cost) return false; // point 3
-  if (targetFrame.rarity === 'legendary' && state.act === 1) return false; // point 4 (shipyard already required by point 1)
-  return layoutCanHold(targetFrameId, ship.equipped, ship.upgrades, state.protocols, state.commanderId); // point 5
+// Every rule a legal mark upgrade must hold: a SHIPYARD visit specifically
+// (marks are a shipyard-only purchase, same "trade a ship up" identity the
+// refit had), not a mercenary (a one-fight rental takes no permanent
+// investment, the standing rule every other permanent upgrade already
+// follows), and not already at the mark III cap. Unlike the old refit's
+// canRefit, there is no Flagship ban and no shopFrameOffers/rarity gate —
+// a mark isn't a hull PURCHASE (frameId never changes, so none of the
+// invariants that forbade refitting the Flagship apply — see
+// withFlagshipRecoveryGate/Lone flagship/SCUTTLE_SHIP's own comments,
+// none of which this touches), and it isn't drawn from a limited-stock
+// offer list the way a fresh hull or a refit target was.
+export function canUpgradeMark(shopKind: 'store' | 'shipyard' | undefined, ship: PlayerShipState): boolean {
+  if (shopKind !== 'shipyard') return false;
+  if (ship.mercenary) return false;
+  return (ship.mark ?? 1) < 3;
 }
 
 // Iteration 28 (Armada mandate): shops stock one fewer part — the offer's
@@ -450,7 +391,7 @@ export function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?
     drawRarityWeighted(DEFENSE_POOL, taken, rng),
     drawRarityWeighted(DEFENSE_POOL, taken, rng),
     drawRarityWeighted(DEFENSE_POOL, taken, rng),
-    drawRarityWeighted(COMPUTER_DRIVE_POOL, taken, rng),
+    drawRarityWeighted(SYSTEMS_POOL, taken, rng),
     drawRarityWeighted(ACTIVE_POOL, taken, rng),
   ];
   const trimmed = hasProtocol(protocols, 'armada-mandate') ? offers.slice(0, SHOP_OFFER_COUNT - 1) : offers;
@@ -496,6 +437,14 @@ export function drawShopOffers(rng: RngFn, commanderId?: CommanderId, protocols?
 // a fake "common" bonus level. Shipyard count 4 -> 5, both to read as the
 // clearly bigger selection and to make room now that a store visit can
 // never be the place you find the roster's top tier.
+// Iteration 59.1: the shipyard pool excludes commons too — mirroring the
+// store's own epic/legendary exclusion, so each shop gains a real tier
+// identity (store = common+rare, "cheap hulls"; shipyard = rare+epic(+
+// legendary in act 2), "quality hulls"). No RARITY_WEIGHTS change needed
+// (52's standing rule) — drawRarityWeighted's own tier-walk already falls
+// a rolled common up to the nearest populated tier (rare) when the pool it
+// was handed has none, same mechanism that already handles an act-1
+// shipyard's legendary exclusion above.
 // reducer.ts imports this back — PICK_NODE calls it when a shop/shipyard
 // node is entered (a non-shop case; the drawing logic itself is shop
 // pricing, so it lives here regardless).
@@ -513,6 +462,7 @@ export function drawFrameOffers(rng: RngFn, act: 1 | 2, kind: 'store' | 'shipyar
     rarity: getFrame(id).rarity,
   }));
   if (kind === 'store') pool = pool.filter((f) => f.rarity !== 'epic' && f.rarity !== 'legendary');
+  if (kind === 'shipyard') pool = pool.filter((f) => f.rarity !== 'common');
   const count = kind === 'shipyard' ? 5 : 2;
   const taken = new Set<Exclude<FrameId, 'cruiser'>>();
   const offers: Exclude<FrameId, 'cruiser'>[] = [];
@@ -522,7 +472,8 @@ export function drawFrameOffers(rng: RngFn, act: 1 | 2, kind: 'store' | 'shipyar
   return offers;
 }
 
-// The shop actions this module owns (52.5 added REFIT_SHIP).
+// The shop actions this module owns (59.3 replaced 52.5's REFIT_SHIP with
+// UPGRADE_MARK).
 export type ShopAction = Extract<
   RunAction,
   {
@@ -530,7 +481,7 @@ export type ShopAction = Extract<
       | 'BUY_PART'
       | 'SELL_PART'
       | 'BUY_SHIP'
-      | 'REFIT_SHIP'
+      | 'UPGRADE_MARK'
       | 'SCUTTLE_SHIP'
       | 'BUY_COMMODITY_LOT'
       | 'SELL_COMMODITY_LOT'
@@ -595,32 +546,18 @@ export function handleShopAction(state: RunState, action: ShopAction): RunState 
       const cost = frameCost(frame.cost, action.frameId, state.commanderId, state.protocols, state.shopKind);
       if (state.credits < cost) return state;
       const commissioned = state.shipsCommissioned ?? state.fleet.length;
-      // Iteration 39: a store's hulls are always treated as common tier
-      // (no rarity bonus, no arrival damage either any more); a shipyard's
-      // arrive pristine AND fused/upgraded to match the frame's real
-      // rarity — see hullRarityBonus above. 2026-08-07: the bonus is
-      // normally pre-rolled at PICK_NODE time (shopFrameBonusPreview), so
-      // what ShopScreen showed before purchase is exactly what's granted
-      // here, no fresh rng draw needed. Falls back to rolling fresh (the
-      // pre-39 behavior) when the preview is absent — a state that
-      // reached BUY_SHIP without going through PICK_NODE's normal draw
-      // (an old save, or a hand-built fixture in a test).
-      let bonus = state.shopFrameBonusPreview?.[action.frameId];
-      let rngCounter = state.rngCounter;
-      if (!bonus) {
-        const { rng, nextCounter } = runRng(state);
-        bonus = hullRarityBonus(action.frameId, state.shopKind === 'shipyard' ? frame.rarity : 'common', rng);
-        rngCounter = nextCounter();
-      }
+      // 61.1: the shipyard random rarity bonus (hullRarityBonus) is
+      // removed — a bought hull, store or shipyard, arrives with exactly
+      // STARTING_FIT[frameId] and nothing else. See shop.ts's git history
+      // for the removed mechanic (iteration 39, reworked 2026-08-08).
       return {
         ...state,
-        rngCounter,
         credits: state.credits - cost,
         fleet: [
           ...state.fleet,
           {
             frameId: action.frameId,
-            equipped: [...STARTING_FIT[action.frameId], ...bonus.items],
+            equipped: [...STARTING_FIT[action.frameId]],
             damage: 0,
             upgrades: [],
             name: shipName(state.map.seed, commissioned, action.frameId),
@@ -638,33 +575,21 @@ export function handleShopAction(state: RunState, action: ShopAction): RunState 
       };
     }
 
-    case 'REFIT_SHIP': {
-      // Iteration 52.5: the reducer just re-validates and applies —
-      // canRefit/refitCost are the single source of truth the UI also
-      // reads from, so there's no separate rule set to drift out of sync.
+    case 'UPGRADE_MARK': {
+      // Iteration 59.3: the reducer just re-validates and applies —
+      // canUpgradeMark/markUpgradeCost are the single source of truth the
+      // UI also reads from, so there's no separate rule set to drift out
+      // of sync. Unlike the old REFIT_SHIP, this never touches frameId,
+      // damage, or shopFrameOffers — a mark is a permanent modification to
+      // the ship the player already has, not a new hull acquisition.
       if (state.phase !== 'shop') return state;
       const ship = state.fleet[action.shipIndex];
-      if (!ship || !canRefit(state, ship, action.frameId)) return state;
-      const cost = refitCost(ship, action.frameId, state.commanderId, state.protocols, state.shopKind);
+      if (!ship || !canUpgradeMark(state.shopKind, ship)) return state;
+      const targetMark = ((ship.mark ?? 1) + 1) as 2 | 3;
+      const cost = markUpgradeCost(ship.frameId, targetMark, state.commanderId, state.protocols);
       if (state.credits < cost) return state;
-      // Clamp damage (not just carry it over): a cost-increasing refit
-      // does not guarantee a higher max HP (Bastion 12cr/6HP -> Freighter
-      // 18cr/3HP is legal by every rule above), so an unclamped refit
-      // could kill the ship outright.
-      const newMaxHp = deriveStats(action.frameId, ship.equipped, ship.upgrades, state.protocols).hp;
-      const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({
-        ...s,
-        frameId: action.frameId,
-        damage: Math.min(s.damage, Math.max(0, newMaxHp - 1)),
-      }));
-      return {
-        ...state,
-        credits: state.credits - cost,
-        fleet,
-        // Consumes the offer, same as BUY_SHIP — a refit target is bought
-        // out of this visit's shipyard stock same as a fresh hull is.
-        shopFrameOffers: state.shopFrameOffers?.filter((id) => id !== action.frameId),
-      };
+      const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({ ...s, mark: targetMark }));
+      return { ...state, credits: state.credits - cost, fleet };
     }
 
     case 'SCUTTLE_SHIP': {
@@ -783,7 +708,6 @@ export function handleShopAction(state: RunState, action: ShopAction): RunState 
         phase: 'map',
         shopOffers: undefined,
         shopFrameOffers: undefined,
-        shopFrameBonusPreview: undefined,
         shopKind: undefined,
         currentEnemy: undefined,
       };

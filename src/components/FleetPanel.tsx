@@ -1,11 +1,21 @@
 import type { CommanderId } from '../game/commanders';
 import { playerOutspeedGap, qualifiesForOutspeed } from '../game/combatEngine';
 import type { CounterProtocolId } from '../game/counterProtocols';
-import { getFrame } from '../game/frames';
+import { frameDisplayName } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import { partSellPrice, REPAIR_COST_PER_HP, upgradeCapFor } from '../game/reducer';
-import { deriveFleetStats, effectiveSlotLayout, effectiveSlots, equipBlockReason, equippedPower, playerShipLabel } from '../game/ship';
+import {
+  deriveFleetStats,
+  effectiveSlotLayout,
+  effectiveSlots,
+  equipBlockReason,
+  equippedPower,
+  equippedPowerGen,
+  playerShipLabel,
+  powerBudget,
+  unequipBlockReason,
+} from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { PartCard } from './PartCard';
 import { PowerPipRow } from './PowerPipRow';
@@ -73,7 +83,8 @@ export function FleetPanel({
 }: FleetPanelProps) {
   const selectedShip = fleet[selectedShipIndex];
   const selectedHasRoom = selectedShip
-    ? selectedShip.equipped.length < effectiveSlots(selectedShip.frameId, selectedShip.upgrades, protocols, commanderId)
+    ? selectedShip.equipped.length <
+      effectiveSlots(selectedShip.frameId, selectedShip.upgrades, protocols, commanderId, selectedShip.mark)
     : false;
 
   const instructions =
@@ -123,7 +134,7 @@ export function FleetPanel({
                 )}
                 {playerShipLabel(fleet, shipIndex)}
                 {/* Iteration 18: named ships need the frame stated somewhere. */}
-                <span className="ship-card__frame">{getFrame(ship.frameId).name}</span>
+                <span className="ship-card__frame">{frameDisplayName(ship.frameId, ship.mark)}</span>
                 {(ship.kills ?? 0) > 0 && (
                   <span
                     className="ship-card__kills"
@@ -163,47 +174,50 @@ export function FleetPanel({
             </div>
             {/* Iteration 13: same StatBar as the enemy panel and combat cards. */}
             <StatBar stats={stats} damage={ship.damage} />
-            {/* 2026-08-12: the slot shape and the power meter both moved
-                into the Items fold below (see ShipBlueprint). They used to
-                render here unconditionally, which put a full-width band of
-                colour on every ship on the prep screen — a screen the
-                player is usually just passing through, not fitting on. The
-                fold's summary line carries the numbers instead. */}
-            {/* 2026-08-08: always shown now, not just when something's
-                fitted — an open augment slot (dashed, dim) is exactly the
-                info a Warlord player needs to see at a glance, now that
-                the Flagship can hold 3. */}
-            <UpgradeBadgeRow
-              upgrades={ship.upgrades}
-              emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
-            />
+            {/* 2026-08-12: the slot shape, power meter, and augment badges
+                all moved into the Items fold below (see ShipBlueprint). They
+                used to render here unconditionally, which put a full-width
+                band of colour on every ship on the prep screen — a screen
+                the player is usually just passing through, not fitting on.
+                The fold's summary line carries the numbers instead. In the
+                shop (no fold — collapsibleParts unset), the same body
+                renders open, so nothing is lost there. */}
             {(() => {
-              const layout = effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId);
+              const layout = effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId, ship.mark);
               const power = equippedPower(ship.equipped);
-              const budget = getFrame(ship.frameId).power;
+              // Iteration 58.3: budget is innate + whatever's equipped
+              // generates — reading `getFrame(...).power` alone here would
+              // silently hide a carried reactor's grant. reactorGen is
+              // split out just for the "(+N from reactors)" caption below.
+              const budget = powerBudget(ship.frameId, ship.equipped);
+              const reactorGen = equippedPowerGen(ship.equipped);
+              const emptyAugmentSlots = upgradeCapFor(ship, commanderId) - ship.upgrades.length;
               const body = (
                 <>
+                  {/* 2026-08-08: always shown now, not just when something's
+                      fitted — an open augment slot (dashed, dim) is exactly
+                      the info a Warlord player needs to see at a glance, now
+                      that the Flagship can hold 3. */}
+                  <UpgradeBadgeRow upgrades={ship.upgrades} emptySlots={emptyAugmentSlots} />
                   <ShipBlueprint
                     layout={layout}
                     equipped={ship.equipped}
                     onUnequip={(partId) => onUnequip(shipIndex, partId)}
+                    unequipBlockReason={(partId) => unequipBlockReason(ship.frameId, ship.equipped, partId)}
                   />
-                  {/* Iteration 57.3, relabelled 2026-08-12: the pips alone
-                      were being read as a second health bar — identical
-                      dimensions to the HP pips, but with INVERTED
-                      semantics (lit = spent here, lit = remaining there).
-                      The word "Power" and the fraction do the work now;
-                      the pips are the supporting visual, not the whole
-                      message. Bonus slots (bay/Lone flagship/Warlord)
-                      never grant power, so this budget is always the
-                      frame's own flat number however many slots the ship
-                      ended up with. */}
+                  {/* Iteration 57.3, redesigned 60.8: the bolt icon inside
+                      PowerPipRow is unambiguous on its own now, so the
+                      separate "Power" word label is gone — same reasoning
+                      as dropping the pip meter itself (it kept reading as
+                      a second HP bar). Bonus slots (bay/Lone flagship/
+                      Warlord) never grant power — only equipped reactors
+                      do (58.3) — so this budget can exceed the frame's own
+                      flat number, captioned by the reactor suffix. */}
                   <div className="blueprint__power">
-                    <span className="blueprint__power-label">Power</span>
                     <PowerPipRow used={power} budget={budget} />
-                    <span className="blueprint__power-value">
-                      {power} / {budget}
-                    </span>
+                    {reactorGen > 0 && (
+                      <span className="blueprint__power-reactor">(+{reactorGen} from reactors)</span>
+                    )}
                   </div>
                 </>
               );
@@ -216,6 +230,8 @@ export function FleetPanel({
                     Items
                     <span className="parts-fold__summary-detail">
                       {ship.equipped.length}/{layout.length} slots · {power}/{budget} power
+                      {ship.upgrades.length > 0 &&
+                        ` · ${ship.upgrades.length} augment${ship.upgrades.length === 1 ? '' : 's'}`}
                     </span>
                   </summary>
                   {body}
@@ -259,7 +275,15 @@ export function FleetPanel({
             // exactly the failure mode iteration 47.1 already had to fix
             // once for the Lone-flagship slot bug.
             const blockReason = selectedShip
-              ? equipBlockReason(selectedShip.frameId, selectedShip.equipped, partId, selectedShip.upgrades, protocols, commanderId)
+              ? equipBlockReason(
+                  selectedShip.frameId,
+                  selectedShip.equipped,
+                  partId,
+                  selectedShip.upgrades,
+                  protocols,
+                  commanderId,
+                  selectedShip.mark,
+                )
               : 'No ship selected.';
             return (
             <div key={`${partId}-${i}`} className="inventory-item">

@@ -57,6 +57,12 @@ interface ShipBlueprintProps {
   // one, the combat theater doesn't) — sockets then render their contents
   // without an unequip affordance.
   onUnequip?: (partId: PartId) => void;
+  // Iteration 58.3: the one genuinely new UNEQUIP guard — only ever returns
+  // non-null for a reactor whose generation the rest of the loadout is
+  // relying on. Same no-dead-click discipline FleetPanel's inventory grid
+  // already applies to EQUIP via equipBlockReason. Only meaningful when
+  // onUnequip is also passed; ignored on read-only surfaces.
+  unequipBlockReason?: (partId: PartId) => string | null;
 }
 
 // 2026-08-12: one blueprint replaces the fleet panel's two separate
@@ -66,20 +72,25 @@ interface ShipBlueprintProps {
 // socket shows BOTH what kind of part it takes and what's currently in it,
 // the way a ship board does: the part sits in the socket, the socket says
 // what it accepts underneath.
-export function ShipBlueprint({ layout, equipped, onUnequip }: ShipBlueprintProps) {
+export function ShipBlueprint({ layout, equipped, onUnequip, unequipBlockReason }: ShipBlueprintProps) {
   const assigned = assignPartsToSlots(layout, equipped);
   return (
     <div className="blueprint">
       {layout.map((kind, i) => {
         const partId = assigned[i];
         const part = partId ? getPart(partId) : null;
+        // 58.3: null whenever there's nothing to block (no onUnequip at
+        // all — a read-only surface — or this specific part isn't blocked).
+        const blockReason = onUnequip && partId ? (unequipBlockReason?.(partId) ?? null) : null;
         return (
           <div key={i} className={`blueprint__slot blueprint__slot--${kind}`}>
-            <div className="blueprint__socket" title={SLOT_KIND_HINT[kind]}>
+            <div className="blueprint__socket" title={blockReason ?? SLOT_KIND_HINT[kind]}>
               {part ? (
                 <PartCard
                   part={part}
-                  onClick={onUnequip && partId ? () => onUnequip(partId) : undefined}
+                  onClick={onUnequip && partId && !blockReason ? () => onUnequip(partId) : undefined}
+                  disabled={!!blockReason}
+                  title={blockReason ?? undefined}
                 />
               ) : (
                 <div className="blueprint__empty" role="img" aria-label={`Empty ${SLOT_KIND_LABEL[kind].toLowerCase()} slot`} />

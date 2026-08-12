@@ -66,7 +66,11 @@ export type PartId =
   | 'disruptor'
   | 'commodity-lot'
   | 'ancient-artifact'
-  | 'captured-plasma';
+  | 'captured-plasma'
+  | 'reactor1'
+  | 'reactor2'
+  | 'reactor3'
+  | 'reactor4';
 
 // Iteration 40 weapon repricing: the Ion cannon (1 cannon die, 1 damage,
 // 3cr) is the price anchor for every other weapon in the roster — 3cr per
@@ -662,13 +666,65 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     cost: 9,
     hull: 3,
   },
+
+  // --- Iteration 58.2: the reactor ladder — power as an upgradeable item.
+  // Swapping a Fission reactor for a Fusion reactor (etc.) IS the upgrade
+  // path; no separate mechanic. Ids are `reactor1`-`reactor4`, deliberately
+  // not anything `fusion`-shaped — 'init3' ("Fusion drive") already owns
+  // that name. Each generates more than 58.1 cut from its own tier's innate
+  // budget, at the price of the slot it occupies (58's own "Calibration
+  // intent" section). `power` (draw) is overridden to 0 for all four below
+  // the derivation — a reactor is a producer, not a consumer, same override
+  // precedent as the commodity lot's `power: 0`. ---
+  {
+    id: 'reactor1',
+    name: 'Fission reactor',
+    type: 'reactor',
+    rarity: 'common',
+    description: 'Generates 3 power.',
+    cost: 3,
+    powerGen: 3,
+  },
+  {
+    id: 'reactor2',
+    name: 'Fusion reactor',
+    type: 'reactor',
+    rarity: 'rare',
+    description: 'Generates 5 power.',
+    cost: 6,
+    powerGen: 5,
+  },
+  {
+    id: 'reactor3',
+    name: 'Tachyon reactor',
+    type: 'reactor',
+    rarity: 'epic',
+    description: 'Generates 7 power.',
+    cost: 10,
+    powerGen: 7,
+  },
+  {
+    id: 'reactor4',
+    name: 'Zero-point reactor',
+    type: 'reactor',
+    rarity: 'legendary',
+    description: 'Generates 9 power.',
+    cost: 15,
+    powerGen: 9,
+  },
 ];
 
 // The real, exported catalog — PART_DEFS plus each part's rarity-derived
 // power (57.1). One derivation site rather than 40+ hand-typed `power:`
 // lines, so a rarity change can never silently leave a stale power value
 // behind (and 57.5's table-driven test asserts the invariant holds anyway).
-export const PARTS: Part[] = PART_DEFS.map((p) => ({ ...p, power: RARITY_POWER[p.rarity] }));
+// Iteration 58.2: a reactor's `power` (draw) is overridden to 0 here rather
+// than rarity-derived — the same single-site-override pattern the commodity
+// lot's `power: 0` already established below, just folded into this
+// derivation instead of a second hand-built object (a reactor IS a normal
+// shop-purchasable/salvageable/sellable PARTS member, unlike the commodity
+// lot, so it belongs in this array, not kept out of it).
+export const PARTS: Part[] = PART_DEFS.map((p) => ({ ...p, power: p.type === 'reactor' ? 0 : RARITY_POWER[p.rarity] }));
 
 // The commodity lot (iteration 20): a pseudo-part that occupies a slot like
 // any other, but is never sold to the shop's random offer draw and never
