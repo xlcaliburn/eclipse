@@ -14,11 +14,14 @@ import {
   RARITY_ORDER,
   STARTING_FIT,
 } from '../game/reducer';
-import { commissionedFleetSize } from '../game/ship';
+import { commissionedFleetSize, equippedPower } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { FitChips } from './FitChips';
 import { FleetPanel } from './FleetPanel';
+import { PowerPipRow } from './PowerPipRow';
+import { ShipyardRefitSection } from './ShipyardRefitSection';
 import { FrameSilhouette } from './ShipSilhouette';
+import { SlotRow } from './SlotRow';
 import { StoreSections } from './StoreSections';
 
 interface ShopScreenProps {
@@ -39,6 +42,10 @@ interface ShopScreenProps {
   // 'store' for a save from before this field existed (that's what every
   // shop visit was, back then).
   kind?: 'store' | 'shipyard';
+  // 52.5 (the hull refit): legendary-target eligibility needs the act, same
+  // gate BUY_SHIP itself checks — canRefit needs it to render the same
+  // legal-target list the reducer would actually accept.
+  act: 1 | 2;
   fleet: PlayerShipState[];
   inventory: PartId[];
   commanderId?: CommanderId;
@@ -51,6 +58,7 @@ interface ShopScreenProps {
   onBuyPart: (offerIndex: number) => void;
   onSellPart: (partId: PartId) => void;
   onBuyShip: (frameId: Exclude<FrameId, 'cruiser'>) => void;
+  onRefitShip: (shipIndex: number, frameId: Exclude<FrameId, 'cruiser'>) => void;
   onScuttle: (shipIndex: number) => void;
   // 2026-08-06: no longer takes a shipIndex — buys to inventory like any
   // other part; equipping it onto a ship is the normal EQUIP flow below.
@@ -70,6 +78,7 @@ export function ShopScreen({
   frameOffers,
   frameBonusPreview,
   kind = 'store',
+  act,
   fleet,
   inventory,
   commanderId,
@@ -79,6 +88,7 @@ export function ShopScreen({
   onBuyPart,
   onSellPart,
   onBuyShip,
+  onRefitShip,
   onScuttle,
   onBuyCommodityLot,
   onSellCommodityLot,
@@ -199,6 +209,19 @@ export function ShopScreen({
                   )}
                 </span>
                 <span className="frame-card__desc">{frame.blurb}</span>
+                {/* Iteration 52.2: the hull's shape, visible BEFORE buying —
+                    with 17 hulls this is where distinguishing "weapon-only"
+                    from "systems-only" from "flexible" matters most. No
+                    `equipped` — every slot renders empty, previewing the
+                    bare layout, not the starting fit (that's FitChips
+                    below). */}
+                <SlotRow layout={frame.slotLayout} />
+                {/* Iteration 57.3: the budget alongside the slot layout —
+                    "used" is what this hull will actually arrive carrying
+                    (starting fit + any pre-rolled bonus items), the same
+                    thing FitChips below previews, so the meter and the
+                    chips never disagree about what's included. */}
+                <PowerPipRow used={equippedPower([...startingFit, ...(preview?.items ?? [])])} budget={frame.power} />
                 {startingFit.length > 0 && <FitChips partIds={startingFit} />}
                 {preview && preview.items.length > 0 && (
                   // 2026-08-08: the actual bonus item(s), same chip row the
@@ -218,6 +241,20 @@ export function ShopScreen({
             );
           })}
         </div>
+      )}
+
+      {/* Iteration 52.5: shipyard-only (canRefit itself enforces this) —
+          renders nothing if no ship currently has a legal target. */}
+      {isShipyard && (
+        <ShipyardRefitSection
+          fleet={fleet}
+          credits={credits}
+          shopFrameOffers={frameOffers}
+          act={act}
+          protocols={protocols}
+          commanderId={commanderId}
+          onRefit={onRefitShip}
+        />
       )}
 
       <h3>Your fleet</h3>

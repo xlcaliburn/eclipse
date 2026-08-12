@@ -30,6 +30,7 @@ import { heatTier, MAX_HEAT } from '../game/heat';
 import { PARTS } from '../game/parts';
 import { PROTOCOLS } from '../game/protocols';
 import type { ProtocolDef } from '../game/protocols';
+import { effectiveSlotLayout, weaponCeiling } from '../game/ship';
 import { UPGRADES } from '../game/upgrades';
 import type { EnemyDef, Part, Rarity, WeaponStats } from '../game/types';
 // Reused straight from the game's own presentation layer — same code-
@@ -38,6 +39,7 @@ import type { EnemyDef, Part, Rarity, WeaponStats } from '../game/types';
 // from what a playtester actually sees in a run.
 import { CommanderCrest } from '../components/CommanderCrest';
 import { classifyArchetype, EnemySilhouette, FrameSilhouette } from '../components/ShipSilhouette';
+import { SlotRow } from '../components/SlotRow';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers — the display vocabulary matches the game's UI
@@ -145,6 +147,7 @@ function PartsTable({ parts }: { parts: Part[] }) {
             <th>Part</th>
             <th>Rarity</th>
             <th>Cost</th>
+            <th>Power</th>
             <th>Effect</th>
           </tr>
         </thead>
@@ -159,6 +162,10 @@ function PartsTable({ parts }: { parts: Part[] }) {
                 <span className={`wiki-rarity wiki-rarity--${p.rarity}`}>{p.rarity}</span>
               </td>
               <td className="wiki-num">{p.cost}cr</td>
+              {/* Iteration 57.1: rarity-derived (common 1 / rare 2 / epic 3
+                  / legendary 4) — shown alongside cost, same pairing
+                  PartCard uses in the shop. */}
+              <td className="wiki-num">{p.power}</td>
               <td>{p.description}</td>
             </tr>
           ))}
@@ -309,9 +316,11 @@ export function Wiki() {
                   <th>Rarity</th>
                   <th>Cost</th>
                   <th>Slots</th>
+                  <th>Power</th>
                   <th>HP</th>
                   <th>INIT</th>
                   <th>Weapon cap</th>
+                  <th>Innate</th>
                   <th>Notes</th>
                 </tr>
               </thead>
@@ -333,10 +342,21 @@ export function Wiki() {
                         )}
                       </td>
                       <td className="wiki-num">{f.cost}cr</td>
-                      <td className="wiki-num">{f.slots}</td>
+                      {/* Iteration 52.1: typed slots, not a bare count — the
+                          layout itself IS the identity now. */}
+                      <td>
+                        <SlotRow layout={f.slotLayout} size={18} />
+                      </td>
+                      {/* Iteration 57.1: the hull's own power budget — a
+                          bare number here (not the pip meter, which reads
+                          as "used/budget" for a specific loadout) since
+                          there's no specific build to show usage against
+                          in a reference table. */}
+                      <td className="wiki-num">{f.power}</td>
                       <td className="wiki-num">{f.baseHp}</td>
                       <td className="wiki-num">{f.baseInitiative}</td>
-                      <td className="wiki-num">{f.maxWeapons ?? '—'}</td>
+                      <td className="wiki-num">{weaponCeiling(effectiveSlotLayout(f.id, []))}</td>
+                      <td>{f.innate ? `${f.innate.name} — ${f.innate.description}` : '—'}</td>
                       <td>{f.blurb}</td>
                     </tr>
                   );

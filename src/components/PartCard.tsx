@@ -7,6 +7,10 @@ interface PartCardProps {
   onClick?: () => void;
   disabled?: boolean;
   showCost?: boolean;
+  // 2026-08-12 (iteration 52.2): a disabled reason ("no free weapon slot")
+  // — the shop/fleet callers pass this through equipBlockReason so a
+  // disabled part explains itself instead of just dead-clicking.
+  title?: string;
 }
 
 // Iteration 29: the Shield stat is displayed as "Piloting" everywhere a
@@ -25,13 +29,14 @@ const TYPE_LABEL: Record<Part['type'], string> = {
   cargo: 'Cargo',
 };
 
-export function PartCard({ part, onClick, disabled, showCost }: PartCardProps) {
+export function PartCard({ part, onClick, disabled, showCost, title }: PartCardProps) {
   return (
     <button
       type="button"
       className={`part-card part-card--${part.type} part-card--rarity-${part.rarity}${part.active ? ' part-card--active' : ''}`}
       onClick={onClick}
       disabled={disabled || !onClick}
+      title={title}
     >
       <span className="part-card__type">
         <PartIcon part={part} size={16} />
@@ -50,7 +55,18 @@ export function PartCard({ part, onClick, disabled, showCost }: PartCardProps) {
         </span>
       )}
       <span className="part-card__desc">{part.description}</span>
-      {showCost && <span className="part-card__cost">{part.cost} cr</span>}
+      {showCost && (
+        <span className="part-card__price-row">
+          <span className="part-card__cost">{part.cost} cr</span>
+          {/* Iteration 57.3: power draw next to the credit price — a
+              player needs both numbers to plan a purchase, not just the
+              one that was already here. Gated on the same `showCost`
+              (only the shop's offer draw passes it), not shown separately
+              — an already-equipped part's power is read off the ship
+              card's own meter instead. */}
+          <span className="part-card__power">{part.power} pwr</span>
+        </span>
+      )}
     </button>
   );
 }

@@ -46,7 +46,15 @@ import type { RunState } from './types';
 // resumed mid-fight would crash on the very first render, not just on a
 // user action — the same "new required-at-read nested field" hazard v5's
 // `heat` bump addressed, same fix.
-export const SAVE_VERSION = 7;
+// v8 (iteration 52, typed slots): `Frame.slots`/`maxWeapons` were replaced
+// by `Frame.slotLayout` (frames.ts) — a loadout legal under the OLD slot
+// count could be illegal under the new typed layout (a Bastion's 2nd
+// weapon, say), which would strand that ship's EQUIP/UNEQUIP with no way
+// to reach a legal state again. This also frees the 5 legacy frame ids
+// (frigate/aegis/tender/ew-cutter/disruptor-cutter) to be repurposed as
+// the un-retired Frigate/Aegis/Sloop/Picket/Disruptor without an old save
+// resolving its ship against the wrong hull's stats.
+export const SAVE_VERSION = 8;
 const SAVE_KEY = 'eclipse.save.v1';
 // Iteration 18: the daily run gets its own slot so it can coexist with a
 // standard run; a small separate record tracks today's attempt + result.

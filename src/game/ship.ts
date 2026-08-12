@@ -1,13 +1,63 @@
 import type { CommanderId } from './commanders';
 import type { PlayerFleetInput } from './combatEngine';
 import { getFrame } from './frames';
-import type { FrameId } from './frames';
+import type { FrameId, SlotKind } from './frames';
 import { getPart } from './parts';
 import { hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
-import type { PartId, PlayerShipState, ShipStats } from './types';
+import type { PartId, PartType, PlayerShipState, ShipStats } from './types';
 import { getUpgrade } from './upgrades';
 import type { UpgradeId } from './upgrades';
+
+// --- Iteration 52.1: typed slots ------------------------------------------
+// Which slot kind a given PartType is accepted by. 'cargo' (the commodity
+// lot) is deliberately absent — it's universal-only (see countParts below),
+// never mapped to a dedicated kind, so it always draws from the shared
+// universal pool.
+const PART_TYPE_SLOT_KIND: Partial<Record<PartType, Exclude<SlotKind, 'universal'>>> = {
+  weapon: 'weapon',
+  shield: 'defense',
+  hull: 'defense',
+  computer: 'systems',
+  drive: 'systems',
+};
+
+// Exported for the UI (SlotRow.tsx greedily assigns each equipped part to
+// a slot of its own matching kind, for display) — one source of truth with
+// the legality math above.
+export function slotKindForPartType(type: PartType): SlotKind {
+  return PART_TYPE_SLOT_KIND[type] ?? 'universal';
+}
+
+interface SlotKindCounts {
+  weapon: number;
+  defense: number;
+  systems: number;
+  universal: number;
+}
+
+function countSlotLayout(layout: SlotKind[]): SlotKindCounts {
+  const counts: SlotKindCounts = { weapon: 0, defense: 0, systems: 0, universal: 0 };
+  for (const kind of layout) counts[kind]++;
+  return counts;
+}
+
+interface PartKindCounts {
+  weapon: number;
+  defense: number;
+  systems: number;
+  cargo: number; // universal-only — see PART_TYPE_SLOT_KIND above
+}
+
+function countParts(partIds: PartId[]): PartKindCounts {
+  const counts: PartKindCounts = { weapon: 0, defense: 0, systems: 0, cargo: 0 };
+  for (const id of partIds) {
+    const bucket = PART_TYPE_SLOT_KIND[getPart(id).type];
+    if (bucket) counts[bucket]++;
+    else counts.cargo++;
+  }
+  return counts;
+}
 
 // `upgrades` are slotless (elite drops) and fold in on top of frame + parts.
 // `protocols` (iteration 28) are RunState-level, not per-ship, but two of
@@ -32,9 +82,13 @@ export function deriveStats(
     missiles: [],
     shieldPierce: 0,
   };
-  // Jink is innate to the Interceptor frame (iteration 8, addendum A.1) —
-  // not a part, always present, no button.
-  if (frameId === 'interceptor') stats.jink = true;
+  // Iteration 52.3: a frame's own innate trait, if it has one — folded in
+  // immediately after the base stats above so parts/upgrades still stack
+  // on top of it exactly as before. Formalizes what used to be a one-off
+  // hardcoded check here (`if (frameId === 'interceptor') stats.jink =
+  // true`) — the Interceptor's `innate` (frames.ts) now expresses the same
+  // thing declaratively, the zero-behavior-change proof the pattern works.
+  if (frame.innate) Object.assign(stats, frame.innate.grants);
 
   const twinLinked = hasProtocol(protocols, 'twin-linked-mounts');
   let twinLinkedApplied = false;
@@ -275,17 +329,168 @@ export function formatStatLine(stats: ShipStats, damage?: number): string {
 // what a single ship should carry, so it needed a build-space bonus of its
 // own alongside the bigger augment cap below, not just a discount and a
 // free starting upgrade.
+// Iteration 52.1: returns the full typed layout (frame's own slotLayout
+// plus one 'universal' per bonus slot) rather than just a count — bonus
+// slots have never had a type and don't gain one now, so they're always
+// appended as 'universal'. `effectiveSlots` below stays a thin `.length`
+// wrapper so every "how many empty slots" call site keeps compiling
+// unchanged.
+export function effectiveSlotLayout(
+  frameId: FrameId,
+  upgrades: UpgradeId[],
+  protocols?: ProtocolId[],
+  commanderId?: CommanderId,
+): SlotKind[] {
+  const frame = getFrame(frameId);
+  const bayCount = upgrades.filter((u) => u === 'bay').length;
+  const lonelyFlagshipBonus = frameId === 'cruiser' && hasProtocol(protocols, 'lone-flagship') ? 2 : 0;
+  const warlordBonus = frameId === 'cruiser' && commanderId === 'warlord' ? 1 : 0;
+  const bonusSlots = bayCount + lonelyFlagshipBonus + warlordBonus;
+  return [...frame.slotLayout, ...(Array(bonusSlots).fill('universal') as SlotKind[])];
+}
+
 export function effectiveSlots(
   frameId: FrameId,
   upgrades: UpgradeId[],
   protocols?: ProtocolId[],
   commanderId?: CommanderId,
 ): number {
-  const frame = getFrame(frameId);
-  const bayCount = upgrades.filter((u) => u === 'bay').length;
-  const lonelyFlagshipBonus = frameId === 'cruiser' && hasProtocol(protocols, 'lone-flagship') ? 2 : 0;
-  const warlordBonus = frameId === 'cruiser' && commanderId === 'warlord' ? 1 : 0;
-  return frame.slots + bayCount + lonelyFlagshipBonus + warlordBonus;
+  return effectiveSlotLayout(frameId, upgrades, protocols, commanderId).length;
+}
+
+// The most weapons a layout can ever carry — its dedicated weapon slots
+// plus every universal slot, since universal accepts anything (open
+// question #3 in plans/iteration-52.md: a universal-heavy hull can go
+// all-weapons by construction; a hull that needs a HARD cap regardless
+// needs zero universal slots, same as Bastion above). Exported for UI
+// (frame cards can show "up to N weapons") and tests that want to assert
+// against the real ceiling instead of a removed `maxWeapons` field.
+export function weaponCeiling(layout: SlotKind[]): number {
+  return layout.filter((k) => k === 'weapon' || k === 'universal').length;
+}
+
+// Iteration 57.2: total power drawn by an equipped set — the sum of each
+// part's rarity-derived Part.power (types.ts). Exported for the UI's power
+// meter (ship cards) alongside `getFrame(frameId).power` for the budget
+// half of "used / budget". Never reaches deriveStats/the combat engine —
+// power is a build-time constraint only, same as slot count.
+export function equippedPower(equipped: PartId[]): number {
+  return equipped.reduce((sum, id) => sum + getPart(id).power, 0);
+}
+
+interface LayoutFeasibility {
+  slotOk: boolean;
+  powerOk: boolean;
+}
+
+// Shared by layoutCanHold and equipBlockReason below — split into its two
+// component checks so equipBlockReason can say WHICH one failed (57.3: "not
+// enough power" must be a distinct, stated reason, not folded into the
+// slot-layout messaging).
+function layoutFeasibility(
+  frameId: FrameId,
+  equipped: PartId[],
+  upgrades: UpgradeId[],
+  protocols?: ProtocolId[],
+  commanderId?: CommanderId,
+): LayoutFeasibility {
+  const slots = countSlotLayout(effectiveSlotLayout(frameId, upgrades, protocols, commanderId));
+  const parts = countParts(equipped);
+  const overflow =
+    Math.max(0, parts.weapon - slots.weapon) +
+    Math.max(0, parts.defense - slots.defense) +
+    Math.max(0, parts.systems - slots.systems) +
+    parts.cargo;
+  return {
+    slotOk: overflow <= slots.universal,
+    // 57.2: the power budget is the frame's own flat `power` field only —
+    // deliberately NOT effectiveSlotLayout's bonus-slot-inflated layout.
+    // Bonus slots (bay upgrades, Lone flagship, Warlord) grant room but not
+    // generation capacity; see effectiveSlotLayout's own comment for the
+    // matching asymmetry on the slot side. Someone will eventually read
+    // "a bay upgrade doesn't add power" as a bug — it isn't.
+    powerOk: equippedPower(equipped) <= getFrame(frameId).power,
+  };
+}
+
+// Iteration 52.1: the one feasibility predicate every "can this part go on
+// this ship" call site now shares — EQUIP (reducer.ts), the shop's
+// bonus-item fitting (hullRarityBonus, reducer/shop.ts), scripts/sim's
+// agent.canFit and budget.hasRoom. Replaces the old pair of checks
+// (`equipped.length >= effectiveSlots(...)` and a separate `maxWeapons`
+// cap) with the single overflow condition 52.1 derives: each category
+// (weapon/defense/systems) maps to its own dedicated slots plus the shared
+// universal pool; cargo (the commodity lot) draws from the universal pool
+// only, having no dedicated kind of its own.
+// Iteration 57.2: also gates on the power budget (layoutFeasibility above)
+// — one predicate, both rules, so every call site above picks power up for
+// free with no change of its own.
+export function canEquip(
+  frameId: FrameId,
+  equipped: PartId[],
+  partId: PartId,
+  upgrades: UpgradeId[],
+  protocols?: ProtocolId[],
+  commanderId?: CommanderId,
+): boolean {
+  return layoutCanHold(frameId, [...equipped, partId], upgrades, protocols, commanderId);
+}
+
+// 52.5 (the hull refit): whether a WHOLE equipped set — not one candidate
+// item added to what's already there — fits a frame's typed-slot layout
+// all at once. `canEquip` above is this with the candidate folded into
+// `equipped` first; `canRefit` (reducer/shop.ts) uses this directly, since
+// a refit target must hold everything the ship already carries
+// simultaneously, not one part at a time — including, since 57.2, the
+// target's power budget covering that same loadout (a refit can legally
+// move a ship DOWN in power, since cost and power aren't perfectly
+// correlated — this is a real gate, not just belt-and-suspenders).
+export function layoutCanHold(
+  frameId: FrameId,
+  equipped: PartId[],
+  upgrades: UpgradeId[],
+  protocols?: ProtocolId[],
+  commanderId?: CommanderId,
+): boolean {
+  const { slotOk, powerOk } = layoutFeasibility(frameId, equipped, upgrades, protocols, commanderId);
+  return slotOk && powerOk;
+}
+
+const SLOT_KIND_LABEL: Record<Exclude<SlotKind, 'universal'>, string> = {
+  weapon: 'weapon',
+  defense: 'defense',
+  systems: 'systems',
+};
+
+// 52.2: the UI is asked to say WHY a part can't be equipped rather than
+// just disabling the control — a dead click is the exact failure mode
+// iteration 47.1 already had to fix once (the Lone-flagship slot bug).
+// Returns null when the part is actually equippable (canEquip already
+// says yes); otherwise a short human reason, cheapest-to-explain first: a
+// completely full ship, then "no free slot of this specific kind."
+// Iteration 57.3: a THIRD reason, "not enough power" — checked only once
+// the slot-layout question is settled, so a part that fails both (rare:
+// most out-of-slot parts are also over budget) reports the slot reason,
+// same arbitrary-but-deterministic priority the two slot reasons above
+// already have between each other.
+export function equipBlockReason(
+  frameId: FrameId,
+  equipped: PartId[],
+  partId: PartId,
+  upgrades: UpgradeId[],
+  protocols?: ProtocolId[],
+  commanderId?: CommanderId,
+): string | null {
+  if (canEquip(frameId, equipped, partId, upgrades, protocols, commanderId)) return null;
+  const { slotOk } = layoutFeasibility(frameId, [...equipped, partId], upgrades, protocols, commanderId);
+  if (!slotOk) {
+    const layout = effectiveSlotLayout(frameId, upgrades, protocols, commanderId);
+    if (equipped.length >= layout.length) return 'Ship is full — no empty slots.';
+    const bucket = PART_TYPE_SLOT_KIND[getPart(partId).type];
+    const label = bucket ? SLOT_KIND_LABEL[bucket] : 'universal';
+    return `No free ${label} slot for this part.`;
+  }
+  return 'Not enough power for this part.';
 }
 
 export function equippedWeaponCount(equippedPartIds: PartId[]): number {

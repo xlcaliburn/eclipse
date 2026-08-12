@@ -32,18 +32,17 @@ import type { FrameId } from './frames';
 import { addHeat, MAX_HEAT } from './heat';
 import { actColumns, bossColumn, generateMap, getNode, globalColumn, laneColumns, maxRows, reachableNodes } from './map';
 import type { CargoTag, GameMap, MapPosition } from './map';
-import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, getPart, isSalvageablePart, PARTS, STARTING_LOADOUT } from './parts';
+import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, isSalvageablePart, PARTS, STARTING_LOADOUT } from './parts';
 import { drawProtocolOffers, hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
 import { pickOne, randomSeed, resumeRng, runRng } from './rng';
 import type { RngFn } from './rng';
 import {
   applyRepairBanking,
+  canEquip,
   deriveFleetForCombat,
   deriveFleetStats,
   deriveStats,
-  effectiveSlots,
-  equippedWeaponCount,
   everyShipAtUpgradeCap,
   fleetHasWeapon,
   playerShipLabel,
@@ -75,6 +74,7 @@ import type { CombatEvent, EnemyDef, PartId, PlayerShipState, RewardSummary, Run
 // upgradeCapFor } from './ship'` above doesn't repeat it in a value import.
 import { drawFrameOffers, drawShopOffers, handleShopAction, hullRarityBonus, hullScrapValue } from './reducer/shop';
 export {
+  canRefit,
   commodityLotBuyCost,
   commodityLotCap,
   COMMODITY_LOT_SELL_PRICE,
@@ -86,6 +86,7 @@ export {
   partCost,
   partSellPrice,
   RARITY_ORDER,
+  refitCost,
   REPAIR_COST_PER_HP,
   rollRarity,
   SHOP_OFFER_COUNT,
@@ -122,6 +123,13 @@ export type RunAction =
   | { type: 'BUY_PART'; offerIndex: number }
   | { type: 'SELL_PART'; partId: PartId }
   | { type: 'BUY_SHIP'; frameId: Exclude<FrameId, 'cruiser'> } // the Flagship is never purchasable
+  // Iteration 52.5 (the hull refit): trade shipIndex's ship up into
+  // frameId — must be an offer this shipyard actually has in stock (same
+  // rule as BUY_SHIP), strictly more expensive than the ship's current
+  // frame, and able to legally carry the ship's current `equipped` (see
+  // canRefit in reducer/shop.ts). The Flagship and mercenaries can never
+  // be refit.
+  | { type: 'REFIT_SHIP'; shipIndex: number; frameId: Exclude<FrameId, 'cruiser'> }
   | { type: 'SCUTTLE_SHIP'; shipIndex: number }
   | { type: 'SET_TARGETING_STANCE'; stance: TargetingStance }
   // Iteration 20 (commodity runs): buy adds a lot to inventory, same as any
@@ -908,17 +916,18 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'prep' && state.phase !== 'shop') return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
-      // 2026-08-07 bug fix: this omitted `state.protocols`, so a Lone
-      // flagship Flagship's +2 bonus slots (real everywhere else —
-      // deriveStats, FleetPanel/FleetOverlay's "has room" checks) were
-      // silently invisible to the one gate that actually allows an EQUIP.
-      // The UI showed the slot as available and let the player click it;
-      // this then rejected the action with no feedback.
-      if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades, state.protocols, state.commanderId)) return state;
       if (!state.inventory.includes(action.partId)) return state;
-      const part = getPart(action.partId);
-      const maxWeapons = getFrame(ship.frameId).maxWeapons;
-      if (part.weapon && maxWeapons !== undefined && equippedWeaponCount(ship.equipped) >= maxWeapons) return state;
+      // 2026-08-07 bug fix (still true under 52.1's canEquip): this used to
+      // omit `state.protocols`, so a Lone flagship Flagship's +2 bonus
+      // slots (real everywhere else — deriveStats, FleetPanel/
+      // FleetOverlay's "has room" checks) were silently invisible to the
+      // one gate that actually allows an EQUIP. The UI showed the slot as
+      // available and let the player click it; this then rejected the
+      // action with no feedback.
+      // Iteration 52.1: canEquip subsumes both the old separate checks
+      // here (slot-count room AND the frame's weapon cap) into the one
+      // typed-slot feasibility predicate — see ship.ts.
+      if (!canEquip(ship.frameId, ship.equipped, action.partId, ship.upgrades, state.protocols, state.commanderId)) return state;
       // 2026-08-06: a commodity lot bought to inventory still can't ride on
       // a mercenary — it would be lost with the ship after one fight, same
       // guard BUY_COMMODITY_LOT used to carry when buy and equip were one
@@ -1408,12 +1417,14 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       };
     }
 
-    // 47.6: the 9 shop actions all delegate to reducer/shop.ts's single
+    // 47.6: the shop actions all delegate to reducer/shop.ts's single
     // handleShopAction dispatcher — see that file's header for why this
-    // split exists and what stays here vs. there.
+    // split exists and what stays here vs. there. 52.5 added REFIT_SHIP to
+    // the set.
     case 'BUY_PART':
     case 'SELL_PART':
     case 'BUY_SHIP':
+    case 'REFIT_SHIP':
     case 'SCUTTLE_SHIP':
     case 'BUY_COMMODITY_LOT':
     case 'SELL_COMMODITY_LOT':

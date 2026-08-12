@@ -211,8 +211,71 @@ const FRAME_SHAPES: Record<FrameId, React.ReactNode> = {
     </>
   ),
 
-  // --- Legacy support hulls (iteration 23, retired iteration 36) — kept
-  // only so an existing save's fleet still renders. ---
+  // --- Iteration 52: 5 genuinely new frames ------------------------------
+  gunboat: ( // stubby hull, three forward gun barrels side by side
+    <>
+      <polygon points="50,12 60,26 60,66 50,78 40,66 40,26" />
+      <rect x="38" y="30" width="5" height="30" />
+      <rect x="47.5" y="26" width="5" height="34" />
+      <rect x="57" y="30" width="5" height="30" />
+      <ellipse cx="50" cy="18" rx="3" ry="4" fill="var(--bg)" opacity="0.8" />
+      <polygon points="46,70 54,70 51,80 49,80" fill="var(--bg)" opacity="0.6" />
+    </>
+  ),
+  destroyer: ( // lean fast hull, swept twin fins, single hot engine
+    <>
+      <polygon points="50,5 57,18 57,72 50,86 43,72 43,18" />
+      <polygon points="43,36 20,58 28,64 43,50" />
+      <polygon points="57,36 80,58 72,64 57,50" />
+      <ellipse cx="50" cy="15" rx="3" ry="4.5" fill="var(--bg)" opacity="0.8" />
+      <rect x="48.75" y="24" width="2.5" height="40" fill="var(--bg)" opacity="0.5" />
+      <polygon points="45,74 55,74 51,88 49,88" opacity="0.55" />
+    </>
+  ),
+  battleship: ( // wide armored hull, three dorsal turrets, twin flank sponsons
+    <>
+      <polygon points="50,6 64,16 68,32 68,70 60,86 40,86 32,70 32,32 36,16" />
+      <circle cx="50" cy="24" r="5" fill="var(--bg)" opacity="0.6" />
+      <circle cx="50" cy="42" r="5" fill="var(--bg)" opacity="0.6" />
+      <circle cx="50" cy="60" r="5" fill="var(--bg)" opacity="0.6" />
+      <polygon points="18,38 32,42 32,64 18,60" />
+      <polygon points="82,38 68,42 68,64 82,60" />
+      <polygon points="42,80 58,80 54,92 46,92" opacity="0.5" />
+    </>
+  ),
+  valkyrie: ( // legendary striker — narrow spear hull, sharp swept wings, hot triple engines
+    <>
+      <polygon points="50,3 56,16 56,70 50,84 44,70 44,16" />
+      <polygon points="44,30 14,52 22,60 44,46" />
+      <polygon points="56,30 86,52 78,60 56,46" />
+      <polygon points="44,46 30,68 38,70 44,60" />
+      <polygon points="56,46 70,68 62,70 56,60" />
+      <ellipse cx="50" cy="14" rx="2.5" ry="4" fill="var(--bg)" opacity="0.85" />
+      <polygon points="45,74 55,74 53,84 47,84" fill="var(--bg)" opacity="0.7" />
+      <polygon points="46,85 54,85 50,98" opacity="0.55" />
+    </>
+  ),
+  titan: ( // the roster's largest hull — layered capital spine, quad sponsons, heavy stern block
+    <>
+      <polygon points="50,2 62,10 66,26 66,76 58,92 42,92 34,76 34,26 38,10" />
+      <polygon points="38,12 30,26 38,30" />
+      <polygon points="62,12 70,26 62,30" />
+      <polygon points="14,30 34,34 34,64 14,60" />
+      <polygon points="86,30 66,34 66,64 86,60" />
+      <rect x="48.75" y="6" width="2.5" height="20" fill="var(--bg)" opacity="0.6" />
+      <circle cx="22" cy="42" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <circle cx="22" cy="52" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <circle cx="78" cy="42" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <circle cx="78" cy="52" r="2.5" fill="var(--bg)" opacity="0.85" />
+      <rect x="42.5" y="34" width="2.5" height="46" fill="var(--bg)" opacity="0.4" />
+      <rect x="54.5" y="34" width="2.5" height="46" fill="var(--bg)" opacity="0.4" />
+      <polygon points="40,88 48,88 46,96 42,96" opacity="0.5" />
+      <polygon points="52,88 60,88 58,96 54,96" opacity="0.5" />
+    </>
+  ),
+
+  // --- Support hulls (iteration 23) — retired iteration 36, un-retired
+  // iteration 52 (see frames.ts's FrameId comment). Shapes unchanged. ---
   frigate: ( // slim hull + a dish — a coordination ship, not a combatant
     <>
       <polygon points="50,15 60,35 60,85 50,95 40,85 40,35" />

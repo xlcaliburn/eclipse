@@ -3,11 +3,22 @@
 > **Status: specced, not implemented.** Implementer: record deviations and
 > verification results here, per the established style.
 >
-> **Depends on [iteration 52](plans/iteration-52.md).** 52 changes the
-> shop draw, adds the hull refit and further credit sinks — all of which
-> move the player's real spending power. Enemy scaling cannot be tuned
-> against an economy that is about to shift underneath it, so this
-> iteration baselines against 52's post-change measurement, not today's.
+> **Depends on [iteration 52](plans/iteration-52.md), and on
+> [56](plans/iteration-56.md) if that lands first.** (Note: 52 was
+> respecced on 2026-08-12 — it is now the hull iteration, not the
+> shop-economy one. The dependency still holds, for different reasons.)
+>
+> - **52** widens the purchasable roster ~7 → ~11 hulls, adds typed
+>   slots that constrain what a given fleet can carry, adds innate hull
+>   traits that change real combat stats, and adds the hull refit as a
+>   credit sink. All four move what a given budget can actually field —
+>   which is the denominator of every ratio this iteration tunes against.
+> - **56** grants a permanent extra fleet berth via act-2 events, i.e. an
+>   extra hull exactly where this iteration's biggest death cluster is.
+>
+> Enemy scaling cannot be tuned against a fleet whose size and
+> composition are about to change, so baseline against those iterations'
+> post-change measurements, not today's.
 
 ## Motivation (user question, 2026-08-08)
 

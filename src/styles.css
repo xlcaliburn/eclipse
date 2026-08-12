@@ -890,6 +890,38 @@ h1, h2, h3 {
   background: var(--danger);
 }
 
+/* Power budget (iteration 57.3): same segmented-pip language as HP
+   (.hp-pips above) rather than a third visual system — one pip per point
+   of a frame's power budget, lit left-to-right as a build spends it
+   (PowerPipRow.tsx). Inverted from HP (which drains): lit here means
+   SPENT, not remaining. `--over` only ever renders defensively (see that
+   component's own comment) — canEquip/canRefit never let a live build get
+   there. */
+.power-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 132px;
+}
+
+.power-pips__pip {
+  width: 6px;
+  height: 8px;
+  flex-shrink: 0;
+  flex-grow: 0;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.power-pips__pip--used {
+  background: var(--accent);
+  box-shadow: 0 0 3px var(--accent-glow);
+}
+
+.power-pips__pip--over {
+  background: var(--danger);
+}
+
 /* Map screen */
 .map-screen {
   background: var(--panel);
@@ -1834,6 +1866,76 @@ h1, h2, h3 {
   border-radius: 50%;
 }
 
+/* Iteration 52.2: typed slot chips — colour + icon + letter, three
+   redundant cues per slot kind (see SlotRow.tsx). Rendered small enough to
+   sit inline on a frame card / ship card header, distinct from the
+   full-size .slot/.part-card hardpoint sockets above. */
+.slot-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+.slot-chip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.slot-chip .part-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.slot-chip__letter {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 2px;
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+/* Filled: a solid tinted chip — "this slot is doing something." */
+.slot-chip--filled {
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 16%, var(--panel-2));
+}
+
+/* Empty: a dashed outline — "waiting for a part of this kind," not just
+   blank (52.2's own distinction). */
+.slot-chip--empty {
+  border: 1px dashed currentColor;
+  background: transparent;
+  opacity: 0.75;
+}
+
+.slot-chip--weapon {
+  color: var(--danger);
+}
+
+.slot-chip--defense {
+  color: var(--success);
+}
+
+.slot-chip--systems {
+  color: var(--accent);
+}
+
+.slot-chip--universal {
+  color: var(--text-dim);
+}
+
 .part-card {
   width: 120px;
   min-height: 84px;
@@ -2641,6 +2743,36 @@ h1, h2, h3 {
   margin-bottom: 12px;
 }
 
+/* Iteration 52.5 (the hull refit) — one row per eligible ship, its legal
+   targets laid out as the same .frame-card buttons the "Expand your
+   fleet" section already uses, so a refit target reads exactly like a
+   fresh-purchase hull card. */
+.shop-screen__refits {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.refit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.refit-row__ship {
+  font-weight: 600;
+  min-width: 120px;
+  padding-top: 8px;
+}
+
+.refit-row__targets {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .shop-button {
   display: inline-flex;
   align-items: center;
@@ -2778,6 +2910,22 @@ h1, h2, h3 {
   font-size: 12px;
   font-weight: 600;
   color: var(--warning);
+}
+
+/* Iteration 57.3: power draw sits next to the credit price, not below it —
+   a shop offer's "what does this cost" answer is now two numbers, and a
+   player planning a purchase needs to read both at once. */
+.part-card__price-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.part-card__power,
+.frame-card__power {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
 }
 
 .shop-screen__footer {

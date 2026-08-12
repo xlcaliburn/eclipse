@@ -1,7 +1,7 @@
 import { getFrame } from '../../src/game/frames';
 import type { FrameId } from '../../src/game/frames';
 import { getPart, STARTING_LOADOUT } from '../../src/game/parts';
-import { effectiveSlots } from '../../src/game/ship';
+import { canEquip } from '../../src/game/ship';
 import type { PartId, PlayerShipState } from '../../src/game/types';
 
 // Iteration 45.1: reference fleets that price themselves off the CURRENT
@@ -37,11 +37,12 @@ const CHEAP_ESCORT: Exclude<FrameId, 'cruiser'> = 'interceptor';
 const WIDE_FLEET_CAP = 4;
 const OTHER_FLEET_CAP = 3; // one Flagship + up to two escorts — 'tall' overrides to 1
 
+// 52.1: delegates to the shared canEquip predicate — see agent.ts's canFit
+// for the identical rewrite (this fixture-builder version carries no
+// protocols/commanderId, since none of the bonus-slot sources apply to a
+// hand-built escort/Flagship fixture).
 function hasRoom(ship: PlayerShipState, partId: PartId): boolean {
-  if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades)) return false;
-  const maxWeapons = getFrame(ship.frameId).maxWeapons;
-  if (maxWeapons === undefined || !getPart(partId).weapon) return true;
-  return ship.equipped.filter((id) => getPart(id).weapon).length < maxWeapons;
+  return canEquip(ship.frameId, ship.equipped, partId, ship.upgrades);
 }
 
 function newEscort(): PlayerShipState {

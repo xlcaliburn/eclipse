@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getFrame } from '../../src/game/frames';
 import { getPart, STARTING_LOADOUT } from '../../src/game/parts';
-import { effectiveSlots } from '../../src/game/ship';
+import { effectiveSlotLayout, effectiveSlots, weaponCeiling } from '../../src/game/ship';
 import { buildFleet, creditsBankedByColumn } from './budget';
 import type { Archetype } from './budget';
 
@@ -43,15 +43,17 @@ describe('buildFleet', () => {
     }
   });
 
-  it('respects a capped frame\'s weapon limit', () => {
-    // Bastion caps at 1 weapon — the tank-taunt archetype leans on it
-    // heavily enough to be a real test of the cap, not just Flagship slots.
+  it('respects each frame\'s typed-slot weapon ceiling', () => {
+    // Bastion caps at 1 weapon (no universal overflow) — the tank-taunt
+    // archetype leans on it heavily enough to be a real test of the cap,
+    // not just Flagship slots. Iteration 52.1: the ceiling is now derived
+    // (dedicated weapon slots + universal slots) rather than a flat
+    // `maxWeapons` field.
     const fleet = buildFleet(60, 'tank-taunt');
     for (const ship of fleet) {
-      const maxWeapons = getFrame(ship.frameId).maxWeapons;
-      if (maxWeapons === undefined) continue;
+      const ceiling = weaponCeiling(effectiveSlotLayout(ship.frameId, ship.upgrades));
       const weaponCount = ship.equipped.filter((id) => getPart(id).weapon).length;
-      expect(weaponCount).toBeLessThanOrEqual(maxWeapons);
+      expect(weaponCount).toBeLessThanOrEqual(ceiling);
     }
   });
 

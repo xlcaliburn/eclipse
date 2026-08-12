@@ -11,12 +11,14 @@
 // error the moment a new RunAction variant isn't classified.
 import type { CommanderId } from '../../src/game/commanders';
 import { getFrame, PURCHASABLE_FRAME_IDS } from '../../src/game/frames';
+import type { FrameId } from '../../src/game/frames';
 import { getEvent, meetsRequirement } from '../../src/game/events';
 import { actColumns, bossColumn, getNode, globalColumn, reachableNodes } from '../../src/game/map';
 import type { MapNode } from '../../src/game/map';
-import { COMMODITY_LOT_PART_ID, getPart } from '../../src/game/parts';
+import { COMMODITY_LOT_PART_ID } from '../../src/game/parts';
 import { hasProtocol } from '../../src/game/protocols';
 import {
+  canRefit,
   commodityLotBuyCost,
   commodityLotCap,
   eliteReward,
@@ -25,13 +27,14 @@ import {
   initialRunState,
   mercenaryCost,
   partCost,
+  refitCost,
   REPAIR_COST_PER_HP,
   runReducer,
   winReward,
 } from '../../src/game/reducer';
 import type { RunAction } from '../../src/game/reducer';
 import { mulberry32 } from '../../src/game/rng';
-import { deriveStats, effectiveSlots } from '../../src/game/ship';
+import { canEquip, deriveStats } from '../../src/game/ship';
 import type { PartId, PlayerShipState, RunState } from '../../src/game/types';
 import type { PolicyConfig } from './policy';
 import { COMMANDER_ROUTE_BIAS, DEFAULT_PROTOCOL_INDEX } from './policy';
@@ -67,6 +70,7 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   BUY_PART: true,
   SELL_PART: true,
   BUY_SHIP: true,
+  REFIT_SHIP: true,
   SCUTTLE_SHIP: true,
   SET_TARGETING_STANCE: true,
   BUY_COMMODITY_LOT: true,
@@ -188,14 +192,13 @@ function pickNode(state: RunState, config: PolicyConfig, commanderId: CommanderI
 
 // --- Shop --------------------------------------------------------------
 
+// 52.1: delegates to the shared canEquip predicate — the only thing left
+// here is the mercenary/commodity-lot guard, which is agent-policy logic,
+// not a slot-legality rule (a mercenary CAN physically carry a lot by the
+// typed-slot math; it's just never allowed to, same as EQUIP's own guard).
 function canFit(ship: PlayerShipState, partId: PartId, protocols: RunState['protocols'], commanderId: CommanderId | undefined): boolean {
   if (ship.mercenary && partId === COMMODITY_LOT_PART_ID) return false;
-  if (ship.equipped.length >= effectiveSlots(ship.frameId, ship.upgrades, protocols, commanderId)) return false;
-  const maxWeapons = getFrame(ship.frameId).maxWeapons;
-  if (maxWeapons === undefined) return true;
-  const part = getPart(partId);
-  if (!part.weapon) return true;
-  return ship.equipped.filter((id) => getPart(id).weapon).length < maxWeapons;
+  return canEquip(ship.frameId, ship.equipped, partId, ship.upgrades, protocols, commanderId);
 }
 
 function buyAndEquipFromOffers(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
@@ -232,13 +235,52 @@ function buyHull(state: RunState, config: PolicyConfig, commanderId: CommanderId
   for (const frameId of config.framePriority) {
     if (s.fleet.length >= cap) break;
     if (!s.shopFrameOffers?.includes(frameId)) continue;
-    if (frameId === 'dreadnought' && (s.act === 1 || s.shopKind !== 'shipyard')) continue;
+    // Iteration 52: generalized off the old hardcoded 'dreadnought' check
+    // — legendary hulls are act-2-and-shipyard-only now (see
+    // reducer/shop.ts's drawFrameOffers). Belt-and-suspenders only:
+    // drawFrameOffers already never puts one in shopFrameOffers outside
+    // that gate, so this never actually fires in practice today, but
+    // keeps this function correct if a legendary id is ever added to a
+    // framePriority list.
+    if (getFrame(frameId).rarity === 'legendary' && (s.act === 1 || s.shopKind !== 'shipyard')) continue;
     const cost = frameCost(getFrame(frameId).cost, frameId, commanderId, s.protocols, s.shopKind);
     if (cost > s.credits) continue;
     s = dispatch(s, { type: 'BUY_SHIP', frameId }, tracker);
     break; // one hull per shop visit is plenty for the fixture-scale runs this drives
   }
   return s;
+}
+
+// Iteration 52.5 (the hull refit): a simple heuristic so the sink is
+// measured rather than invisible — at fleet cap (buyHull above already
+// covers "grow the fleet" when there's room), refit the cheapest hull
+// aboard into the best affordable legal target this visit's shipyard
+// offers. "Cheapest hull" (by frame cost) is the one with the least sunk
+// investment, so it's the natural one to trade up first; "best" is the
+// most expensive (highest-tier) legal, affordable target, not just the
+// first one found.
+function refitHull(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
+  const cap = Math.min(config.fleetCap, commanderFleetCap(commanderId, state.protocols));
+  if (state.fleet.length < cap) return state; // buyHull already covers this case
+  if (!state.shopFrameOffers || state.shopFrameOffers.length === 0) return state;
+  const candidates = state.fleet
+    .map((ship, index) => ({ ship, index }))
+    .filter(({ ship }) => ship.frameId !== 'cruiser' && !ship.mercenary)
+    .sort((a, b) => getFrame(a.ship.frameId).cost - getFrame(b.ship.frameId).cost);
+  for (const { ship, index } of candidates) {
+    let best: Exclude<FrameId, 'cruiser'> | null = null;
+    let bestCost = -1;
+    for (const frameId of state.shopFrameOffers) {
+      if (!canRefit(state, ship, frameId)) continue;
+      if (refitCost(ship, frameId) > state.credits) continue;
+      if (getFrame(frameId).cost > bestCost) {
+        bestCost = getFrame(frameId).cost;
+        best = frameId;
+      }
+    }
+    if (best) return dispatch(state, { type: 'REFIT_SHIP', shipIndex: index, frameId: best }, tracker);
+  }
+  return state;
 }
 
 function buyRepairs(state: RunState, config: PolicyConfig, tracker: { count: number; rejected: string | null }): RunState {
@@ -261,7 +303,11 @@ function buyCommodityLot(state: RunState, commanderId: CommanderId | undefined, 
     const owned = s.fleet.filter((sh) => sh.equipped.includes(COMMODITY_LOT_PART_ID)).length + s.inventory.filter((id) => id === COMMODITY_LOT_PART_ID).length;
     if (owned >= cap || cost > s.credits) break;
     s = dispatch(s, { type: 'BUY_COMMODITY_LOT' }, tracker);
-    const carrier = s.fleet.findIndex((sh) => !sh.equipped.includes(COMMODITY_LOT_PART_ID) && sh.equipped.length < effectiveSlots(sh.frameId, sh.upgrades, s.protocols, commanderId));
+    // 52.1: a plain length check isn't enough any more — cargo is
+    // universal-only, so a ship can have room by COUNT while having zero
+    // free universal slots (every one already spent on overflow from
+    // another category). canFit (== canEquip) is the real answer.
+    const carrier = s.fleet.findIndex((sh) => canFit(sh, COMMODITY_LOT_PART_ID, s.protocols, commanderId));
     if (carrier !== -1) s = dispatch(s, { type: 'EQUIP', shipIndex: carrier, partId: COMMODITY_LOT_PART_ID }, tracker);
     else break; // nowhere to carry it — stop rather than buy an uncarryable lot
   }
@@ -289,12 +335,14 @@ function buyMercenary(state: RunState, config: PolicyConfig, commanderId: Comman
 
 // 2026-08-08: `fuseForFoundry`/`buyShipyardUpgrade` removed — the Foundry
 // (permanent stat fuses) and the shipyard's separate purchasable upgrade
-// were both removed from the game entirely. A shipyard visit now only
-// means a (better-odds) hull purchase — see `buyHull` below — and repairs.
+// were both removed from the game entirely. A shipyard visit now means a
+// (better-odds) hull purchase — see `buyHull` below — a refit (52.5, when
+// there's no room to grow) — and repairs.
 function runShop(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
   let s = sellCommodityLots(state, tracker);
   if (s.shopKind === 'shipyard') {
     s = buyHull(s, config, commanderId, tracker);
+    s = refitHull(s, config, commanderId, tracker);
     s = buyRepairs(s, config, tracker);
   } else {
     s = buyAndEquipFromOffers(s, config, commanderId, tracker);

@@ -5,10 +5,12 @@ import { getFrame } from '../game/frames';
 import { COMMODITY_LOT_PART_ID, getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import { partSellPrice, REPAIR_COST_PER_HP, upgradeCapFor } from '../game/reducer';
-import { deriveFleetStats, effectiveSlots, playerShipLabel } from '../game/ship';
+import { deriveFleetStats, effectiveSlotLayout, effectiveSlots, equipBlockReason, equippedPower, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { PartCard } from './PartCard';
+import { PowerPipRow } from './PowerPipRow';
 import { CounterProtocolRow, ProtocolRow } from './SettingsScreen';
+import { SlotRow } from './SlotRow';
 import { StatBar } from './StatBar';
 import { UpgradeBadgeRow } from './UpgradeBadgeRow';
 import { FrameSilhouette } from './ShipSilhouette';
@@ -162,6 +164,17 @@ export function FleetPanel({
             </div>
             {/* Iteration 13: same StatBar as the enemy panel and combat cards. */}
             <StatBar stats={stats} damage={ship.damage} />
+            {/* Iteration 52.2: the typed-slot shape, filled vs. empty at a
+                glance — same layout the shop's frame card previewed before
+                this ship was ever bought. */}
+            <SlotRow layout={effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId)} equipped={ship.equipped} />
+            {/* Iteration 57.3: the power budget, same pip family as HP
+                above. Bonus slots (bay/Lone flagship/Warlord) never grant
+                power (ship.ts's layoutFeasibility) — the budget shown here
+                is always the frame's own flat number, regardless of how
+                many slots this ship's upgrades/protocols/commander granted
+                it above. */}
+            <PowerPipRow used={equippedPower(ship.equipped)} budget={getFrame(ship.frameId).power} />
             {/* 2026-08-08: always shown now, not just when something's
                 fitted — an open augment slot (dashed, dim) is exactly the
                 info a Warlord player needs to see at a glance, now that
@@ -225,12 +238,22 @@ export function FleetPanel({
   function inventoryGrid() {
     return (
         <div className="inventory-grid">
-          {inventory.map((partId, i) => (
+          {inventory.map((partId, i) => {
+            // 2026-08-12 (iteration 52.2): per-part reason, not just a
+            // blanket "ship is full" — a dead click on a part that can't
+            // fit THIS ship's slot mix (e.g. a 2nd weapon on a Bastion) is
+            // exactly the failure mode iteration 47.1 already had to fix
+            // once for the Lone-flagship slot bug.
+            const blockReason = selectedShip
+              ? equipBlockReason(selectedShip.frameId, selectedShip.equipped, partId, selectedShip.upgrades, protocols, commanderId)
+              : 'No ship selected.';
+            return (
             <div key={`${partId}-${i}`} className="inventory-item">
               <PartCard
                 part={getPart(partId)}
-                onClick={selectedHasRoom ? () => onEquip(selectedShipIndex, partId) : undefined}
-                disabled={!selectedHasRoom}
+                onClick={blockReason ? undefined : () => onEquip(selectedShipIndex, partId)}
+                disabled={!!blockReason}
+                title={blockReason ?? undefined}
               />
               {/* A commodity lot has no half-cost salvage value (SELL_PART
                   refuses it outright, see reducer.ts) — equip it onto a
@@ -249,7 +272,8 @@ export function FleetPanel({
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
     );
   }

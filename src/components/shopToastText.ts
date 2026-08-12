@@ -19,6 +19,8 @@ export function shopToastText(action: RunAction, state: RunState): string | null
       return `Bought ${getPart(state.shopOffers![action.offerIndex]).name}.`;
     case 'BUY_SHIP':
       return `${getFrame(action.frameId).name} added to the fleet.`;
+    case 'REFIT_SHIP':
+      return `${playerShipLabel(state.fleet, action.shipIndex)} refit into a ${getFrame(action.frameId).name}.`;
     case 'BUY_COMMODITY_LOT':
       return 'Commodity lot bought.';
     case 'BUY_MERCENARY':

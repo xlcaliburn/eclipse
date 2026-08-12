@@ -28,11 +28,16 @@ const HULL_CODE: Record<Exclude<FrameId, 'cruiser'>, string> = {
   freighter: 'FRT',
   derelict: 'DER',
   corvette: 'CRV',
-  frigate: 'SIG',
+  frigate: 'FRG',
   aegis: 'AEG',
-  tender: 'TDR',
-  'ew-cutter': 'ECM',
+  tender: 'SLP',
+  'ew-cutter': 'PKT',
   'disruptor-cutter': 'DIS',
+  gunboat: 'GUN',
+  destroyer: 'DST',
+  battleship: 'BTL',
+  valkyrie: 'VLK',
+  titan: 'TTN',
 };
 
 // The Flagship's frame. Named 'cruiser' for historical reasons — the frame

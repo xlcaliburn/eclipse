@@ -1,4 +1,5 @@
 import type { Part } from './types';
+import { RARITY_POWER } from './types';
 
 // 47.5k: the highest-leverage type change available — was `export type
 // PartId = string` (in types.ts), so every part id used in STARTING_FIT,
@@ -80,7 +81,12 @@ export type PartId =
 // price; a real drawback (the Rift cannon's self-damage) discounts below
 // it. See plans/iteration-40.md... actually no plan file for this one —
 // scoped and shipped directly per user direction, 2026-08-07.
-export const PARTS: Part[] = [
+// Iteration 57.1: power is rarity-derived (RARITY_POWER, types.ts) for
+// every part below — no per-part judgment call, so the literals here omit
+// it entirely; PARTS (below the closing bracket) maps RARITY_POWER in
+// automatically. An individual part COULD still diverge later (the field
+// lives on Part itself, not just this derivation) without a schema change.
+const PART_DEFS: Omit<Part, 'power'>[] = [
   {
     id: 'ion',
     name: 'Ion cannon',
@@ -658,6 +664,12 @@ export const PARTS: Part[] = [
   },
 ];
 
+// The real, exported catalog — PART_DEFS plus each part's rarity-derived
+// power (57.1). One derivation site rather than 40+ hand-typed `power:`
+// lines, so a rarity change can never silently leave a stale power value
+// behind (and 57.5's table-driven test asserts the invariant holds anyway).
+export const PARTS: Part[] = PART_DEFS.map((p) => ({ ...p, power: RARITY_POWER[p.rarity] }));
+
 // The commodity lot (iteration 20): a pseudo-part that occupies a slot like
 // any other, but is never sold to the shop's random offer draw and never
 // unequips to inventory — bought and sold for real credits via
@@ -683,6 +695,12 @@ const COMMODITY_LOT_PART: Part = {
   rarity: 'common',
   description: 'Bought low, sold high at a later station. Occupies a slot; lost if the carrying ship is.',
   cost: 0,
+  // Iteration 57.1: the one deliberate override of the rarity-derived rule
+  // (RARITY_POWER.common would otherwise say 1) — a lot is "not real
+  // equipment" (see isSalvageablePart's own comment above), priced at 0cr
+  // for the same reason, and shouldn't compete with weapons/systems for a
+  // power budget it was never priced against.
+  power: 0,
 };
 
 // Iteration 34 (the relic chain): the quest capstone — assembled from
@@ -706,6 +724,7 @@ const ANCIENT_ARTIFACT_PART: Part = {
   cost: 12,
   computer: 4,
   shield: 4,
+  power: RARITY_POWER.legendary, // real equipment, not the commodity lot's exception — draws power like any legendary
 };
 
 // Iteration 40 ("Captured schematic"): an elite-kill-exclusive weapon —
@@ -727,6 +746,7 @@ const CAPTURED_SCHEMATIC_PART: Part = {
   description: '1 cannon die, 3 damage. A modified plasma cannon salvaged from an elite kill — never sold.',
   cost: 6,
   weapon: { kind: 'cannon', diceCount: 1, damage: 3 },
+  power: RARITY_POWER.rare,
 };
 
 // Built dynamically (not FRAMES's hand-written-object-literal style, which

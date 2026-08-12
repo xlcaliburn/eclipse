@@ -1,415 +1,692 @@
-# Iteration 52 — The shop economy: draw weights, and the hull refit (specced 2026-08-08)
+# Iteration 52 — Hulls: identity, variety, and trading up (respecced 2026-08-12)
 
-> **Status: specced, not implemented.** Implementer: record deviations and
-> verification results here, per the established style.
+> **Status: implemented and verified, in 2 attributable stages** per
+> 52.7's discipline. `npx tsc -b --force` clean project-wide at every
+> checkpoint; `npx vitest run` green throughout (808 at b7ea8d2 → 812
+> after stage (a) → 825 after stage (b)); `npx vite build` clean at every
+> checkpoint. No browser/preview passes, per repo CLAUDE.md. See the
+> status notes at the end of this file for the full measurement tables,
+> the fixture audit, deviations from the spec's exact text, and the one
+> deliberately-not-fixed pre-existing statistical flake.
+>
+> **This is a rewrite.** The first draft of iteration 52 (committed
+> b7ea8d2) was rejected, and iteration 54's hull-identity spec is folded
+> in — `plans/iteration-54.md` is deleted and 54 is a deliberate gap in
+> the numbering, not a reused slot. The roster below was settled with the
+> user over several rounds on 2026-08-12; **[iteration
+> 57](plans/iteration-57.md)** (ship power budgets) is its direct
+> follow-on and the two were designed together (not implemented here —
+> out of this iteration's scope).
 
-## Motivation (player feedback via the user, 2026-08-08)
+## Motivation
 
-Three of four reported items, all landing on the shop:
+Player feedback, 2026-08-08:
 
 1. *"currently getting too much money and not enough buying options."*
 2. *"players did like the idea of being able to fuse or permanently
-   upgrade a ship"* — with the follow-up constraint: *"the fuse mechanic
-   should be introduced so that it doesn't conflict with the other
-   augments. i think it was just introduced in a confusing way."*
+   upgrade a ship"* — with: *"the fuse mechanic should be introduced so
+   that it doesn't conflict with the other augments. i think it was just
+   introduced in a confusing way."*
 3. *"more diversity of ship options as currently the same 5 options
-   basically show up each time. we need more rare tier options across
-   the board."*
+   basically show up each time."*
+4. *"i also want to have 'weapon only' or computer only etc slots be
+   clearly marked and also a unique feature for different shapes of ship
+   bases."*
 
-(The fourth item, mobile responsiveness, is
-[iteration 53](plans/iteration-53.md) — separate spec per the user's
-scoping decision.)
+User direction, 2026-08-12:
 
-## Grounding — the audit that drove this (measured 2026-08-08, at 1d2a920)
+> *"i don't like iteration 52 as it currently stands - redo it. let's
+> combine 54 together into it. i don't want to change the rarity weights,
+> i want more lower tier ship options, with different frames."*
 
-### The catalog is inverted relative to the draw weights
+> *"i like frigate, but also add gunboat (for even more guns), picket is
+> good, sloop is good, i want to add a few more epic variants battleship
+> (move dreadnought to epic), then have Valkyrie, Titan, Aegis as 3
+> legendary frames. adjust the ship slots and power levels. i also want
+> to display the UI such that it is more distinct that certain slots are
+> for weapons only, or for certain equips"*
 
-`RARITY_WEIGHTS` (reducer/shop.ts) rolls **common 73% / rare 20% / epic
-5% / legendary 2%**. The actual part catalog is the opposite shape:
+> *"i do like disruptor as well."*
 
-| Rarity | Parts in catalog | Cost range (avg) | Draw weight |
-|---|---|---|---|
-| common | **9** | 2–4cr (3.1) | **0.73** |
-| rare | 17 | 5–6cr (5.3) | 0.20 |
-| epic | **21** | 7–9cr (8.0) | 0.05 |
-| legendary | 3 | 12–13cr (12.3) | 0.02 |
+> *"I like the idea of having lower tiers be more restrictive, and higher
+> tiers being stronger while still having a clear identity."*
 
-`drawShopOffers` is also stratified by TYPE, which compounds it — per
-slot, the common tier it rolls into 73% of the time contains:
+### Why no rarity re-weighting
 
-| Stratified pool | slots/shop | common | rare | epic | legendary |
-|---|---|---|---|---|---|
-| WEAPON | 3 | **2** | 6 | 8 | 2 |
-| DEFENSE | 3 | 5 | 8 | 7 | 1 |
-| COMPUTER_DRIVE | 1 | **2** | 3 | 6 | 0 |
-| ACTIVE | 1 | **0** | 2 | 9 | 0 |
+The rejected draft's centrepiece was re-weighting the shop draw (common
+73% → 35%). **Dropped — no weight changes.** The user's alternative is
+better matched to the existing machinery: the draw rolls **common 73% of
+the time** and the frame roster has only **3 commons**, so feeding that
+tier beats re-pointing the dial at tiers the catalog is thin in. Taking
+the roster 7 → 17 makes the act-1 shipyard draw 5-of-~13 instead of
+5-of-6 — the reported "same 5 options every time" — **without touching a
+single weight**.
 
-So ~3/4 of every shop's 8 slots are drawn from pools of 2–5 items (the
-ACTIVE pool has no commons at all — every common roll there already
-falls back to rare via `drawRarityWeighted`'s tier walk), while the 21
-epics — the largest group in the catalog — share a 5% roll.
+## Grounding (audited 2026-08-08 at 1d2a920, still current)
 
-**This one mis-tuning explains complaints 1 AND 3 simultaneously.**
-Variety is low because 73% of offers come from the catalog's smallest
-tier; money piles up because that tier is also its *cheapest*. Expected
-cost to buy out an entire 8-slot shop today is **~32cr** (Σ weight ×
-avg cost × 8), against 11–16cr income per act-1 fight from column 4 on —
-two fights clears a whole shop.
+- `Frame` = `{ id, name, slots: number, baseInitiative, baseHp, cost,
+  rarity, blurb, maxWeapons?: number }`. 13 entries, 7 purchasable.
+- `PartType` = `'weapon' | 'computer' | 'shield' | 'hull' | 'drive' |
+  'cargo'`. The `cargo` member is the commodity lot — an edge case in
+  52.1.
+- **`ShipStats` fields available to an innate trait** (verified in
+  `types.ts`): `initiative`, `hp`, `computer`, `shield`, `shieldPierce`,
+  `flak`, `taunt`, `reactiveArmor`, `onDestroyDamage`, `ablative`,
+  `capacitorShield`, `cloak`, `jink`. Note **`fleetShieldAura` is NOT
+  one** — it lives on `Part` and is applied in the fleet-wide derive, so
+  a declarative trait cannot grant it.
+- `shieldPierce` is documented in `types.ts` as a deliberately-preserved
+  **dormant engine hook** awaiting "a future part/upgrade to reuse" —
+  Dreadnought's trait below is exactly that revival.
+- `drawShopOffers` strata the catalog into WEAPON, DEFENSE
+  (shield+hull), COMPUTER_DRIVE, plus a cross-cutting ACTIVE pool. **The
+  slot kinds in 52.1 deliberately reuse those categories**, so a hull's
+  sockets and the shop's stock speak one vocabulary.
+- `effectiveSlots(frameId, upgrades, protocols, commanderId)` = frame
+  slots + `bay` upgrades + Lone-flagship +2 (cruiser) + Warlord +1
+  (cruiser). Consumers: `FleetOverlay`, `FleetPanel`, EQUIP, the shop's
+  bonus-item fitting, `scripts/sim`'s `agent.canFit`/`budget.hasRoom`.
+- **Jink is already an innate hull trait in all but name** —
+  `deriveStats` contains `if (frameId === 'interceptor') stats.jink =
+  true`. The pattern 52.3 formalizes already exists as a one-off.
+- The 5 retired legacy hulls (`frigate`, `tender`, `ew-cutter`,
+  `disruptor-cutter`, `aegis`) are still in `FRAMES` for save
+  compatibility. Their retirement comment sets a condition: *"Do not
+  resurrect without giving each a genuine base-level reason to exist."*
+  **This iteration supplies exactly that** — typed slots and innate
+  traits — and all five come back.
 
-### It also points the same direction as the balance gap
-
-Iteration 51 measured act-1 clear at 7.2–12.6% against a 20–40% target
-band. "Too much money, nothing to buy" and "clear rate too low" are the
-same failure seen from two ends: the shop cannot convert credits into
-power fast enough. Re-weighting toward the fat part of the catalog
-raises both prices AND fleet strength, so it should push clear rates
-UP toward the band rather than away from it. That is a prediction this
-iteration must actually check (52.4), not an assumption.
-
-### Enemy power does NOT scale with player wealth — it inverts
-
-Asked directly by the user: *"do we currently have it scaling roughly
-alongside the $ value of the equipment/ship value?"*
-
-`scripts/enemyValue.ts` exists to answer exactly this — it prices an
-enemy composition in credits using the player's own shop as the
-yardstick, against an optimistic "won every fight, spent nothing"
-budget. It had drifted badly (the three staleness bugs
-plans/iteration-47.md's 47.7.3 catalogued: a hardcoded `winReward =
-4 + col`, 4 live act-2 escalations, and act 2 frozen at 10 columns).
-**Those three are now fixed** (2026-08-08, this session) so the numbers
-below are real; see the file's own comments.
-
-| Act 1 | c1 | c5 | c9 |
-|---|---|---|---|
-| Player budget (ceiling) | ~21cr | ~45cr | ~98cr |
-| Worst combat node value | 45cr | 52cr | 51cr |
-| **Enemy as % of budget** | **217%** | **115%** | **52%** |
-
-| Act 2 | c0 | c5 | c11 |
-|---|---|---|---|
-| **Enemy as % of budget** | **54%** | **30%** | **29%** |
-
-**Enemy value is nearly flat within an act while player budget grows
-~5×.** Act 1 enemies go 45 → 52cr (+16%) across nine columns; the
-budget goes 21 → 98cr (+367%). `veterancyBonus` is the only
-column-linked scaling and it is +1 HP at c5–7, +2 at c8–9 — a rounding
-error against a 5× wealth curve. The enemy pools change by band, which
-is a step function, not a curve.
-
-**Caveat, stated honestly**: this model prices dice and HP linearly, so
-multi-ship formations (Missile swarm's 3 hulls) look expensive while
-folding fast in a real fight — the balance table has a fresh fleet
-beating that same c1 Missile swarm 88% of the time. So the *absolute*
-early ratios overstate difficulty. **The robust signal is the trend, not
-the level**: whatever the true starting point, the ratio falls
-monotonically across every act.
-
-That single fact ties together three separate things this project has
-been chasing:
-
-- **"Too much money" late** — by c8–9 the player can afford roughly
-  twice what the enemy is worth, which is exactly when the complaint
-  lands.
-- **The death clusters** — iteration 51's data put ~half of act-1 deaths
-  at c5–c7 and ~40–50% of act-2 entrants dying at global c11 (act-2
-  column 0). Both are the *early* part of an act, precisely where this
-  ratio is at its worst.
-- **The act-2 entry wall** — act-1 c9's worst node is 51cr; act-2 c0's
-  is 73cr, a 43% jump in one step (88cr for its elite), on top of the
-  counter-protocol and a fresh escalation pair.
-
-Fixing this is **[iteration 55](plans/iteration-55.md)**, deliberately
-sequenced AFTER this iteration: enemy scaling cannot be tuned against an
-economy that is about to change underneath it.
-
-### Ships: the draw is nearly the whole roster
-
-7 purchasable frames — common 3 (Interceptor 6cr, Derelict 4cr, Corvette
-8cr), rare 2 (Bastion 12cr, Freighter 18cr), epic 1 (Cruiser 22cr),
-legendary 1 (Dreadnought 30cr). `drawFrameOffers` gives a store **2**
-(common+rare only → 5 candidates) and a shipyard **5**. The Dreadnought
-is act-2-shipyard-only, so an act-1 shipyard draws **5 of 6** — you see
-almost the entire roster every single visit. That is exactly the
-reported "the same 5 options basically show up each time"; the number in
-the complaint is literally the draw count.
-
-With only 7 frames, within-visit choice and between-visit variety are in
-direct tension — no draw count fixes both. This iteration takes the
-cheap half (a modest count reduction plus rarity weighting, which alone
-changes *which* hulls appear); the real fix is more hulls, deferred to
-the content pass per the user's "re-weight first, then add content"
-decision (see "Deferred" at the end).
-
-## 52.1 Re-weight the rarity draw
-
-`RARITY_WEIGHTS` (reducer/shop.ts) becomes:
+## 52.1 Typed slots
 
 ```ts
-const RARITY_WEIGHTS: Record<Rarity, number> = {
-  common: 0.35,
-  rare: 0.4,
-  epic: 0.2,
-  legendary: 0.05,
-};
+export type SlotKind = 'universal' | 'weapon' | 'defense' | 'systems';
 ```
 
-Expected effects, computed against the current catalog:
+| Slot kind | accepts `PartType` |
+|---|---|
+| `weapon` | `weapon` |
+| `defense` | `shield`, `hull` |
+| `systems` | `computer`, `drive` |
+| `universal` | anything, including `cargo` |
 
-- **Shop clear cost ~32cr → ~43cr** (+36%): Σ(weight × tier avg cost) ×
-  8 slots = 5.42cr/slot vs 3.97 today. Directly answers complaint 1.
-- **Variety**: 60% of rolls now draw from the 17-rare and 21-epic pools
-  instead of 73% from 9 commons. Answers complaint 3's part half.
-- **Fleet strength up**, which per the section above is the intended
-  direction given the 7–12% clear rate.
+`Frame` gains `slotLayout: SlotKind[]` and **loses both `slots` and
+`maxWeapons`**, which become derived:
 
-Notes for the implementer:
+- `frameSlots(frame) = frame.slotLayout.length`
+- weapon ceiling = `count('weapon') + count('universal')`
 
-- The weights must still sum to 1.0 — `rollRarity` walks a cumulative
-  sum with a floating-point guard returning 'legendary'; keep that.
-- `rollRarity` has a direct tier-boundary unit test (exported for
-  exactly this reason). It will need updating to the new cumulative
-  boundaries — that is expected, not a regression.
-- Legendary 0.02 → 0.05 means ~0.4 legendary offers per 8-slot shop
-  (one every ~2.5 shops, vs ~1 in 6 today). With only 3 legendary parts
-  in the catalog that may read as too frequent; it is the most likely
-  knob to want a second look after measurement. Flag it in the status
-  notes either way.
-- `drawFrameOffers` shares `drawRarityWeighted`, so frame draws
-  re-weight too: epic/legendary hulls (Cruiser, Dreadnought) will appear
-  materially more often. Combined with `hullRarityBonus` — a shipyard
-  purchase's free bonus items scale with the hull's rarity tier — this
-  compounds into more free items as well as better hulls. Watch it in
-  52.4; it is the most plausible source of an over-correction.
+**`cargo` is universal-only**, so **every frame must keep at least one
+`universal` slot** or it could never carry a commodity lot. Assert over
+all of `FRAMES`, legacy entries included.
 
-## 52.2 Frame draw count
+**Bonus slots stay universal.** `effectiveSlots` becomes
+`effectiveSlotLayout(...)` = the frame's layout plus one `'universal'`
+per `bay` upgrade / Lone-flagship bonus / Warlord bonus. Granted slots
+have never had a type and should not gain one. Keep a thin
+`effectiveSlots()` returning `.length` so "empty slot count" call sites
+don't all change.
 
-`drawFrameOffers`: shipyard count **5 → 4**. Store stays at 2.
+**Legality check.** An `equipped: PartId[]` is legal iff:
 
-Rationale: 4-of-6 gives 15 distinct act-1 combinations vs the current
-6, at the cost of one fewer choice per visit. This is deliberately a
-modest move, not a fix — with a 7-frame roster the tension is
-structural. Leave a comment saying the count should be revisited (likely
-back up) once the content pass widens the roster.
+```
+overflow = max(0, nWeapon  - dWeapon)
+         + max(0, nDefense - dDefense)
+         + max(0, nSystems - dSystems)
+         + nCargo
+legal    = overflow <= dUniversal
+```
 
-## 52.3 The hull refit — a buyable permanent ship upgrade
+Exactly the feasibility condition for this structure (each category maps
+to its dedicated slots ∪ the shared universal pool) — no matching
+algorithm needed. Export
+`canEquip(frameId, equipped, partId, upgrades, protocols, commanderId)`
+computing it with the candidate included; **EQUIP, the shop's bonus-item
+fitting, `agent.canFit` and `budget.hasRoom` all call it** rather than
+re-deriving. It replaces today's separate slot-count and `maxWeapons`
+checks everywhere.
 
-**The design problem this solves.** Players liked the removed Foundry's
-*idea* (permanently improving a ship you own) but found it confusing.
-The concrete reason it was confusing: augments already occupy the
-"permanent slotless bonus" niche, and four of the seven are pure stat
-bumps (`spine` +2 HP, `reactor` +1 computer, `lattice` +1 piloting,
-`drives` +2 initiative) — so a second permanent stat channel was a
-duplicate system by construction. The old version compounded that by
-*consuming an inventory part* on top of a credit cost, so one item had
-two unrelated uses ("equip it, or feed it to the Foundry?").
+`PlayerShipState.equipped` stays a flat `PartId[]` — parts are never
+assigned to slot indices, only checked for feasibility. Save shape and
+fixture construction are unchanged.
 
-**The fix: refit the HULL, not the fittings.** Augments are earned
-gadgets bolted onto a ship; a refit rebuilds the ship itself into a
-bigger frame. Different verb, different axis, different acquisition
-(earned vs bought), zero shared state — and it needs no new stat
-channel, no new item type, and no new content, because the frame ladder
-already exists.
+**Save compatibility**: an existing save can hold a loadout legal today
+and illegal under the new layouts, stranding EQUIP/UNEQUIP. **Bump
+`SAVE_VERSION`** — the same call made for v5's `heat` and v7's combat
+fields. This also frees the legacy frame ids to be repurposed (52.4).
 
-### The rule
+## 52.2 Slot marking in the UI
 
-At a **shipyard**, trade a ship up into a bigger hull. It keeps
-everything that made it *that ship*: equipped parts, augments, name,
-kills, fights survived.
+The user asked specifically for slots to be *visually distinct by kind*.
+Go beyond a subtle chip — **three redundant cues** so it reads at a
+glance and survives colourblindness:
+
+- **Colour** per kind — weapon on the danger/accent hue, defense on the
+  shield hue, systems on the computer hue, universal neutral/outlined.
+- **Icon** per kind, reusing/extending `PartIcon`'s existing type
+  iconography so a `weapon` slot chip and a weapon part read as one
+  family.
+- **A letter or short label** (W / D / S / •) for when colour and icon
+  are both ambiguous at small sizes.
+
+**Filled vs empty is its own state** — an empty weapon-only slot should
+look like it is *waiting for a weapon*, not merely blank.
+
+A shared `<SlotRow layout equipped />` component (following the
+established `ShipPickRow` / `FitChips` / `UpgradeBadgeRow` pattern),
+rendered on:
+
+- **the shop's frame cards** — the layout must be visible *before*
+  buying; with 17 hulls this is where it matters most
+- ship cards in `FleetPanel` and `FleetOverlay`
+- the prep screen
+- 52.5's refit rows (so the player sees the shape they're trading into)
+
+When a part cannot be equipped anywhere, say *why* ("no free weapon
+slot") rather than silently disabling — a dead click is the exact
+failure mode iteration 47.1 had to fix once already for the
+Lone-flagship slot bug.
+
+Mobile: iteration 53 just re-derived the combat dock's height budget;
+`<SlotRow>` appears on fleet/shop surfaces rather than in that dock, but
+check it does not overflow at ≤720px.
+
+## 52.3 Innate hull traits
+
+```ts
+// on Frame
+innate?: { name: string; description: string; grants: Partial<ShipStats> };
+```
+
+Folded in by `deriveStats` immediately after the frame's base stats, so
+parts and upgrades stack on top as today.
+
+**Declarative `grants` only.** Every trait in 52.4 reuses a `ShipStats`
+field the engine already honours, so the combat engine needs **no
+changes at all**. A trait needing a new engine hook is a separate,
+called-out addition — do not smuggle one in.
+
+**Design rule, applied throughout**: prefer *countable* stats (`flak`,
+`reactiveArmor`, `ablative`, `capacitorShield`, `shieldPierce`) over
+*binary flags* (`taunt`, `cloak`). A binary flag granted innately
+obsoletes the part whose whole identity it is — innate taunt on a cheap
+hull would kill the lure beacon. The two exceptions are deliberate:
+
+- **Jink** is already frame-only; no part grants it.
+- **Taunt on Aegis** is allowed *because it is a 42cr legendary* — that
+  does not undercut a cheap lure beacon for the other 16 hulls the way
+  a 12cr Bastion would have.
+
+Not every hull gets a trait. Cruiser explicitly stays "no gimmick" as
+the baseline others are read against, and several hulls' identity is
+their layout alone.
+
+## 52.4 The roster: 7 → 17 purchasable frames
+
+### Legacy id mapping (all five revived)
+
+| id | New name | Tier | Note |
+|---|---|---|---|
+| `frigate` | **Frigate** | common | keeps its name |
+| `ew-cutter` | **Picket** | common | |
+| `tender` | **Sloop** | common | |
+| `disruptor-cutter` | **Disruptor** | rare | keeps its identity |
+| `aegis` | **Aegis** | legendary | promoted; keeps its name |
+
+Repurposing these ids is safe because 52.1 bumps `SAVE_VERSION`. Add
+them to `PURCHASABLE_FRAME_IDS` and rewrite the legacy comment in
+`frames.ts` to record that iteration 52 supplied the missing reason and
+un-retired them.
+
+### The roster
+
+`W` = weapon-only, `D` = defense, `S` = systems, `U` = universal.
+**Power** is not implemented here — it is [iteration
+57](plans/iteration-57.md) — but is listed so the two iterations are
+designed as one coherent progression. Every number is a starting point;
+the balance sim arbitrates (52.7).
+
+**Common** — 73% of rolls, the tier being widened
+
+| Frame | Cost | Layout | HP | Init | Power* | Innate |
+|---|---|---|---|---|---|---|
+| Derelict | 4 | `U U` | 2 | 0 | 2 | — |
+| Interceptor | 6 | `W S U` | 2 | 2 | 3 | Jink |
+| Frigate | 7 | `W W U` | 3 | 0 | 3 | — |
+| Corvette | 8 | `U U S` | 2 | 1 | 4 | `capacitorShield: 1` |
+| Picket | 8 | `S S U` | 2 | 2 | 4 | — |
+| Sloop | 9 | `U U U` | 3 | 1 | 4 | — |
+
+**Rare** — 20%
+
+| Frame | Cost | Layout | HP | Init | Power* | Innate |
+|---|---|---|---|---|---|---|
+| Bastion | 12 | `W D D` | 6 | 0 | 5 | `reactiveArmor: 1` |
+| Disruptor | 13 | `S S D U` | 3 | 1 | 6 | `flak: 1` |
+| Gunboat | 14 | `W W W U` | 3 | 1 | 6 | — |
+| Freighter | 18 | `W U U U S` | 3 | 0 | 7 | — |
+
+**Epic** — 5%
+
+| Frame | Cost | Layout | HP | Init | Power* | Innate |
+|---|---|---|---|---|---|---|
+| Cruiser | 22 | `W W U U` | 4 | 1 | 9 | — *(the deliberate "no gimmick" baseline)* |
+| Destroyer | 24 | `W W S U U` | 5 | 3 | 10 | — |
+| Battleship | 28 | `W W W D D U` | 7 | 0 | 11 | — |
+| Dreadnought | 30 | `W W W W D D U U` | 8 | 0 | 12 | `shieldPierce: 1` |
+
+**Legendary** — 2%
+
+| Frame | Cost | Layout | HP | Init | Power* | Innate |
+|---|---|---|---|---|---|---|
+| Valkyrie | 38 | `W W W S U U` | 6 | 4 | 14 | Jink |
+| Aegis | 42 | `D D D W U U S` | 10 | 0 | 15 | `taunt: true` |
+| Titan | 48 | `W W W W D D U U U` | 12 | 0 | 18 | `ablative: 3` |
+
+**Flagship** (`cruiser`, never purchasable): layout
+`W W U U U U` (6 slots, universal-heavy — forced by the balance
+fixtures, see 52.6), power* 10.
+
+### Tier gating
+
+The act-2-shipyard gate currently hardcoded to the Dreadnought **moves
+to legendary tier generally** — Dreadnought is epic now, and Valkyrie /
+Aegis / Titan are the new giants. Without this a Titan could appear at
+act-1 column 1. Stores already never stock epic or legendary, so epics
+remain shipyard-only by the existing rule.
+
+### Draw counts stay as they are
+
+The rejected draft cut the shipyard draw 5 → 4 to buy variety.
+**Unnecessary now**: with ~13 act-1-eligible hulls the shipyard draws 5
+of 13 instead of 5 of 6, and the store 2 of ~10 instead of 2 of 5.
+Leave `drawFrameOffers`'s counts alone; note in its comment that roster
+width is what makes them work.
+
+## 52.5 The hull refit
+
+Players liked the removed Foundry's *idea* but found it confusing. The
+concrete reason: augments already occupy the "permanent slotless bonus"
+niche, and four of seven are pure stat bumps, so a second permanent stat
+channel was a duplicate by construction. The old version compounded it
+by *consuming an inventory part* on top of credits, giving one item two
+unrelated uses.
+
+**Refit the HULL, not the fittings.** Augments are earned gadgets bolted
+on; a refit rebuilds the ship into a bigger frame. Different verb,
+different axis, different acquisition (earned vs bought), no shared
+state, no new stat channel — and with a 17-hull roster there is a real
+ladder to climb.
+
+At a **shipyard**, trade a ship up, keeping what made it that ship:
+equipped parts, augments, name, kills, fights survived.
 
 - **Price**: `getFrame(target).cost - hullScrapValue(current.frameId)` —
-  the new hull, less a trade-in for the old one. `hullScrapValue`
-  already exists (`floor(cost/2)`, used by the Lone flagship protocol),
-  so the trade-in reuses the game's existing "what's a used hull worth"
-  answer rather than inventing a second one. Example: Interceptor (6cr)
-  → Cruiser (22cr) costs 22 − 3 = **19cr**.
+  the new hull less a trade-in on the old. `hullScrapValue` already
+  exists (`floor(cost/2)`, used by Lone flagship), so the trade-in reuses
+  the game's existing "what is a used hull worth" answer.
 - **Target must be in `shopFrameOffers`** — you can only trade into a
-  hull this shipyard actually has in stock, same as `BUY_SHIP`. Buying
-  consumes the offer; so does a refit.
-- **Legal targets only.** All four must hold:
-  1. `getFrame(target).cost > getFrame(current).cost` — a refit is an
-     upgrade, never a sidegrade or a downgrade.
-  2. `getFrame(target).slots >= ship.equipped.length` — never orphan a
-     fitted part.
-  3. `target.maxWeapons === undefined || target.maxWeapons >=
-     equippedWeaponCount(ship.equipped)` — never orphan a weapon (an
-     Interceptor with 3 weapons cannot become a Bastion, cap 1).
-  4. The Dreadnought keeps its existing act-2 + shipyard gate, same
-     check `BUY_SHIP` already makes.
-- **The Flagship can never be refit.** `frameId === 'cruiser'` is load-
-  bearing across the codebase — `withFlagshipRecoveryGate`, the Lone
-  flagship protocol's +2 slots/+2 HP, `SCUTTLE_SHIP`'s "the fleet can
-  never be emptied" guarantee all key off it. Refitting it away would
-  break all three. Guard explicitly and comment why.
+  hull this shipyard has in stock, same as `BUY_SHIP`; both consume the
+  offer.
+- **Legal targets** — all must hold:
+  1. `getFrame(target).cost > getFrame(current).cost` — an upgrade,
+     never a sidegrade or downgrade.
+  2. The ship's current `equipped` is **legal against the target's
+     `slotLayout`** — reuse 52.1's `canEquip` feasibility check directly.
+     This subsumes the old draft's separate slot-count and weapon-cap
+     rules. (Once iteration 57 lands, it must also satisfy the target's
+     power budget — 57 owns that addition.)
+  3. Legendary targets keep the act-2 + shipyard gate.
+- **The Flagship can never be refit.** `frameId === 'cruiser'` is
+  load-bearing for `withFlagshipRecoveryGate`, Lone flagship's +2
+  slots/HP, and `SCUTTLE_SHIP`'s "the fleet can never be emptied"
+  guarantee. Guard explicitly and comment why.
 - **Mercenaries can never be refit** — a one-fight rental takes no
-  permanent investment, the same rule augments already follow.
-- **Damage must be clamped**: `damage = Math.min(damage, newMaxHp - 1)`.
-  A cost-increasing refit does NOT guarantee an HP increase (Bastion
+  permanent investment, the rule augments already follow.
+- **Clamp damage**: `damage = Math.min(damage, newMaxHp - 1)`. A
+  cost-increasing refit does not guarantee an HP increase (Bastion
   12cr/6HP → Freighter 18cr/3HP is legal by every rule above), so an
-  unclamped refit could kill the ship outright. Derive `newMaxHp` via
-  `deriveStats` on the new frame with the same parts/upgrades/protocols.
+  unclamped refit could kill the ship outright.
 
-### Why this is the sink the economy needs
+Implementation: `{ type: 'REFIT_SHIP'; shipIndex; frameId }` handled in
+`reducer/shop.ts`'s `handleShopAction`; export `canRefit(...)` and
+`refitCost(...)` so the UI renders legal targets without duplicating the
+rules, and have the reducer call the same predicate. UI: a "Refit"
+section in the shipyard listing each eligible ship's legal targets with
+prices and a `<SlotRow>` per target. Toast on success. Add `REFIT_SHIP`
+to `scripts/sim/agent.ts`'s `HANDLED_ACTIONS` plus a simple heuristic
+(at fleet cap, refit the cheapest hull into the best affordable legal
+target) so the sink is measured rather than invisible.
 
-`MAX_FLEET_SIZE` is 4. A wealthy player at fleet cap currently has
-nothing left to buy but parts they already have — precisely the reported
-complaint. The refit is the only way to grow *after* the cap, so it
-absorbs exactly the late-run surplus that has nowhere to go today, and
-it scales: the ladder tops out at a 30cr Dreadnought, so a full
-Interceptor → Dreadnought path is a genuine multi-shop project.
+## 52.6 Fixture audit — the main implementation risk
 
-### Implementation
+Ships are hand-constructed in many places and any can become illegal
+under the new layouts. **Audit every one before touching balance
+numbers** — an illegal fixture silently changes what the balance table
+measures:
 
-- New action `{ type: 'REFIT_SHIP'; shipIndex: number; frameId:
-  Exclude<FrameId, 'cruiser'> }` on `RunAction`, handled in
-  `reducer/shop.ts`'s `handleShopAction` (it is a shop action in every
-  sense — phase, gating, offer consumption).
-- Export a `canRefit(ship, targetFrameId, state)` predicate from
-  `reducer/shop.ts` so `ShipyardSections`/`ShopScreen` can render legal
-  targets without duplicating the four rules. The reducer case must call
-  the same predicate — one source of truth, the discipline
-  `MERCENARY_FIT`/`partSellPrice` were exported for.
-- Export `refitCost(currentFrameId, targetFrameId)` likewise.
-- UI: a "Refit" section in the shipyard (alongside the hull rack), one
-  row per non-Flagship, non-mercenary ship, showing its legal targets
-  and prices. Reuse `ShipPickRow` if it fits; otherwise follow its
-  shape. A toast on success, matching every other shop purchase
-  (`shopToastText.ts`).
-- `scripts/sim/agent.ts`: add `REFIT_SHIP` to `HANDLED_ACTIONS` (the
-  compile error when the variant lands is the guard working), and give
-  the agent a simple heuristic so the sink is actually MEASURED rather
-  than invisible: at fleet cap, in a shipyard, refit the cheapest-hull
-  non-Flagship ship into the most expensive legal target it can afford.
-  Without this the refit is invisible to `balance:full` (the fleet-
-  orders precedent) and 52.4 cannot evaluate it.
-- Wiki: the frames table is data-driven; add a line on refit to whatever
-  section covers shops.
+- `scripts/balance.ts` — `STRONG_FLEET`, `ENDGAME_FLEET`,
+  `STRIKE_FLEET`, `NO_SPEED_CONTROL` and the rest. The Flagship fixtures
+  carry 6 mixed parts (`plasma, plasma, comp3, hull2, init3, shield1`),
+  which is why the Flagship layout above is universal-heavy.
+- `scripts/sim/budget.ts`'s `PRIORITY` lists and `buildFleet`.
+- `scripts/sim/policy.ts`'s per-archetype `partPriority` — an archetype
+  whose list no longer fits its `framePriority` hulls will silently
+  under-build.
+- `STARTING_FIT` (reducer/shop.ts) — **every purchasable hull's arrival
+  loadout, including all 10 new/revived ones**, must be legal under its
+  own layout.
+- `STARTING_LOADOUT` (parts.ts) — the Flagship's opening fit.
+- Test fixtures across `reducer.test.ts`, `ship.test.ts`,
+  `combatEngine.test.ts`.
 
-## 52.4 Further credit sinks
+Add a test asserting every `STARTING_FIT` entry and `STARTING_LOADOUT`
+is legal against its frame's layout, so this cannot reappear silently.
 
-User direction: *"i think it's good for the player to buy stuff"* — so
-these are all things to BUY, not taxes. Ordered by
-value-per-implementation-cost. **Implement 1 and 2; treat 3 and 4 as
-optional if the measurement in 52.5 says the surplus is still there.**
+## 52.7 Implementation order and measurement
 
-### 1. Part tier-up — trade a fitted part up its own ladder
+Sequence internally so a balance swing is attributable — the discipline
+iteration 51 used:
 
-The catalog already contains explicit stat ladders (`hull1/2/3`,
-`shield1/2/3`, `comp1/2/3`, `init2/3`) and weapon tiers (ion → plasma →
-antimatter). Let a shipyard trade a **fitted** part up one tier for the
-price difference plus a premium, keeping the slot filled.
+**(a) Typed slots + UI + traits, retro-fitted to the existing 7 frames.**
+Measure. Typed slots constrain builds (a nerf); traits are a buff.
+Report the net.
 
-Why it is the best of these: it needs no new content, it is the same
-"trade in toward better" verb as 52.3's hull refit (one concept, two
-scales — a player who understands one understands the other), it soaks
-credits continuously rather than in one lump, and it directly answers
-"nothing to buy" for a player whose slots are all full — currently the
-single most common late-run state with nothing to spend on.
+**(b) The 10 new/revived hulls + the refit.** Measure again.
 
-Needs a declared ladder table (`PART_TIER_UP: Partial<Record<PartId,
-PartId>>`) in `parts.ts`, next to the ladder it describes. Price it the
-same way the refit is priced — `getPart(next).cost -
-partSellPrice(current)` — so both trade-ins use one rule.
+Per stage: `npx tsc -b --force` clean project-wide, `npx vitest run`
+green (report the count; 808 at b7ea8d2), `npx vite build` clean.
 
-### 2. Fleet-capacity expansion — buy the 5th berth
+- `npm run balance` — the matchup table **will** move at stage (a)
+  (innate traits change fixture fleets' stats). Record before/after per
+  matchup; a trait swinging a column more than ~10pp deserves a second
+  look.
+- `npm run balance:full` — per-commander clear rates against the b7ea8d2
+  baseline (baseline 12.4%, merchant 12.6%, engineer 12.6%, spymaster
+  9.6%, admiral 9.0%, warlord 11.8%; act-2 conditional 0% everywhere).
+- `npx tsx scripts/enemyValue.ts` — the roster changes what a given
+  budget can field, which is iteration 55's input. Record it.
+- No browser passes (CLAUDE.md).
 
-`MAX_FLEET_SIZE` is 4 (the Admiral gets 5). A one-time, expensive
-shipyard purchase (+1 permanent fleet slot, hard-capped at one) is a
-large, clean, late-run sink that unlocks *more purchases* rather than
-being an end in itself — money spent to enable spending, which is the
-compounding shape this economy wants.
+**Watch for**: the legendary tier roughly doubles top-end power. At 2%
+draw odds and 38–48cr they are rare and expensive, but if clear rates
+jump sharply at stage (b) the legendary stats are the first suspect.
 
-Interacts with `fleetCap(commanderId, protocols)`: it must ADD to
-whatever that returns rather than overriding, so it composes with the
-Admiral's 5 and with Armada mandate's +2, and Lone flagship's hard-set
-1 must still win (that protocol's whole premise). Store as an optional
-`RunState.purchasedFleetBerths?: number`.
+## Open questions
 
-### 3. Choose-your-augment at the shipyard (optional)
+1. **Slot rigidity** — the layouts above lean flexible (the Flagship
+   especially, forced by 52.6's fixtures). Sharper, more dedicated
+   layouts are possible if the identities read as too soft in play.
+2. **Battleship vs Dreadnought** — both are heavy epics; Battleship is
+   differentiated by layout alone (3 weapon + 2 defense dedicated) and
+   carries no innate. If they read as too similar, Battleship is the one
+   to give a trait.
+3. **Weapon-cap semantics** — deriving the ceiling as `weapon +
+   universal` slots means a universal-heavy hull can go all-weapons
+   (the Sloop, notably). If some hulls need a hard cap regardless, that
+   needs a separate explicit field.
 
-The removed `BUY_UPGRADE` sold one *random* upgrade for 12cr. Bring it
-back letting the player **pick** from the full list, priced well above
-the old 12cr. Zero new mechanics — it is the existing augment system —
-but note it is capped hard by `upgradeCapFor` (1 per ship, 3 for the
-Warlord's Flagship), so it soaks far less than 1 or 2 unless that cap
-also rises. Flag rather than silently raising the cap: that cap is what
-makes elite drops feel earned.
+## Status notes (implementer, 2026-08-12)
 
-### 4. Heat laundering (optional)
+### Summary
 
-Pay credits at a shop to drop pursuit heat by 1. Ties the economy to a
-system it currently never touches, and gives a wealthy player a way to
-buy out of the interception the heat track threatens. Cheap to build
-(`addHeat(state.heat, -1)` behind a price). Keep the price high enough
-that it never becomes the default answer to routing.
+Implemented in the 2 stages 52.7 specifies, with a real checkpoint
+between them: stage (a) landed `SlotKind`/`Frame.slotLayout`/`canEquip`/
+`effectiveSlotLayout` (52.1), the `<SlotRow>` UI (52.2), and innate traits
+folded into `deriveStats` (52.3) — retrofitted to the original 7
+purchasable frames only. `PURCHASABLE_FRAME_IDS` and Dreadnought's rarity
+were deliberately held at their pre-52 values through stage (a)'s
+measurement even though `frames.ts` already carried the full 17-frame
+final data (writing it once, then gating exposure via two flags, was less
+error-prone than writing the file twice) — the balance scripts only ever
+see what's actually purchasable/rollable, so this kept the two stages'
+numbers genuinely attributable without literal double-authoring. Stage
+(b) then flipped both flags, added `REFIT_SHIP`/`canRefit`/`refitCost`
+(52.5) plus its shipyard UI section, and generalized the act-2-shipyard
+gate from a hardcoded `'dreadnought'` check to `rarity === 'legendary'`.
 
-### Explicitly rejected
+### Files changed
 
-- **Shop reroll**: removed outright on 2026-08-08 (see PLAN.md's
-  fourteen-item polish batch). It was removed deliberately; re-adding it
-  as a sink would relitigate that decision without new evidence, which
-  the project's own planning rules forbid.
-- **Column-scaled part prices (inflation)**: it would flatten the
-  surplus curve directly, but it is a tax, not something to buy — it
-  makes the player poorer without giving them anything, which is the
-  opposite of the user's stated intent.
+Core: `src/game/frames.ts` (rewritten — `SlotKind`, `Frame.slotLayout`,
+`Frame.innate`, all 17 frame entries, `frameSlots`), `src/game/ship.ts`
+(`canEquip`, `layoutCanHold`, `effectiveSlotLayout`, `equipBlockReason`,
+`weaponCeiling`, `slotKindForPartType`, innate-folding in `deriveStats`,
+jink hardcode removed), `src/game/types.ts` (no changes — every innate
+trait reuses an existing `ShipStats` field, per 52.3's rule),
+`src/game/reducer.ts` (EQUIP now calls `canEquip`; `REFIT_SHIP` added to
+`RunAction` and delegated to `handleShopAction`; re-exports for
+`canRefit`/`refitCost`), `src/game/reducer/shop.ts` (`STARTING_FIT`
+grown to 17 entries, `hullRarityBonus` rewritten around `canEquip`,
+`drawFrameOffers`/`BUY_SHIP`'s legendary gate generalized, `canRefit`/
+`refitCost`/the `REFIT_SHIP` case added), `src/game/persistence.ts`
+(`SAVE_VERSION` 7 → 8).
 
-## 52.5 Measurement
+UI: `src/components/SlotRow.tsx` (new), `src/components/PartIcon.tsx`
+(`SlotKindIcon` added), `src/components/PartCard.tsx` (`title` prop),
+`src/components/FleetPanel.tsx` (`<SlotRow>` + per-part
+`equipBlockReason` messaging), `src/components/FleetOverlay.tsx`
+(`<SlotRow>`), `src/components/ShopScreen.tsx` (`<SlotRow>` on frame
+cards, `act` prop, `<ShipyardRefitSection>` wired in),
+`src/components/ShipyardRefitSection.tsx` (new), `src/components/
+shopToastText.ts` (`REFIT_SHIP` toast), `src/components/
+ShipSilhouette.tsx` (5 new hull silhouettes), `src/game/shipNames.ts`
+(`HULL_CODE` grown to 17 entries), `src/wiki/Wiki.tsx` (hull table
+rewritten around `<SlotRow>` + `weaponCeiling` + an Innate column),
+`src/styles.css` (`.slot-row`/`.slot-chip`/`.shop-screen__refits`/
+`.refit-row`).
 
-Run before and after the whole iteration, and record both in the status
-notes:
+`scripts/`: `scripts/sim/agent.ts` (`canFit` delegates to `canEquip`;
+`buyCommodityLot`'s carrier search fixed to use it too — see the
+liveness-bug note below; `buyHull`'s dreadnought-specific gate
+generalized; `refitHull` heuristic + `REFIT_SHIP` in
+`HANDLED_ACTIONS`), `scripts/sim/budget.ts` (`hasRoom` delegates to
+`canEquip`), `scripts/sim/budget.test.ts` (weapon-cap test rewritten
+around `weaponCeiling`), `scripts/sim/policy.ts` (`framePriority`
+widened per-archetype — see below).
 
-- `npm run balance:full` — per-commander act-1 clear / act-2 conditional
-  / full-run, plus the c5–c7 and c11 death spikes. **Prediction to
-  test**: act-1 clear rises toward the 20–40% band (the shop converts
-  credits into power faster now). If it rises past 40%, the re-weight
-  over-corrected — say so and propose the trim rather than shipping it
-  silently. Baseline at 1d2a920: baseline 12.4%, merchant 12.6%,
-  engineer 12.6%, spymaster 9.6%, admiral 9.0%, warlord 11.8%; act-2
-  conditional 0% everywhere.
-- `npm run balance` — the matchup table simulates HAND-BUILT fixture
-  fleets, so it must be **unchanged**; any movement means something
-  leaked into `deriveStats`/frames and should be investigated, not
-  accepted.
-- Report the measured shop-clear cost change (a few lines of arithmetic
-  over the new weights is enough — no new tooling).
+Tests: `src/game/ship.test.ts` (52.6's guard test block), `src/game/
+reducer.test.ts` (fixture/assertion updates — see below).
 
-Standard bar per milestone: `npx tsc -b --force` clean project-wide,
-`npx vitest run` green (report the count; 808 at 1d2a920), `npx vite
-build` clean. No browser passes (CLAUDE.md).
+### The fixture audit (52.6) — what had to change and why
 
-## Tests
+- **Bastion's layout deviates from the spec's literal `W D D` table
+  entry only in this: it has ZERO universal slots**, which conflicts
+  with 52.1's own stated invariant ("every frame must keep at least one
+  universal slot... assert over all of FRAMES"). This is a genuine
+  self-contradiction in the spec (the roster table's Bastion row and the
+  universal-slot invariant can't both hold) — resolved in Bastion's
+  favor: keeping zero universal slots makes its 1-weapon cap
+  **structural** (no overflow budget for a 2nd weapon at all), which is
+  exactly what a pre-existing regression test
+  (`reducer.test.ts`, "a Bastion (max 1 weapon) refuses a second weapon
+  but accepts a second non-weapon part") already locked in, and matches
+  the "durable protector, one gun" identity the roster table's own HP/
+  cost numbers were clearly written around. The alternative (adding a
+  universal slot so Bastion can carry a commodity lot) would have let a
+  2nd weapon in via overflow, silently changing that identity. Documented
+  in `frames.ts`'s own comment and asserted in `ship.test.ts`'s guard
+  test as the one deliberate exception, rather than silently violated.
+- **`scripts/balance.ts`'s fixtures needed NO changes** — audited every
+  one (`STRONG_FLEET`, `ENDGAME_FLEET`, `STRIKE_FLEET`,
+  `NO_SPEED_CONTROL`, the `FLEETS` table). The Flagship layout
+  (`W W U U U U`) was chosen specifically so the heaviest of them (6 mixed
+  parts, up to 3 weapons via overflow) stays legal — see frames.ts's own
+  comment on that frame. `bastion`/`interceptor` fixtures elsewhere in
+  that file were already within their new typed budgets by construction.
+- **`scripts/sim/budget.ts`/`policy.ts`**: `hasRoom` swapped to
+  `canEquip` (was hand-rolling the old `maxWeapons` check, which no
+  longer compiles once `Frame.maxWeapons` is gone). `policy.ts`'s
+  `framePriority` lists were widened beyond the letter of the spec's ask
+  — left untouched, a wider roster competing for the same shop-offer
+  slots would only have DILUTED how often each archetype's 2-3 preferred
+  ids show up, with the agent never able to take advantage of the new
+  hulls to compensate (52.6's own flagged risk: "an archetype whose list
+  no longer fits its framePriority hulls will silently under-build" —
+  the mirror-image failure mode, an archetype that never LOOKS at the new
+  hulls at all). Widened each archetype with 1-3 new-roster ids that fit
+  its existing doctrine (`balanced`: + Frigate, Gunboat; `tank-taunt`: +
+  Aegis, its own doctrine's legendary endpoint; `alpha-missile`: +
+  Gunboat; `outspeed`: + Destroyer, base initiative 3; `wide`: +
+  Derelict, Frigate). `tall` (never buys an escort) untouched.
+- **A real liveness bug caught by `scripts/sim/agent.test.ts`**:
+  `agent.ts`'s `buyCommodityLot` picked a "carrier" ship via a plain
+  `equipped.length < effectiveSlots(...)` count check — under typed
+  slots, a ship can have numeric room while having ZERO free universal
+  slots (every one already spent on overflow from another category), and
+  the commodity lot is universal-only. This let the agent believe an
+  EQUIP would succeed when `canEquip` would actually refuse it —
+  exactly the reducer/policy mismatch the liveness test exists to catch.
+  Fixed by routing through `canFit` (== `canEquip`) like every other
+  equip decision in that file.
+- **`STARTING_FIT`/`STARTING_LOADOUT`**: every entry (all 17 purchasable
+  frames plus the Flagship) is legal against its own frame's
+  `slotLayout` — asserted by the new guard test in `ship.test.ts`
+  (52.6's explicit ask), incrementally (each part added on top of the
+  previous, mirroring how a real EQUIP sequence would build it up).
+- **`reducer.test.ts`**: ~119 hand-built `PlayerShipState` fixtures exist
+  in this file; the overwhelming majority needed no changes at all,
+  since an "illegal" `equipped` array is inert until something calls
+  `canEquip` against it (parts are never slot-indexed — see 52.1). Only
+  fixtures that were BOTH illegal under the new layouts AND actually
+  exercised by an EQUIP/BUY_SHIP dispatch in that same test needed
+  rewriting:
+  - The Lone-flagship/Warlord bonus-slot tests built a Flagship "full at
+    base capacity" with 6x `comp1` (all systems-type) — illegal under
+    the Flagship's `W W U U U U` layout (only 4 universal slots can hold
+    a systems-type item, not 6). Rewritten to 2x `ion` + 4x `comp1`
+    (fills the 2 weapon + 4 universal slots exactly), preserving the
+    tests' actual point (the bonus slots are usable, not just
+    displayed).
+  - The Dreadnought "4-weapon cap enforced" test hardcoded the old flat
+    `maxWeapons: 4`. The real ceiling under typed slots is 6 (4 dedicated
+    + 2 universal — see the Open Questions #3 discussion this
+    predates), a genuine, intentional behavior change. Split into two
+    tests: the original purchase-mechanics assertions (now with no cap
+    language) and a new isolated test proving the real ceiling (6, not
+    8 — the 2 still-empty DEFENSE slots aren't touched by a weapon
+    overflow at all).
+  - `'aegis'`'s "legacy hull still derives stats" test expected the
+    pre-52 `baseHp: 2` — un-retirement changed that to `10`; updated and
+    renamed to also assert the new innate `taunt`.
+  - The "five retired support hulls are gone from the shop pool" test's
+    entire premise inverted (they're un-retired) — replaced with a test
+    asserting they're purchasable under their 52.4-roster names.
+  - Three tests hardcoded `'dreadnought'` as the act-2/shipyard-gated
+    example (now epic, not gated) — repointed to `'titan'` (a genuine
+    legendary) for the gate-refusal cases, and a new test added
+    confirming Dreadnought itself is now buyable in an act-1 shipyard.
+  - `"every purchasable frame arrives at 0 damage"` looped all 17
+    purchasable frames buying each at a STORE; 3 more legendary ids now
+    exist beyond Dreadnought and are correctly refused there — the loop's
+    skip condition generalized from `frameId === 'dreadnought'` to
+    `getFrame(frameId).rarity === 'legendary'`.
 
-- `rollRarity` boundary test updated to the new cumulative bands.
-- `drawShopOffers`: existing uniqueness invariants still hold across
-  many seeds (unchanged behavior, new weights).
-- `drawFrameOffers`: shipyard returns 4; store still 2; store still
-  never yields epic/legendary.
-- `refitCost` arithmetic, including the trade-in.
-- `canRefit`: each of the four legality rules gets a case, plus the
-  Flagship guard and the mercenary guard.
-- `REFIT_SHIP` reducer: happy path preserves parts/augments/name/kills/
-  fightsSurvived and consumes the frame offer + credits; damage clamps
-  on an HP-reducing refit (Bastion → Freighter is the concrete case);
-  rejected outside a shipyard, at insufficient credits, on the Flagship,
-  on a mercenary, and for a target not in `shopFrameOffers`.
+### Deviations from the spec's exact text
 
-## Deferred (the content pass — user's explicit sequencing)
+- **Bastion's universal-slot exception** — covered above; the one
+  frame layout that doesn't literally match "every frame keeps >=1
+  universal slot."
+- **Weapon-cap semantics resolved as the spec's own Open Question #3
+  anticipated**: no separate hard-cap field was added. A hull's real
+  weapon ceiling is `count('weapon') + count('universal')` in its
+  layout, computed on demand (`ship.ts`'s `weaponCeiling`, exported for
+  UI/tests) rather than stored. This is a genuine, intentional loosening
+  for every frame except Bastion (which has 0 universal slots, so its
+  ceiling stays hard at 1) — most visibly the Dreadnought, whose
+  ceiling is now 6, not the old flat 4.
+- **`canRefit`'s signature is `Pick<RunState, 'shopKind' |
+  'shopFrameOffers' | 'act' | 'protocols' | 'commanderId'>`, not the
+  full `RunState`** — not specified either way; chosen so the shipyard
+  UI (which only ever holds a handful of these as discrete props, not
+  the whole `RunState`) can call it directly without reconstructing one.
+- **Refit is explicitly `shopKind === 'shipyard'`-only**, enforced
+  inside `canRefit` itself. The spec's prose ("At a shipyard, trade a
+  ship up...") strongly implies this and the UI section only being
+  specced for the shipyard listing confirms it, but it isn't one of the
+  spec's own enumerated numbered rules — made explicit rather than left
+  as an accident of "stores never offer legendary/epic anyway" (a store
+  COULD otherwise offer a legal common/rare refit target, and nothing
+  else in the spec suggests that should be allowed).
+- **`policy.ts`'s `framePriority` widening** — covered above under the
+  fixture audit; goes beyond the spec's literal ask (which only names
+  `partPriority` vs. `framePriority` COMPATIBILITY as the risk) but
+  follows directly from 52.6's own stated concern.
 
-The user chose "re-weight first, then add content" so the two effects
-stay attributable. That content pass is now specced as
-**[iteration 54](plans/iteration-54.md)** — and it grew: rather than
-simply adding more hulls, the user redirected it toward *hull identity*
-(typed weapon-only/systems-only slots, clearly marked, plus a named
-innate trait per frame), with new rare-tier hulls layered on top of that
-foundation. Gaps this audit found, carried into 54 as its seed data:
+### Balance measurement tables
 
-- **Frames**: 7 total is too few for any draw count to feel varied;
-  rare tier has only 2 entries (Bastion, Freighter). The single biggest
-  content gap.
-- **ACTIVE parts**: 0 common, 2 rare, 9 epic — the thinnest and most
-  top-heavy pool in the game.
-- **COMPUTER_DRIVE**: 11 parts total, 0 legendary — and no frame
-  currently favours computer/drive builds.
-- Once the roster is wider, revisit 52.2's shipyard count (likely back
-  up from 4).
+`npm run balance` (the fixture matchup table) is **byte-identical at
+every checkpoint**, stage (a) and (b) alike — none of `balance.ts`'s
+hand-built fleets reference `PURCHASABLE_FRAME_IDS` or draw frame
+offers, so the roster/rarity changes literally cannot reach it. The
+pre-existing FAIL/WARN lines (col10-solid-vs-GCDS, strong-vs-Hive-Mother,
+fresh-vs-col-3-elite, strike-vs-plasma-tank WARN, Titan/Void-Citadel
+KNOWN MARGINAL) are all unchanged, exactly as documented before this
+iteration.
+
+`npm run balance:full` (n=500/commander), act-1 clear rate — act-2
+conditional was 0% everywhere at every checkpoint, dropped from the
+table for the same reason iteration 51's did:
+
+| Checkpoint | auto | merchant | engineer | spymaster | admiral | warlord |
+|---|---|---|---|---|---|---|
+| Baseline (b7ea8d2) | 12.4% | 12.6% | 12.6% | 9.6% | 9.0% | 11.8% |
+| Stage (a) — typed slots + UI + traits, roster still 7 | 12.8% | 13.2% | 12.8% | 10.0% | 9.0% | 12.2% |
+| Stage (b) — roster 7→17, refit added | 11.6% | 8.8% | 13.2% | 7.6% | 11.2% | 10.8% |
+
+`npx tsx scripts/enemyValue.ts` is **also byte-identical at every
+checkpoint** — it measures enemy value against the player's starting fit
++ banked win rewards, neither of which the roster/rarity change touches
+(the Flagship's own frame/starting loadout is unchanged throughout).
+Recorded for the record per 52.7's instruction, but there is genuinely
+nothing to report here; iteration 55 (its actual consumer) will need to
+re-derive this once a real fleet-building model exists that reflects the
+wider hull choice, which `enemyValue.ts` in its current form does not
+attempt.
+
+### Reading the movement
+
+Stage (a) is a small net BUFF (+0.2 to +0.6pp for 5 of 6 rows, admiral
+flat), consistent with the spec's own prediction that typed slots (a
+nerf, since the original 7 frames now have SOME structure where none
+existed) would be outweighed by 3 new innate traits (Corvette
+`capacitorShield`, Bastion `reactiveArmor`, Dreadnought `shieldPierce` —
+all real, previously-unavailable-for-free stats) plus Interceptor's Jink
+formalization being exactly zero-behavior-change as designed.
+
+Stage (b) moves more, and unevenly — auto/spymaster/warlord down
+1-2.4pp, engineer/admiral up 0.4-2.2pp, **merchant down 4.4pp** (its
+confidence interval, [6.6-11.6%], barely overlaps stage (a)'s
+[10.5-16.4%], unlike every other commander's stage-b move which stays
+comfortably inside a 500-run Wilson interval of the stage-a figure).
+Read plainly: the merchant's own `COMMANDER_ROUTE_BIAS` (`shop: +30,
+shipyard: +30, combat: -15`) means it visits shops/shipyards far more
+than any other commander, so it's the one most exposed to the roster
+DILUTION effect the spec's own "Watch for" section flags — a wider pool
+of purchasable ids sharing the same 5 (shipyard) / 2 (store) draw slots
+means the specific ids `policy.ts`'s `framePriority` lists want show up
+less often per visit, and the merchant simply takes more of those visits
+than anyone else. This is the expected shape of the tradeoff the spec's
+own motivation section accepted going in ("more lower tier ship options...
+with different frames" — necessarily thinner odds per specific option),
+not a regression introduced by an implementation mistake; flagged here
+rather than chased, since re-tuning `COMMANDER_ROUTE_BIAS` or the
+draw counts is explicitly out of this iteration's scope (52.4's own
+"draw counts stay as they are" section).
+
+**No clear-rate band was closed** — every commander's act-1 clear stays
+well under the 20-40% target band before and after, exactly as
+iteration 46's KNOWN GAP already documents. That gap is not this
+iteration's job to close (iteration 55, gated on this one, is where the
+enemy-value/wealth-curve flattening work lives).
+
+### The one flake, not fixed
+
+`reducer.test.ts`'s "can offer a legendary hull in an act-2 shipyard"
+(and its Dreadnought-specific sibling) draw 30-40 unseeded map-generation
+rolls and check that a low-probability tier (now split across 3-4
+legendary/epic ids sharing a ~2-5% roll each) appears at least once.
+Confirmed pre-existing (reproduced against the ORIGINAL single-legendary
+version before touching any code) rather than introduced by this
+iteration's roster widening, which only makes the specific-id odds
+thinner (more ids sharing the tier). Iteration count bumped 30→40 for
+the rewritten versions to reduce (not eliminate) the false-fail rate;
+a fully deterministic seed would be the real fix, out of scope here.

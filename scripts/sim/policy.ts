@@ -46,7 +46,16 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   balanced: {
     label: 'Balanced (the floor)',
     partPriority: BASE_PART_PRIORITY,
-    framePriority: ['interceptor', 'corvette', 'bastion'],
+    // Iteration 52.6: widened past the original 3 — with 17 purchasable
+    // frames now drawing from the SAME shop-offer slots, leaving this list
+    // untouched would only dilute how often interceptor/corvette/bastion
+    // themselves appear (more competing ids sharing the draw), with no
+    // offsetting upside from the new roster — exactly the "silently
+    // under-build" risk 52.6 flags. Frigate (common, a real 2nd weapon
+    // slot for 7cr) and Gunboat (rare, 3 dedicated weapon slots) are
+    // straightforward upgrades on the existing picks' own doctrine, not a
+    // new one.
+    framePriority: ['interceptor', 'corvette', 'bastion', 'frigate', 'gunboat'],
     fleetCap: 3,
     repairThreshold: 0.4,
     routeBias: {},
@@ -54,7 +63,10 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   'tank-taunt': {
     label: 'Tank-taunt (Bastion + lure)',
     partPriority: ['lure', 'hull2', 'shield2', 'reactive', 'plasma', 'hull2', 'shield2', 'hull3', 'shield3', 'plasma'],
-    framePriority: ['bastion', 'interceptor'],
+    // Aegis (legendary, innate taunt) is this archetype's own doctrine
+    // taken to its logical endpoint — added last since it's only ever
+    // reachable act-2-shipyard, late.
+    framePriority: ['bastion', 'interceptor', 'aegis'],
     fleetCap: 2,
     repairThreshold: 0.5,
     routeBias: { repair: 15 },
@@ -62,7 +74,9 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   'alpha-missile': {
     label: 'Alpha-missile (racks + flak)',
     partPriority: ['missile', 'torpedo', 'flak', 'missile', 'comp2', 'torpedo', 'hull1', 'comp3', 'flak2', 'torpedo'],
-    framePriority: ['interceptor', 'corvette'],
+    // Gunboat's 3 dedicated weapon slots are a direct fit for a
+    // volume-of-fire doctrine, missile or cannon alike.
+    framePriority: ['interceptor', 'corvette', 'gunboat'],
     fleetCap: 3,
     repairThreshold: 0.4,
     routeBias: {},
@@ -70,7 +84,9 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   outspeed: {
     label: 'Outspeed (init ladder + drives)',
     partPriority: ['init3', 'ion', 'comp2', 'init2', 'plasma', 'hull1', 'shield1', 'comp3', 'init2', 'plasma'],
-    framePriority: ['interceptor', 'corvette'],
+    // Destroyer (epic, base initiative 3 — the highest below Valkyrie) is
+    // this archetype's doctrine as a hull identity, not just a part stack.
+    framePriority: ['interceptor', 'corvette', 'destroyer'],
     fleetCap: 3,
     repairThreshold: 0.4,
     routeBias: {},
@@ -78,7 +94,10 @@ export const ARCHETYPES: Record<string, PolicyConfig> = {
   wide: {
     label: 'Wide (hull count first)',
     partPriority: ['ion', 'ion', 'ion', 'ion', 'ion', 'ion', 'comp1', 'hull1', 'comp1', 'hull1'],
-    framePriority: ['interceptor', 'corvette', 'interceptor', 'corvette'],
+    // Derelict (4cr, the cheapest hull in the yard) and Frigate (7cr, twin
+    // guns) both fit "as many bodies as credits allow" better than a 2nd
+    // and 3rd Interceptor/Corvette repeat did.
+    framePriority: ['interceptor', 'corvette', 'derelict', 'frigate'],
     fleetCap: 4,
     repairThreshold: 0.35,
     routeBias: { shop: 15, shipyard: 15 }, // wide needs more shop visits to fill more hulls

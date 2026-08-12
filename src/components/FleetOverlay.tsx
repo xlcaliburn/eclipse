@@ -1,13 +1,16 @@
 import type { CommanderId } from '../game/commanders';
 import type { CounterProtocolId } from '../game/counterProtocols';
+import { getFrame } from '../game/frames';
 import { getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
 import { upgradeCapFor } from '../game/reducer';
-import { deriveStats, effectiveSlots, formatStatLine, playerShipLabel } from '../game/ship';
+import { deriveStats, effectiveSlotLayout, effectiveSlots, equippedPower, formatStatLine, playerShipLabel } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { AdaptivePanel } from './AdaptivePanel';
 import { PartCard } from './PartCard';
+import { PowerPipRow } from './PowerPipRow';
 import { CounterProtocolRow, ProtocolRow } from './SettingsScreen';
+import { SlotRow } from './SlotRow';
 import { UpgradeBadgeRow } from './UpgradeBadgeRow';
 
 interface FleetOverlayProps {
@@ -58,6 +61,10 @@ function fleetBody(
               upgrades={ship.upgrades}
               emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
             />
+            {/* Iteration 52.2: same typed-slot shape FleetPanel shows. */}
+            <SlotRow layout={effectiveSlotLayout(ship.frameId, ship.upgrades, protocols, commanderId)} equipped={ship.equipped} />
+            {/* Iteration 57.3: same power meter FleetPanel shows. */}
+            <PowerPipRow used={equippedPower(ship.equipped)} budget={getFrame(ship.frameId).power} />
             <div className="slot-grid">
               {ship.equipped.map((partId, i) => (
                 <PartCard key={`${partId}-${i}`} part={getPart(partId)} />

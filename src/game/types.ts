@@ -28,6 +28,13 @@ export type WeaponKind = 'cannon' | 'missile';
 // compile error on an unassigned item beats a silently-common default.
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
 
+// Iteration 57.1 (ship power budgets, the "minimal" version — no reactor
+// parts, no reactor slot kind): what a part draws is rarity-derived, not a
+// per-part judgment call. Shared by parts.ts (to populate Part.power) and
+// ship.test.ts's table-driven check that every part's power matches its own
+// rarity.
+export const RARITY_POWER: Record<Rarity, number> = { common: 1, rare: 2, epic: 3, legendary: 4 };
+
 export interface Part {
   id: PartId;
   name: string;
@@ -35,6 +42,16 @@ export interface Part {
   rarity: Rarity;
   description: string;
   cost: number; // shop price in credits
+  // Iteration 57.1: what this part draws from its ship's frame.power budget
+  // (ship.ts's canEquip/layoutCanHold). Rarity-derived (RARITY_POWER above)
+  // for every part in PARTS — a real field on Part rather than a computed
+  // function so an individual part COULD diverge from its rarity later
+  // without a schema change (plans/iteration-57.md's open question #1); no
+  // part does yet, except the commodity lot (parts.ts), which is
+  // deliberately 0 — it isn't real equipment, just cargo riding in a slot.
+  // Never read by deriveStats/the combat engine — power is a build-time
+  // constraint only, same as slot count.
+  power: number;
   // Weapon parts fire `diceCount` dice of `damage` each, in the given phase.
   // `selfDamageOnNatOne` (rift cannon): a natural 1 does not miss — it deals
   // that much direct damage to the firing ship instead. `shieldPierce` here

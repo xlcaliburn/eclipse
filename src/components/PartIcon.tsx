@@ -1,3 +1,4 @@
+import type { SlotKind } from '../game/frames';
 import type { Part } from '../game/types';
 
 // Iteration 10.3: one code-authored glyph per part type (cannon and missile
@@ -86,6 +87,34 @@ export function PartIcon({ part, size = 20, className }: PartIconProps) {
       aria-hidden="true"
     >
       {glyphFor(part)}
+    </svg>
+  );
+}
+
+// Iteration 52.2: one glyph per SLOT KIND (as opposed to TYPE_GLYPHS above,
+// which is per PART type) — an empty slot's icon deliberately reuses the
+// same shapes so a "weapon slot waiting to be filled" and an actual weapon
+// part read as one visual family, not two unrelated icon sets. `defense`
+// reuses the shield glyph, `systems` the computer glyph, `universal` the
+// cargo glyph (the one PartType universal slots exist to guarantee room
+// for) — see SlotRow.tsx for where this renders.
+const SLOT_KIND_GLYPH: Record<SlotKind, React.ReactNode> = {
+  weapon: CANNON_GLYPH,
+  defense: SHIELD_GLYPH,
+  systems: COMPUTER_GLYPH,
+  universal: CARGO_GLYPH,
+};
+
+export function SlotKindIcon({ kind, size = 20, className }: { kind: SlotKind; size?: number; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      width={size}
+      height={size}
+      className={`part-icon${className ? ` ${className}` : ''}`}
+      aria-hidden="true"
+    >
+      {SLOT_KIND_GLYPH[kind]}
     </svg>
   );
 }
