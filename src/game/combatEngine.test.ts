@@ -110,6 +110,21 @@ describe('active parts (iteration 7)', () => {
     expect(state.playerShips[0].damage).toBe(1);
   });
 
+  // 2026-08-12 (player report): the charge used to burn for nothing at
+  // full HP (Math.max(0, 0 - 1) silently stays 0) — canUseActive now
+  // refuses a repair active outright when there's nothing to repair, for
+  // both injector and dcbay.
+  it('injector/dcbay: canUseActive refuses at full HP (nothing to repair) — the charge stays unspent', () => {
+    const fleet = [{ stats: blankStats({ hp: 5, actives: ['injector', 'dcbay'] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 3);
+    expect(canUseActive(state, 0, 0)).toBe(false); // injector
+    expect(canUseActive(state, 0, 1)).toBe(false); // dcbay
+    state = useActive(state, 0, 0);
+    expect(state.usedActives).toHaveLength(0); // refused, not consumed
+    expect(state.playerShips[0].damage).toBe(0);
+  });
+
   it('uplink2: +2 computer for exactly one round', () => {
     const fleet = [{ stats: blankStats({ hp: 5, actives: ['uplink2'] }), initialDamage: 0 }];
     const foe = enemy({}, { hp: 5 });

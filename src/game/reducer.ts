@@ -108,6 +108,13 @@ export type RunAction =
   | { type: 'EQUIP'; shipIndex: number; partId: PartId }
   | { type: 'UNEQUIP'; shipIndex: number; partId: PartId }
   | { type: 'ENGAGE' }
+  // 2026-08-12: dismisses the Prep screen's "you have unequipped items"
+  // notice — records the inventory count at dismissal so it stays
+  // dismissed until a genuinely new item pushes the count past that,
+  // rather than reappearing every visit. Non-blocking (ENGAGE doesn't
+  // gate on this), so it's fine to dispatch from any phase — the UI only
+  // ever fires it from Prep.
+  | { type: 'DISMISS_INVENTORY_WARNING' }
   | { type: 'ADVANCE_ROUND' }
   | { type: 'AUTO_RESOLVE' }
   | { type: 'SET_PRIORITY_TARGET'; index: number | null }
@@ -976,6 +983,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const fleet = mapShip(state.fleet, action.shipIndex, (s) => ({ ...s, equipped, damage }));
       return { ...state, fleet, inventory: [...state.inventory, action.partId] };
     }
+
+    case 'DISMISS_INVENTORY_WARNING':
+      return { ...state, inventoryWarningDismissedAt: state.inventory.length };
 
     case 'ENGAGE': {
       if (state.phase !== 'prep' || !state.currentEnemy || state.currentCombatSeed === undefined) return state;

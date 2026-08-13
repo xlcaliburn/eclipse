@@ -1366,12 +1366,19 @@ export function combatOutcome(state: CombatState): CombatOutcome {
 // A ship's Nth active ability (by equip order) is identified by
 // `(shipIndex, abilityIndex)`, where `abilityIndex` indexes into
 // `stats.actives` — the part ids of every active part this ship carries.
+// 2026-08-12 (player report): a repair active (injector, dcbay) could be
+// spent at full HP for zero effect — Math.max(0, damage - N) silently
+// no-ops at damage 0, so the once-per-combat charge just burned for
+// nothing, with no warning it would.
+const REPAIR_ACTIVES: PartId[] = ['injector', 'dcbay'];
+
 export function canUseActive(state: CombatState, shipIndex: number, abilityIndex: number): boolean {
   if (state.winner) return false;
   const ship = state.playerShips[shipIndex];
   if (!ship || !isAlive(ship)) return false;
   const abilityId = ship.stats.actives?.[abilityIndex];
   if (!abilityId) return false;
+  if (REPAIR_ACTIVES.includes(abilityId) && ship.damage <= 0) return false;
   return !state.usedActives.some((u) => u.shipIndex === shipIndex && u.abilityIndex === abilityIndex);
 }
 

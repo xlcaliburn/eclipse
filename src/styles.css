@@ -1701,6 +1701,30 @@ h3 .info-dot,
   }
 }
 
+/* 2026-08-12: the dismissible "N unequipped items" notice — inline text +
+   a small text-button dismiss, same register as the other Prep warnings
+   rather than the boxed install-hint's full panel treatment (this is one
+   line, not a standing banner). */
+.prep-screen__inventory-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prep-screen__inventory-hint-dismiss {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.prep-screen__inventory-hint-dismiss:hover {
+  color: var(--text);
+}
+
 /* Panels */
 .enemy-panel,
 .blueprint-panel {

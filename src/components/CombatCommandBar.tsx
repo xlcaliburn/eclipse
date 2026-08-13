@@ -175,6 +175,16 @@ export function CombatCommandBar({
               {activeAbilities.map(({ shipIndex, abilityIndex, partId }) => {
                 const part = getPart(partId);
                 const usable = canUseActive(combat, shipIndex, abilityIndex);
+                // 2026-08-12: canUseActive now also blocks a repair active
+                // (injector, dcbay) at full HP — distinct from "already
+                // spent," so the tile needs to say which. usedActives is
+                // the only source of truth for "actually spent"; anything
+                // else blocking it (today: full HP) falls to the other
+                // label.
+                const alreadyUsed = combat.usedActives.some(
+                  (u) => u.shipIndex === shipIndex && u.abilityIndex === abilityIndex,
+                );
+                const kindLabel = usable ? '1 per combat' : alreadyUsed ? 'Spent' : 'Full HP';
                 return (
                   <button
                     key={`${shipIndex}-${abilityIndex}`}
@@ -182,9 +192,9 @@ export function CombatCommandBar({
                     className="card-tile"
                     disabled={!usable}
                     onClick={() => onUseActive(shipIndex, abilityIndex)}
-                    title={part.description}
+                    title={!usable && !alreadyUsed ? 'Already at full HP — nothing to repair.' : part.description}
                   >
-                    <span className="card-tile__kind">{usable ? '1 per combat' : 'Spent'}</span>
+                    <span className="card-tile__kind">{kindLabel}</span>
                     <span className="card-tile__name">
                       <ActiveSparkIcon size={14} className={usable ? 'part-icon--charged' : 'part-icon--spent'} />
                       {part.name}

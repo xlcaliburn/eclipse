@@ -132,6 +132,23 @@ export function PrepScreen({ state, dispatch, onViewFleet }: PrepScreenProps) {
         {canEngage && missileOnlyWarning && (
           <p className="warning">Missile-only fleet — no cannons for extended fights.</p>
         )}
+        {/* 2026-08-12: non-blocking — unlike the two warnings above, having
+            spare parts sitting in inventory doesn't stop Engage, it's just
+            easy to forget about. Dismissing it records the inventory count
+            so it doesn't reappear every visit — only once a genuinely new
+            item pushes the count past what was last dismissed. */}
+        {state.inventory.length > 0 && state.inventory.length > (state.inventoryWarningDismissedAt ?? 0) && (
+          <p className="hint prep-screen__inventory-hint">
+            {state.inventory.length} unequipped item{state.inventory.length === 1 ? '' : 's'} in inventory.
+            <button
+              type="button"
+              className="prep-screen__inventory-hint-dismiss"
+              onClick={() => dispatch({ type: 'DISMISS_INVENTORY_WARNING' })}
+            >
+              Dismiss
+            </button>
+          </p>
+        )}
       </div>
     </div>
   );

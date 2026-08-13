@@ -49,6 +49,10 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   PICK_NODE: true,
   EQUIP: true,
   UNEQUIP: true,
+  // 2026-08-12: the Prep screen's dismissible "unequipped items" notice —
+  // pure UI state, never dispatched by the floor agent, same as it never
+  // interacts with any other view-only affordance.
+  DISMISS_INVENTORY_WARNING: true,
   ENGAGE: true,
   ADVANCE_ROUND: true,
   AUTO_RESOLVE: true,

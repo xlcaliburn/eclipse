@@ -3017,6 +3017,27 @@ describe('iteration 9.4: targeting doctrine', () => {
   });
 });
 
+describe('DISMISS_INVENTORY_WARNING (2026-08-12: Prep screen "unequipped items" notice)', () => {
+  it('records the current inventory count on dismissal', () => {
+    const state: RunState = { ...initialRunState(), inventory: ['ion', 'comp1'] };
+    const result = runReducer(state, { type: 'DISMISS_INVENTORY_WARNING' });
+    expect(result.inventoryWarningDismissedAt).toBe(2);
+  });
+
+  it('a fresh run has never dismissed it', () => {
+    expect(initialRunState().inventoryWarningDismissedAt).toBeUndefined();
+  });
+
+  it('re-dismissing after a new item bumps the count further', () => {
+    let state: RunState = { ...initialRunState(), inventory: ['ion'] };
+    state = runReducer(state, { type: 'DISMISS_INVENTORY_WARNING' });
+    expect(state.inventoryWarningDismissedAt).toBe(1);
+    state = { ...state, inventory: [...state.inventory, 'comp1'] }; // a new item arrives
+    state = runReducer(state, { type: 'DISMISS_INVENTORY_WARNING' });
+    expect(state.inventoryWarningDismissedAt).toBe(2);
+  });
+});
+
 describe('ISSUE_ORDER (iteration 48, fleet orders)', () => {
   function engagedState(overrides: Partial<RunState> = {}): RunState {
     const prepped: RunState = {

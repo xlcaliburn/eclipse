@@ -427,6 +427,12 @@ export interface RunState {
   fled: MapPosition[];
   credits: number;
   inventory: PartId[]; // owned, unequipped parts
+  // 2026-08-12: the Prep screen's "you have unequipped items" notice —
+  // dismissed once, it stays dismissed until inventory grows past this
+  // count again (a genuinely new item since the last dismissal), not just
+  // every time the screen re-renders. Optional/absent means never
+  // dismissed (a pre-existing save, or a fresh run) — falls back to 0.
+  inventoryWarningDismissedAt?: number;
   fleet: PlayerShipState[];
   escalations: ScheduledEscalation[]; // seeded at run start from the map seed
   bossRevealed: boolean; // the boss dossier has been bought
