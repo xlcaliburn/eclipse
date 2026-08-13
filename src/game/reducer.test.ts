@@ -3652,10 +3652,16 @@ describe('iteration 30: counter-protocols', () => {
   }
 
   // Same forceNodeType helper the Dreadnought act-2-shipyard tests use
-  // above — builds a minimal, reachable act-2 lane-0 node of the given type.
-  function act2StateAt(type: NodeType, overrides: Partial<RunState> = {}): RunState {
-    const map = forceNodeType(initialRunState().map, 0, 0, type, 2);
-    return { ...initialRunState(), phase: 'map', act: 2, map, ...overrides };
+  // above — builds a minimal, reachable act-2 lane-node of the given type
+  // at `col`, with `position` set one column short so a single PICK_NODE
+  // (row 0, default target = position.col + 1) lands on it. `col` defaults
+  // to 0 (the seam) — iteration 55's counter-protocol ramp (mechanism A)
+  // means col 0/1 and col >= 2 behave differently, so tests that want the
+  // counter ACTIVE pass col explicitly past the ramp (col: 2).
+  function act2StateAt(type: NodeType, overrides: Partial<RunState> = {}, col = 0): RunState {
+    const map = forceNodeType(initialRunState().map, col, 0, type, 2);
+    const position = col === 0 ? null : { col: col - 1, row: 0 };
+    return { ...initialRunState(), phase: 'map', act: 2, map, position, ...overrides };
   }
 
   it('winning the act-1 boss also draws exactly one silver, one gold, one prismatic COUNTER offer, index-paired with the protocol offers', () => {
@@ -3715,9 +3721,9 @@ describe('iteration 30: counter-protocols', () => {
     expect(result.counterProtocol).toBeUndefined();
   });
 
-  it('a drafted counter-protocol applies to a combat enemy in act 2, never in act 1 regardless', () => {
+  it('a drafted counter-protocol applies to a combat enemy in act 2 (past the seam ramp), never in act 1 regardless', () => {
     const act2 = runReducer(
-      { ...act2StateAt('combat'), counterProtocol: 'hardened-veterans' as CounterProtocolId },
+      { ...act2StateAt('combat', {}, 2), counterProtocol: 'hardened-veterans' as CounterProtocolId },
       { type: 'PICK_NODE', row: 0 },
     );
     expect(act2.currentEnemy?.appliedCounter).toBe('hardened-veterans');
@@ -3730,30 +3736,59 @@ describe('iteration 30: counter-protocols', () => {
   });
 
   it('no counter applies in act 2 when nothing was drafted', () => {
-    const result = runReducer(act2StateAt('combat'), { type: 'PICK_NODE', row: 0 });
+    const result = runReducer(act2StateAt('combat', {}, 2), { type: 'PICK_NODE', row: 0 });
     expect(result.currentEnemy?.appliedCounter).toBeUndefined();
   });
 
   it('applies to elite nodes too', () => {
     const result = runReducer(
-      { ...act2StateAt('elite'), counterProtocol: 'targeting-arrays' as CounterProtocolId },
+      { ...act2StateAt('elite', {}, 2), counterProtocol: 'targeting-arrays' as CounterProtocolId },
       { type: 'PICK_NODE', row: 0 },
     );
     expect(result.currentEnemy?.appliedCounter).toBe('targeting-arrays');
   });
 
   it('applies on top of veterancy/escalations rather than replacing them', () => {
-    // col 0 has no veterancy/escalations in play, so this just confirms the
-    // counter doesn't clobber the enemy's base stats — a fuller escalation
-    // interaction is exercised structurally by applyCounterProtocol's own
-    // unit tests (counterProtocols.test.ts), which operate on the same
-    // clone-and-mutate shape applyEscalations uses.
+    // col 2 (past the ramp) has no veterancy/escalations in play, so this
+    // just confirms the counter doesn't clobber the enemy's base stats — a
+    // fuller escalation interaction is exercised structurally by
+    // applyCounterProtocol's own unit tests (counterProtocols.test.ts),
+    // which operate on the same clone-and-mutate shape applyEscalations
+    // uses.
     const result = runReducer(
-      { ...act2StateAt('combat'), counterProtocol: 'hardened-veterans' as CounterProtocolId },
+      { ...act2StateAt('combat', {}, 2), counterProtocol: 'hardened-veterans' as CounterProtocolId },
       { type: 'PICK_NODE', row: 0 },
     );
     expect(result.currentEnemy).toBeDefined();
     expect(result.currentEnemy!.groups[0].stats.hp).toBeGreaterThan(0);
+  });
+
+  describe('act-2 seam ramp (iteration 55, mechanism A)', () => {
+    it('a drafted counter does NOT apply at local col 0 or 1', () => {
+      const col0 = runReducer(
+        { ...act2StateAt('combat', {}, 0), counterProtocol: 'hardened-veterans' as CounterProtocolId },
+        { type: 'PICK_NODE', row: 0 },
+      );
+      expect(col0.currentEnemy?.appliedCounter).toBeUndefined();
+
+      const col1 = runReducer(
+        { ...act2StateAt('combat', {}, 1), counterProtocol: 'hardened-veterans' as CounterProtocolId },
+        { type: 'PICK_NODE', row: 0 },
+      );
+      expect(col1.currentEnemy?.appliedCounter).toBeUndefined();
+    });
+
+    it('a drafted counter DOES apply from local col 2 on', () => {
+      const result = runReducer(
+        { ...act2StateAt('combat', {}, 2), counterProtocol: 'hardened-veterans' as CounterProtocolId },
+        { type: 'PICK_NODE', row: 0 },
+      );
+      expect(result.currentEnemy?.appliedCounter).toBe('hardened-veterans');
+    });
+
+    it('the ramp exempts the boss too structurally, but the boss column is always past it (never a live concern)', () => {
+      expect(bossColumn(2)).toBeGreaterThan(1);
+    });
   });
 });
 

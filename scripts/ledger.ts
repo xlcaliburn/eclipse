@@ -78,7 +78,7 @@ function runColumn(act: 1 | 2, col: number, counter?: Parameters<typeof applyCou
   const esc = representativeEscalations(act);
   const cells: Cell[] = [];
   for (const raw of combatEnemyPool(act, col)) {
-    let enemy: EnemyDef = applyEscalations(applyVeterancy(raw, col), globalCol, esc);
+    let enemy: EnemyDef = applyEscalations(applyVeterancy(raw, act, col), globalCol, esc);
     if (counter) enemy = applyCounterProtocol(enemy, counter);
     const r = simulateFleet(fleet, enemy, SIMS);
     cells.push({ label: enemy.name, winPct: Math.round(r.winRate.point * 100) });
@@ -105,7 +105,7 @@ function report() {
     const cells = runColumn(1, col);
     const budget = realisticBudget(1, col);
     const fleet = buildFleet(budget, 'balanced');
-    const elite = applyEscalations(applyVeterancy(eliteEnemyForColumn(1, col, () => 0.5), col), col, representativeEscalations(1));
+    const elite = applyEscalations(applyVeterancy(eliteEnemyForColumn(1, col, () => 0.5), 1, col), col, representativeEscalations(1));
     const er = simulateFleet(fleet, elite, SIMS);
     printColumn(1, col, cells, { label: elite.name, winPct: Math.round(er.winRate.point * 100) });
   }

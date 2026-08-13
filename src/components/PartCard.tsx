@@ -1,4 +1,4 @@
-import type { Part } from '../game/types';
+import type { BuildTag, Part } from '../game/types';
 import { WeaponDie } from './Die';
 import { PartIcon, PowerBoltIcon } from './PartIcon';
 
@@ -36,6 +36,19 @@ const TYPE_LABEL: Record<Part['type'], string> = {
   reactor: 'Reactor',
 };
 
+// Iteration 63.3 (build tags): a short word per chip, not an icon/color
+// alone — legible at the card's small size and never ambiguous for a
+// colorblind reader. The full name (for the title tooltip) lives in the
+// wiki's Builds section, which reads these same ids off `BuildTag`.
+const BUILD_TAG_LABEL: Record<BuildTag, string> = {
+  alpha: 'Alpha',
+  speed: 'Speed',
+  tank: 'Tank',
+  swarm: 'Swarm',
+  pierce: 'Pierce',
+  attrition: 'Attrition',
+};
+
 export function PartCard({ part, onClick, disabled, showCost, showPower, title }: PartCardProps) {
   return (
     <button
@@ -62,6 +75,19 @@ export function PartCard({ part, onClick, disabled, showCost, showPower, title }
         </span>
       )}
       <span className="part-card__desc">{part.description}</span>
+      {/* Iteration 63.3: which of the six named builds this part belongs
+          to (see the wiki's Builds section) — a purely informational chip
+          row, absent entirely for the many parts that aren't specifically
+          tagged. */}
+      {part.buildTags && part.buildTags.length > 0 && (
+        <span className="part-card__tags">
+          {part.buildTags.map((tag) => (
+            <span key={tag} className="part-card__tag">
+              {BUILD_TAG_LABEL[tag]}
+            </span>
+          ))}
+        </span>
+      )}
       {(showCost || showPower) && (
         <span className="part-card__price-row">
           {showCost && <span className="part-card__cost">{part.cost} cr</span>}

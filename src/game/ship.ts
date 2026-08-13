@@ -214,29 +214,42 @@ function withAceBonus(
   return stats;
 }
 
-// Iteration 23 (Aegis Relay): a shield harmonic anywhere in the fleet adds
-// its bonus to EVERY ship's shield, for the whole fight — summed across
-// however many are carried (multiple stack). Folded in once here, at
-// fleet-derive time, the same place the ace-pilot bonus already folds in —
-// not a live combat-engine hook, so it doesn't vanish if the carrier dies
-// mid-fight (see iteration-23.md for why that's a deliberate trade).
-function fleetShieldAuraBonus(fleet: PlayerShipState[]): number {
-  return fleet.reduce(
-    (sum, ship) => sum + ship.equipped.reduce((s, id) => s + (getPart(id).fleetShieldAura ?? 0), 0),
-    0,
-  );
+// Iteration 23 (Aegis Relay, Piloting harmonic) / 63.1 (Command matrix,
+// Vector sync array): a fleet-wide aura part adds its bonus to EVERY
+// ship's matching stat, for the whole fight — summed across however many
+// are carried (multiple stack). Folded in once here, at fleet-derive
+// time, the same place the ace-pilot bonus already folds in — not a live
+// combat-engine hook, so it doesn't vanish if the carrier dies mid-fight
+// (see iteration-23.md for why that's a deliberate trade; 63.1's two new
+// auras follow the identical rule). One shared summer parameterized by
+// which Part field to read, rather than three near-identical functions.
+function fleetAuraBonus(
+  fleet: PlayerShipState[],
+  field: 'fleetShieldAura' | 'fleetComputerAura' | 'fleetInitAura',
+): number {
+  return fleet.reduce((sum, ship) => sum + ship.equipped.reduce((s, id) => s + (getPart(id)[field] ?? 0), 0), 0);
 }
 
 export function deriveFleetStats(fleet: PlayerShipState[], commanderId?: CommanderId, protocols?: ProtocolId[]): ShipStats[] {
-  const auraShield = fleetShieldAuraBonus(fleet);
+  const auraShield = fleetAuraBonus(fleet, 'fleetShieldAura');
+  // 63.1: the initiative aura folds in HERE (fleet-derive time), not as a
+  // separate combat-engine hook — Outspeed qualification and activation
+  // order both already read from these derived stats, so a Vector sync
+  // array's fleet-wide +1 reaches both automatically, with no engine
+  // change of its own.
+  const auraComputer = fleetAuraBonus(fleet, 'fleetComputerAura');
+  const auraInit = fleetAuraBonus(fleet, 'fleetInitAura');
   return fleet.map((ship) => {
-    const stats = withAceBonus(
+    let stats = withAceBonus(
       deriveStats(ship.frameId, ship.equipped, ship.upgrades, protocols),
       ship,
       commanderId,
       protocols,
     );
-    return auraShield > 0 ? { ...stats, shield: stats.shield + auraShield } : stats;
+    if (auraShield > 0) stats = { ...stats, shield: stats.shield + auraShield };
+    if (auraComputer > 0) stats = { ...stats, computer: stats.computer + auraComputer };
+    if (auraInit > 0) stats = { ...stats, initiative: stats.initiative + auraInit };
+    return stats;
   });
 }
 

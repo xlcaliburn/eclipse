@@ -2232,6 +2232,24 @@ h3 .info-dot,
   letter-spacing: 0.02em;
 }
 
+/* Iteration 63.3: build-tag chips — text, not color-only, so the signal
+   survives colorblindness at this small a size; subtle (dim border/text)
+   since it's supporting info, not a rarity/type cue. */
+.part-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.part-card__tag {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
 /* Combat fleet view */
 .combat-fleets {
   display: grid;

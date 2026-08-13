@@ -23,7 +23,7 @@ import {
   weaponCeiling,
   withUpgrade,
 } from './ship';
-import type { PartId, PlayerShipState } from './types';
+import type { BuildTag, PartId, PlayerShipState } from './types';
 import { RARITY_POWER, TIER_INDEX } from './types';
 
 function ship(overrides: Partial<PlayerShipState> = {}): PlayerShipState {
@@ -155,6 +155,59 @@ describe('shield harmonic aura (Aegis Relay)', () => {
     const displayStats = deriveFleetStats(fleet);
     expect(combatStats[0].shield).toBe(displayStats[0].shield);
     expect(combatStats[1].shield).toBe(displayStats[1].shield);
+  });
+});
+
+// Iteration 63.1: Command matrix / Vector sync array — the two new fleet
+// auras, on the exact same pattern as the shieldharmonic block above (one
+// shared `fleetAuraBonus` summer in ship.ts). The init aura additionally
+// has to prove it reaches Outspeed qualification, since that's the whole
+// reason it folds in at fleet-derive time rather than a separate hook.
+describe('fleet computer/init auras (Command matrix, Vector sync array — iteration 63.1)', () => {
+  it('Command matrix adds its aura to every ship, including the carrier, and stacks', () => {
+    const fleet = [ship({ equipped: ['commandmatrix'] }), ship()];
+    const stats = deriveFleetStats(fleet);
+    // The carrier's OWN card computer (2) plus the +1 aura it also grants
+    // every ship (including itself) = 3; the other ship gets just the aura.
+    expect(stats[0].computer).toBe(3);
+    expect(stats[1].computer).toBe(1);
+
+    const stacked = deriveFleetStats([ship({ equipped: ['commandmatrix'] }), ship({ equipped: ['commandmatrix'] })]);
+    expect(stacked[0].computer).toBe(2 + 2); // own card + both auras
+    expect(stacked[1].computer).toBe(2 + 2);
+  });
+
+  it('Vector sync array adds its aura to every ship, including the carrier, and stacks', () => {
+    const fleet = [ship({ equipped: ['vectorsync'] }), ship()];
+    const stats = deriveFleetStats(fleet);
+    expect(stats[0].initiative).toBe(2 + 1); // own card + its own aura
+    expect(stats[1].initiative).toBe(1); // just the aura
+  });
+
+  it("the init aura reaches Outspeed qualification (it's derived stats, not a separate hook)", () => {
+    // OUTSPEED_GAP is 4. A base-0 Flagship with no init aura falls short
+    // against an enemy at initiative 0; Vector sync array's fleet-wide +1
+    // on a SECOND ship should be exactly what tips a plain escort over.
+    const carrier = ship({ equipped: ['vectorsync'] });
+    const escort = ship({ equipped: ['init1', 'init1', 'init1'] }); // 3 init, one short
+    const stats = deriveFleetStats([carrier, escort]);
+    expect(stats[1].initiative).toBe(4); // 3 + the aura's +1
+    expect(qualifiesForOutspeed(stats[1].initiative, 0)).toBe(true);
+    expect(qualifiesForOutspeed(3, 0)).toBe(false); // without the aura, it wouldn't
+  });
+
+  it('does nothing when no ship carries either aura', () => {
+    const stats = deriveFleetStats([ship(), ship()]);
+    expect(stats[0].computer).toBe(0);
+    expect(stats[1].initiative).toBe(0);
+  });
+
+  it('both new auras agree with deriveFleetForCombat, same as the shield aura', () => {
+    const fleet = [ship({ equipped: ['commandmatrix', 'vectorsync'] }), ship()];
+    const combatStats = deriveFleetForCombat(fleet).map((f) => f.stats);
+    const displayStats = deriveFleetStats(fleet);
+    expect(combatStats[1].computer).toBe(displayStats[1].computer);
+    expect(combatStats[1].initiative).toBe(displayStats[1].initiative);
   });
 });
 
@@ -642,4 +695,165 @@ describe('flagshipMissingRequiredParts (mandatory Flagship computer + hull)', ()
     ];
     expect(flagshipMissingRequiredParts(fleet)).toBeNull();
   });
+});
+
+// Iteration 63.2 ("computers are oddly valued" — Targeting uplink read as
+// strictly worse than Gluon computer): every EPIC active now carries +2 of
+// its base stat, every RARE active +1 — table-driven over every part with
+// `active: true`, so a future active can't be added at the old, under-
+// valued +1 without this failing loudly.
+describe('iteration 63.2 — active parts carry +2 (epic) / +1 (rare) of their base stat', () => {
+  it('every active part\'s base stat matches its rarity', () => {
+    const actives = PARTS.filter((p) => p.active);
+    expect(actives.length).toBeGreaterThan(0); // sanity: the filter actually found something
+    for (const part of actives) {
+      const baseStat = part.computer ?? part.shield ?? part.hull ?? part.initiative;
+      expect(baseStat, `${part.id} (${part.rarity}) has no scalar base stat to check`).toBeDefined();
+      if (part.rarity === 'epic') {
+        expect(baseStat, part.id).toBe(2);
+      } else if (part.rarity === 'rare') {
+        expect(baseStat, part.id).toBe(1);
+      }
+    }
+  });
+});
+
+// Iteration 63.1 ("each category should have at least 1 legendary").
+describe('iteration 63.1 — a legendary in every non-cargo part category', () => {
+  it('every PartType except cargo (the commodity lot, kept out of PARTS anyway) has >= 1 legendary part', () => {
+    const types = Array.from(new Set(PARTS.map((p) => p.type))).filter((t) => t !== 'cargo');
+    for (const type of types) {
+      const legendaries = PARTS.filter((p) => p.type === type && p.rarity === 'legendary');
+      expect(legendaries.length, `type ${type}`).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('the three new legendaries have the right ids, categories, and auras', () => {
+    const byId = Object.fromEntries(PARTS.map((p) => [p.id, p]));
+    expect(byId['commandmatrix']).toMatchObject({ type: 'computer', rarity: 'legendary', fleetComputerAura: 1 });
+    expect(byId['vectorsync']).toMatchObject({ type: 'drive', rarity: 'legendary', fleetInitAura: 1 });
+    expect(byId['citadelplating']).toMatchObject({ type: 'hull', rarity: 'legendary', hull: 4, ablative: 2 });
+  });
+
+  it("Citadel plating's flat +4 HP AND +2 ablative both actually reach deriveStats, not just the raw part data", () => {
+    const base = deriveStats('cruiser', []);
+    const fitted = deriveStats('cruiser', ['citadelplating']);
+    expect(fitted.hp).toBe(base.hp + 4);
+    expect(fitted.ablative).toBe(2);
+  });
+
+  it("Ablative mesh's +4 ablative reaches deriveStats and stacks with Ablative coating (+2)", () => {
+    expect(deriveStats('cruiser', ['ablativemesh']).ablative).toBe(4);
+    expect(deriveStats('cruiser', ['ablativemesh', 'ablative']).ablative).toBe(6);
+  });
+});
+
+// Iteration 63.3: build tags are purely informational (never read by
+// deriveStats/the engine), but the wiki's Builds section renders each
+// build's part list FROM these — so a tag that points at nothing, or a
+// build with too few members to look like a real kit, would be a silent
+// content bug the wiki can't catch on its own.
+describe('iteration 63.3 — build tags', () => {
+  it('every BuildTag has at least 2 tagged parts', () => {
+    const tags: BuildTag[] = ['alpha', 'speed', 'tank', 'swarm', 'pierce', 'attrition'];
+    for (const tag of tags) {
+      const members = PARTS.filter((p) => p.buildTags?.includes(tag));
+      expect(members.length, tag).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('no part carries more than 2 tags', () => {
+    for (const part of PARTS) {
+      expect((part.buildTags ?? []).length, part.id).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('Reload drones and Ablative mesh are tagged for the builds they were added to fill', () => {
+    const byId = Object.fromEntries(PARTS.map((p) => [p.id, p]));
+    expect(byId['reloaddrones'].buildTags).toContain('alpha');
+    expect(byId['ablativemesh'].buildTags).toContain('tank');
+  });
+});
+
+// Iteration 63.4 ("hulls especially starting tiers should be much more
+// restrictive... universal slots should be treated as premium"). Power
+// values are asserted UNCHANGED — only slot KINDS moved, not counts — the
+// existing 58.1 formula-guard test above already covers every frame's
+// power, so this block only checks what's new: universal-slot counts and
+// the resulting weapon ceilings.
+describe('iteration 63.4 — restrictive hull layouts', () => {
+  const CHANGED: FrameId[] = [
+    'cruiser',
+    'light-cruiser',
+    'freighter',
+    'derelict',
+    'corvette',
+    'aegis',
+    'destroyer',
+    'valkyrie',
+    'titan',
+  ];
+
+  it('every changed frame kept the same TOTAL slot count (only kinds moved, not counts) — power is therefore untouched', () => {
+    const oldSlotCounts: Record<string, number> = {
+      cruiser: 6,
+      'light-cruiser': 4,
+      freighter: 5,
+      derelict: 2,
+      corvette: 3,
+      aegis: 7,
+      destroyer: 5,
+      valkyrie: 6,
+      titan: 9,
+    };
+    for (const id of CHANGED) {
+      expect(getFrame(id).slotLayout.length, id).toBe(oldSlotCounts[id]);
+    }
+  });
+
+  it('the Flagship has a mandatory defense slot and a mandatory systems slot (user direction: "no exception")', () => {
+    const layout = getFrame('cruiser').slotLayout;
+    expect(layout.filter((k) => k === 'defense').length).toBeGreaterThanOrEqual(1);
+    expect(layout.filter((k) => k === 'systems').length).toBeGreaterThanOrEqual(1);
+    expect(layout.filter((k) => k === 'universal').length).toBe(2); // down from 4
+  });
+
+  it('universal slots dropped on every changed frame except the deliberate exceptions (Sloop, untouched)', () => {
+    const universalCount = (id: FrameId) => getFrame(id).slotLayout.filter((k) => k === 'universal').length;
+    // Sloop ('tender') is the ONE frame this pass deliberately left alone —
+    // its whole identity is full flexibility (frames.ts's own comment).
+    expect(universalCount('tender')).toBe(3);
+    // Every other CHANGED frame's universal count strictly decreased from
+    // its pre-63.4 value.
+    const oldUniversalCounts: Record<string, number> = {
+      cruiser: 4,
+      'light-cruiser': 2,
+      freighter: 3,
+      derelict: 2,
+      corvette: 2,
+      aegis: 2,
+      destroyer: 2,
+      valkyrie: 2,
+      titan: 3,
+    };
+    for (const id of CHANGED) {
+      expect(universalCount(id), id).toBeLessThan(oldUniversalCounts[id]);
+    }
+  });
+
+  it('every frame still keeps at least one universal slot (Bastion the one pre-existing exception, unchanged by this pass)', () => {
+    for (const frame of Object.values(FRAMES)) {
+      const hasUniversal = frame.slotLayout.includes('universal');
+      expect(hasUniversal, frame.id).toBe(frame.id !== 'bastion');
+    }
+  });
+
+  it("the Flagship's weapon ceiling drops from 6 to 4 (2 dedicated + 2 universal, not 2 + 4)", () => {
+    expect(weaponCeiling(getFrame('cruiser').slotLayout)).toBe(4);
+  });
+
+  // 52.6/57.5's existing guard tests (above, unchanged) already assert
+  // STARTING_FIT/STARTING_LOADOUT stay legal against these new layouts —
+  // deliberately not re-asserted here; a break there means the layout
+  // table itself is wrong, and that guard already fails loudly.
 });

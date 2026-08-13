@@ -13,6 +13,7 @@ import type { FleetOrderId, TargetingStance } from './combatEngine';
 import { drawCommanderChoices } from './commanders';
 import type { CommanderId } from './commanders';
 import {
+  ACT2_SEAM_RAMP_COLS,
   applyCounterProtocol,
   applyEscalations,
   applyVeterancy,
@@ -288,8 +289,23 @@ function bossEnemyForAct(map: GameMap, act: 1 | 2): EnemyDef {
 // AFTER veterancy/escalations at every site (documented ordering: counters
 // are the outermost layer, so appliedCounter always reflects what they
 // actually added on top of whatever else already landed).
-function withCounterProtocol(enemy: EnemyDef, state: RunState): EnemyDef {
-  return state.act === 2 && state.counterProtocol ? applyCounterProtocol(enemy, state.counterProtocol) : enemy;
+//
+// 2026-08-12 (iteration 55, mechanism A — act-seam trim): `col` is the
+// act-LOCAL column the enemy is being constructed for. At act 2's own local
+// cols 0..ACT2_SEAM_RAMP_COLS the counter skips application outright — the
+// drafted counter stacking on top of the pool-band jump AND a fleet still
+// carrying act-1 damage was the single biggest lever behind the seam's 0%
+// act-2-conditional-clear wall (see plans/iteration-55.md 55.0's
+// grounding). Shares ACT2_SEAM_RAMP_COLS with `combatEnemyPool`'s own
+// act-2 easy-pool ramp (enemies.ts) — one constant, so the two ramps can't
+// drift to different widths. Every call site passes its own local `col`;
+// the boss and any col > ACT2_SEAM_RAMP_COLS are unaffected, so this is a
+// no-op everywhere the counter already applied before this iteration
+// except the two ramped columns.
+function withCounterProtocol(enemy: EnemyDef, state: RunState, col: number): EnemyDef {
+  if (state.act !== 2 || !state.counterProtocol) return enemy;
+  if (col <= ACT2_SEAM_RAMP_COLS) return enemy;
+  return applyCounterProtocol(enemy, state.counterProtocol);
 }
 
 // Iteration 24 (Flagship recovery): the Flagship ('cruiser') is the one hull
@@ -824,22 +840,24 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const globalCol = globalColumn(state.act, node.col);
       if (node.type === 'combat') {
         const rawEnemy = pickFromPool(combatEnemyPool(state.act, node.col), rng);
-        const scaledEnemy = applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations);
+        const scaledEnemy = applyEscalations(applyVeterancy(rawEnemy, state.act, node.col), globalCol, globalEscalations);
         // A convoy's +4cr premium (map.ts's CARGO_DESCRIPTION) is danger
         // money, not free — see convoyEscort's own comment.
-        const enemy = withCounterProtocol(node.cargo === 'convoy' ? convoyEscort(scaledEnemy) : scaledEnemy, state);
+        const enemy = withCounterProtocol(node.cargo === 'convoy' ? convoyEscort(scaledEnemy) : scaledEnemy, state, node.col);
         return enterCombat(base, enemy, rng, nextCounter);
       }
       if (node.type === 'elite') {
         const rawEnemy = eliteEnemyForColumn(state.act, node.col, rng);
-        const enemy = withCounterProtocol(applyEscalations(applyVeterancy(rawEnemy, node.col), globalCol, globalEscalations), state);
+        const enemy = withCounterProtocol(applyEscalations(applyVeterancy(rawEnemy, state.act, node.col), globalCol, globalEscalations), state, node.col);
         return enterCombat(base, enemy, rng, nextCounter);
       }
       if (node.type === 'boss') {
         // Iteration 30: the act-2 final boss is included, same uniformity
         // rule as escalations — the balance pass (not a fiat exemption)
         // catches it if a prismatic counter ever pushes a boss out of band.
-        const enemy = withCounterProtocol(applyEscalations(bossEnemyForAct(state.map, state.act), globalCol, globalEscalations), state);
+        // (node.col here is the boss column, always > ACT2_SEAM_RAMP_COLS —
+        // the seam ramp never reaches the boss.)
+        const enemy = withCounterProtocol(applyEscalations(bossEnemyForAct(state.map, state.act), globalCol, globalEscalations), state, node.col);
         return enterCombat(base, enemy, rng, nextCounter);
       }
       // shop / shipyard / repair / event — the "dock" node types (15.2,
@@ -854,7 +872,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // like any other Hunted arrival; the pursuit tax is meant to compose
       // with this, not bypass it.
       if (base.heat >= MAX_HEAT) {
-        const enemy = withCounterProtocol(hunterKillerForAmbush(state.act, node.col), state);
+        const enemy = withCounterProtocol(hunterKillerForAmbush(state.act, node.col), state, node.col);
         return enterCombat(base, enemy, rng, nextCounter, { interceptionActive: true });
       }
       const heat = addHeat(base.heat, 1);
@@ -1585,7 +1603,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           ...state,
           phase: 'prep',
           currentEvent: undefined,
-          currentEnemy: withCounterProtocol(ambushEnemy, state), // iteration 30: an act-2 event-ambush is still a fight
+          // iteration 30: an act-2 event-ambush is still a fight. col falls
+          // back to Infinity (never ramped) if position is somehow null —
+          // an event node always has a real position, so this is
+          // defensive only (see iteration 55's ramp-window comment on
+          // withCounterProtocol's definition).
+          currentEnemy: withCounterProtocol(ambushEnemy, state, state.position?.col ?? Infinity),
           pendingAmbushBonus: ambushBonus,
           currentCombatSeed: drawCombatSeed(rng),
           rngCounter: nextCounter(),

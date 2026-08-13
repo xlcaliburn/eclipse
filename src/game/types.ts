@@ -27,6 +27,17 @@ export type PartType = 'weapon' | 'computer' | 'shield' | 'hull' | 'drive' | 'ca
 
 export type WeaponKind = 'cannon' | 'missile';
 
+// Iteration 63.3: a small, purely-informational tag naming which of the
+// six named builds a part belongs to (alpha strike / speed / tank / swarm
+// / pierce / attrition — see the wiki's Builds section, which renders its
+// per-build part lists FROM this field so the two can never drift). Never
+// read by deriveStats/the combat engine — display only, same "build-time
+// only" category as Part.power. At most 2 per part (a part central to two
+// builds, like Arc projector or Vector sync array); most parts carry 0 or
+// 1 and that's fine — untagged just means "generically good," not missing
+// data.
+export type BuildTag = 'alpha' | 'speed' | 'tank' | 'swarm' | 'pierce' | 'attrition';
+
 // Iteration 36: shared by parts and frames — governs both display (grey/
 // blue/purple/gold) and shop-appearance odds (see reducer.ts's
 // RARITY_WEIGHTS). Required on every Part/Frame rather than optional: a
@@ -136,6 +147,21 @@ export interface Part {
   // fleet-derive time — see ship.ts — not dynamically removed if the
   // carrier dies mid-combat).
   fleetShieldAura?: number;
+  // Iteration 63.1: Command matrix's fleet-wide computer aura — the same
+  // shape/timing as fleetShieldAura above (summed across the whole fleet
+  // at derive time, applied to every ship including the carrier, stacks if
+  // multiple carried, NOT removed if the carrier dies mid-fight — same
+  // documented trade as the harmonic).
+  fleetComputerAura?: number;
+  // Iteration 63.1: Vector sync array's fleet-wide initiative aura — same
+  // shape as fleetComputerAura above. Must flow through deriveFleetStats so
+  // Outspeed qualification/activation order pick it up automatically, not
+  // a separate combat-engine hook.
+  fleetInitAura?: number;
+  // Iteration 63.3 (build tags — see BuildTag's own comment above): which
+  // of the six named builds this part belongs to. Optional; absent/empty
+  // means "not specifically tagged," not "bad."
+  buildTags?: BuildTag[];
 }
 
 // Derived combat stats for a single ship (one of the player's fleet, or one

@@ -94,15 +94,19 @@ export const FRAMES: Record<FrameId, Frame> = {
   cruiser: {
     id: 'cruiser',
     name: 'Flagship',
-    // Iteration 52.1: universal-heavy by necessity, not by design intent —
-    // scripts/balance.ts's fixture fleets hand-equip the Flagship with up
-    // to 6 mixed parts (any of weapon/computer/hull/drive/shield), and
-    // those fixtures are how the balance sim measures the game; a more
-    // dedicated layout here would silently break every one of them (see
-    // 52.6). 2 dedicated weapon slots keep the "at least somewhat capped"
-    // feel; the remaining 4 stay universal so any fixture (and any real
-    // build) still fits.
-    slotLayout: ['weapon', 'weapon', 'universal', 'universal', 'universal', 'universal'],
+    // Iteration 63.4 (user direction: "flag ship should be no exception,
+    // it should also have at least 1 defense and 1 system slot mandatory")
+    // — was universal-heavy (`W W U U U U`, 52.1) purely to avoid breaking
+    // scripts/balance.ts's hand-equipped fixture fleets; re-audited against
+    // the actual fixtures instead of just avoiding them: STARTING_LOADOUT
+    // (ion, ion, comp1, injector) and every hand-built cruiser fixture in
+    // balance.ts/reducer.test.ts fit `W W D S U U` with room to spare (the
+    // overflow math spills any extra defense/systems items into the 2
+    // remaining universal slots) — see plans/iteration-63.md's 63.4 fit
+    // table. `flagshipMissingRequiredParts` (ship.ts) already enforces a
+    // computer + hull part before the fleet can engage; this layout change
+    // reinforces that same intent structurally rather than duplicating it.
+    slotLayout: ['weapon', 'weapon', 'defense', 'systems', 'universal', 'universal'],
     baseInitiative: 0,
     // 2026-08-08: 3 -> 4. Hull plating dropped out of STARTING_LOADOUT
     // (parts.ts) — its +1 HP moved here instead, onto the frame's own base,
@@ -221,7 +225,10 @@ export const FRAMES: Record<FrameId, Frame> = {
   'light-cruiser': {
     id: 'light-cruiser',
     name: 'Cruiser',
-    slotLayout: ['weapon', 'weapon', 'universal', 'universal'],
+    // 63.4: was `W W U U` (2 of 4 = 50% universal) — restrictive-hull pass,
+    // universal slots trimmed to the roster's ≤1/3 norm. Starting fit
+    // (ion, shield1) still fits: ion->W, shield1->D.
+    slotLayout: ['weapon', 'weapon', 'defense', 'universal'],
     baseInitiative: 1,
     baseHp: 4,
     cost: 22,
@@ -237,7 +244,11 @@ export const FRAMES: Record<FrameId, Frame> = {
   freighter: {
     id: 'freighter',
     name: 'Freighter',
-    slotLayout: ['weapon', 'universal', 'universal', 'universal', 'systems'],
+    // 63.4: was `W U U U S` (3 of 5 = 60% universal) — trimmed to 2, still
+    // keeping a real cargo-runner flexibility edge over the rest of the
+    // roster (it's the only hull besides the Sloop with 2+ universal).
+    // Starting fit (ion) still fits: ion->W.
+    slotLayout: ['weapon', 'defense', 'systems', 'universal', 'universal'],
     baseInitiative: 0,
     baseHp: 3,
     cost: 18,
@@ -251,13 +262,16 @@ export const FRAMES: Record<FrameId, Frame> = {
   derelict: {
     id: 'derelict',
     name: 'Derelict',
-    slotLayout: ['universal', 'universal'],
+    // 63.4: was `U U` (100% universal — the roster's worst offender).
+    // Gets exactly one dedicated weapon slot now; still the roster's
+    // floor hull otherwise. Starting fit (ion) fits: ion->W.
+    slotLayout: ['weapon', 'universal'],
     baseInitiative: 0,
     baseHp: 2,
     cost: 4,
     rarity: 'common',
     power: 2, // 58.1: slots(2) + TIER_INDEX.common(0) — unchanged by the formula cut
-    blurb: 'Barely flight-worthy — no dedicated weapon slot at all, the weakest hull in the yard. Arrives fitted with an ion cannon.',
+    blurb: 'Barely flight-worthy — the weakest hull in the yard. Arrives fitted with an ion cannon.',
   },
 
   // Iteration 36: replaces the five retired support hulls below as the
@@ -276,7 +290,11 @@ export const FRAMES: Record<FrameId, Frame> = {
   corvette: {
     id: 'corvette',
     name: 'Corvette',
-    slotLayout: ['universal', 'universal', 'systems'],
+    // 63.4: was `U U S` (2 of 3 = 67% universal). No dedicated weapon slot
+    // (deliberately — a cheap utility hull, not a fighter): its starting
+    // ion cannon spills into the one remaining universal slot instead,
+    // leaving the defense/systems slots open for the player's own build.
+    slotLayout: ['defense', 'systems', 'universal'],
     baseInitiative: 1,
     baseHp: 2,
     cost: 8,
@@ -311,7 +329,9 @@ export const FRAMES: Record<FrameId, Frame> = {
   aegis: {
     id: 'aegis',
     name: 'Aegis',
-    slotLayout: ['defense', 'defense', 'defense', 'weapon', 'universal', 'universal', 'systems'],
+    // 63.4: was `D D D W U U S` (2 of 7 = 29% universal) — trimmed to 1.
+    // Starting fit (ion, shield1) still fits: ion->W, shield1->D.
+    slotLayout: ['defense', 'defense', 'defense', 'weapon', 'systems', 'systems', 'universal'],
     baseInitiative: 0,
     baseHp: 10,
     cost: 42,
@@ -335,6 +355,13 @@ export const FRAMES: Record<FrameId, Frame> = {
   // than sit 1cr apart. Scoped to these two for now — the rest of the
   // roster's hand-tuned prices carry their own balance history and a
   // wholesale reprice off this formula is a separate, bigger pass.
+  // 63.4 (restrictive hulls — "universal slots should be treated as
+  // premium, and should be the minority in most cases"): the Sloop is the
+  // one deliberate exception, not an oversight — its whole identity IS
+  // full flexibility, and the premium pricing directly above already
+  // makes that flexibility cost real credits rather than being free. Every
+  // other frame in the roster was trimmed toward ≤1/3 universal this same
+  // pass; this is the one left alone on purpose.
   tender: {
     id: 'tender',
     name: 'Sloop',
@@ -389,7 +416,11 @@ export const FRAMES: Record<FrameId, Frame> = {
   destroyer: {
     id: 'destroyer',
     name: 'Destroyer',
-    slotLayout: ['weapon', 'weapon', 'systems', 'universal', 'universal'],
+    // 63.4: was `W W S U U` (2 of 5 = 40% universal) — trimmed to 1, and
+    // gained a SECOND systems slot in the swap (the speed hull leans into
+    // drives/reactors competing for the same socket, the intended 58
+    // interplay). Starting fit (light-missile) still fits: ->W.
+    slotLayout: ['weapon', 'weapon', 'systems', 'systems', 'universal'],
     baseInitiative: 3,
     baseHp: 5,
     cost: 24,
@@ -411,7 +442,10 @@ export const FRAMES: Record<FrameId, Frame> = {
   valkyrie: {
     id: 'valkyrie',
     name: 'Valkyrie',
-    slotLayout: ['weapon', 'weapon', 'weapon', 'systems', 'universal', 'universal'],
+    // 63.4: was `W W W S U U` (2 of 6 = 33% universal) — trimmed to 1, a
+    // second systems slot in the swap (same speed-hull reasoning as the
+    // Destroyer above). Starting fit (light-missile) fits: ->W.
+    slotLayout: ['weapon', 'weapon', 'weapon', 'systems', 'systems', 'universal'],
     baseInitiative: 4,
     baseHp: 6,
     cost: 38,
@@ -427,7 +461,11 @@ export const FRAMES: Record<FrameId, Frame> = {
   titan: {
     id: 'titan',
     name: 'Titan',
-    slotLayout: ['weapon', 'weapon', 'weapon', 'weapon', 'defense', 'defense', 'universal', 'universal', 'universal'],
+    // 63.4: was `W W W W D D U U U` (3 of 9 = 33% universal) — trimmed to
+    // 2 (still the roster's other deliberately-flexible hull besides the
+    // Sloop/Freighter, matching its status as the 48cr endpoint). Starting
+    // fit (ion, ion, shield1) still fits: ion,ion->W,W; shield1->D.
+    slotLayout: ['weapon', 'weapon', 'weapon', 'weapon', 'defense', 'defense', 'systems', 'universal', 'universal'],
     baseInitiative: 0,
     baseHp: 12,
     cost: 48,

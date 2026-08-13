@@ -1,5 +1,6 @@
 import { getCounterProtocol } from '../game/counterProtocols';
 import type { CounterProtocolId } from '../game/counterProtocols';
+import { ACT2_COUNTER_RAMP_COPY } from '../game/enemies';
 import { getProtocol } from '../game/protocols';
 import type { ProtocolId } from '../game/protocols';
 
@@ -57,7 +58,8 @@ export function ProtocolDraftScreen({ offers, counterOffers, onChoose }: Protoco
               {protocol.cost && <span className="protocol-card__cost">Cost: {protocol.cost}</span>}
               {counter && (
                 <span className="protocol-card__counter">
-                  The enemy adapts: {counter.name} — {counter.blurb}
+                  The enemy adapts: {counter.name} — {counter.blurb}{' '}
+                  <span className="protocol-card__counter-ramp">{ACT2_COUNTER_RAMP_COPY}</span>
                 </span>
               )}
             </button>

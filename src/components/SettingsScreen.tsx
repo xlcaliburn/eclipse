@@ -5,6 +5,7 @@ import { setSoundSetting } from '../soundPreference';
 import { playSfx } from '../audio';
 import { getCounterProtocol } from '../game/counterProtocols';
 import type { CounterProtocolId } from '../game/counterProtocols';
+import { ACT2_COUNTER_RAMP_COPY } from '../game/enemies';
 import { getProtocol } from '../game/protocols';
 import type { ProtocolId } from '../game/protocols';
 import { seedToCode } from '../game/seedCode';
@@ -69,7 +70,9 @@ export function CounterProtocolRow({ counterProtocolId }: { counterProtocolId: C
           Enemy answer: {counter.name}
           <span className="protocol-row__tier"> ({counter.tier})</span>
         </h3>
-        <p className="settings-row__hint">{counter.blurb}</p>
+        <p className="settings-row__hint">
+          {counter.blurb} <span className="protocol-row__counter-ramp">{ACT2_COUNTER_RAMP_COPY}</span>
+        </p>
       </div>
     </div>
   );

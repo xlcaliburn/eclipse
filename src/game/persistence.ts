@@ -54,7 +54,18 @@ import type { RunState } from './types';
 // (frigate/aegis/tender/ew-cutter/disruptor-cutter) to be repurposed as
 // the un-retired Frigate/Aegis/Sloop/Picket/Disruptor without an old save
 // resolving its ship against the wrong hull's stats.
-export const SAVE_VERSION = 8;
+// v9 (iteration 63.4, restrictive hulls): the same v8 hazard, again — 9 of
+// 18 frames' `slotLayout`s changed shape (universal slots swapped for
+// dedicated defense/systems ones on the Flagship and 8 purchasable hulls),
+// so a loadout legal under the OLD layout can be illegal under the new one
+// (a Flagship carrying 4 mixed universal-slot parts, say — now only 2
+// universal slots exist). Also where CombatState gained an always-read
+// required field (`flakRemaining` — combatEngine.ts's Reload drones), the
+// same "new required-at-read nested field" hazard v7's bump addressed for
+// `commandPoints`/etc. — a pre-v9 save resumed mid-fight would have
+// `flakRemaining` simply `undefined`, throwing the moment anything read
+// `.player`/`.enemy` off it.
+export const SAVE_VERSION = 9;
 const SAVE_KEY = 'eclipse.save.v1';
 // Iteration 18: the daily run gets its own slot so it can coexist with a
 // standard run; a small separate record tracks today's attempt + result.

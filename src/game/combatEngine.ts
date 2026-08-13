@@ -71,6 +71,13 @@ export interface RoundModifiers {
   // died (dice simply never resolve against a dead target, so no explicit
   // clear is needed — see fireShip's own comment).
   markedEnemyIndex: number | null;
+  // Iteration 63.3 (Reload drones): armed by ANY one ship's active — the
+  // effect itself is fleet-wide ("every ship fires its missiles once
+  // more"), so this is a plain flag, not a per-ship list like
+  // overrideShipIndices/evadingShipIndices above. Consumed at the end of
+  // THIS round's resolution in advanceRound, then cleared like every other
+  // armed active when freshRoundModifiers() resets for the next round.
+  reloadDronesArmed: boolean;
 }
 
 // A plain, serializable snapshot of an in-progress (or finished) fight. The
@@ -101,6 +108,17 @@ export interface CombatState {
   enemyShips: CombatShip[];
   roundModifiers: RoundModifiers;
   usedActives: { shipIndex: number; abilityIndex: number }[]; // active parts already spent this combat
+  // Iteration 63.3 (Reload drones): flak's "cancels N enemy missile dice
+  // EACH COMBAT" promise used to be free — the pool was recomputed fresh
+  // every advanceRound call but only ever given nonzero values during the
+  // one missile-phase round (round 0), so it was never actually spent
+  // across more than one call. Reload drones adds a SECOND missile-firing
+  // opportunity, possibly in a later round, so the pool now genuinely has
+  // to persist and be decremented across advanceRound calls — computed
+  // once in initCombat from each side's flak at the fight's start, carried
+  // forward, and only ever consumed by an actual missile-phase fireShip
+  // call (round 0's real missile phase, or a reload volley in any round).
+  flakRemaining: { player: number; enemy: number };
   // Iteration 9.4: the player's fleet-wide targeting doctrine for this fight
   // — set once at initCombat (from RunState, persists between fights until
   // the player changes it on the prep screen), applies to every player die.
@@ -749,6 +767,7 @@ function freshRoundModifiers(): RoundModifiers {
     playerBaseShieldZeroed: false, // always recomputed per-round in advanceRound, never carried
     bracingShipIndices: [],
     markedEnemyIndex: null,
+    reloadDronesArmed: false,
   };
 }
 
@@ -821,6 +840,10 @@ export function initCombat(
     enemyShips,
     roundModifiers: freshRoundModifiers(),
     usedActives: [],
+    // 63.3: the fight's real, once-ever flak budget — see CombatState's own
+    // comment on this field for why it now has to persist instead of being
+    // recomputed fresh (and thrown away) every advanceRound call.
+    flakRemaining: { player: totalFlak(playerShips), enemy: totalFlak(enemyShips) },
     targetingStance,
     priorityTargetIndex: null,
     log: [],
@@ -915,9 +938,17 @@ export function advanceRound(state: CombatState): CombatState {
     log.push({ kind: 'part-effect', text: `Convergence +${convergenceBonus(roundNumber)}.` });
   }
 
+  // 63.3: reads the fight's real, persisted flak budget (CombatState's own
+  // comment) rather than recomputing fresh — was `isMissilePhase ?
+  // totalFlak(...) : 0` before Reload drones existed, since flak only ever
+  // needed to matter during the one round-0 missile phase. `fireShip`'s
+  // own flak-cancel branch is still gated on `phase === 'missile'`, so a
+  // normal cannon round's flakState values are simply never read — this
+  // change only enables the NEW case (a missile-phase fireShip call in a
+  // later round, via Reload drones below) to draw from the same pool.
   const flakState: FlakState = {
-    playerRemaining: isMissilePhase ? totalFlak(playerShips) : 0,
-    enemyRemaining: isMissilePhase ? totalFlak(enemyShips) : 0,
+    playerRemaining: state.flakRemaining.player,
+    enemyRemaining: state.flakRemaining.enemy,
   };
 
   const order = computeActivationOrder(playerShips, enemyShips, roundModifiers.initiativeBonus);
@@ -1024,6 +1055,43 @@ export function advanceRound(state: CombatState): CombatState {
     }
   }
 
+  // Iteration 63.3 (Reload drones): armed by any one ship's active — the
+  // effect is fleet-wide ("every ship fires its missiles once more"),
+  // resolved at the end of THIS round, whichever round that is (the
+  // missile phase itself, or any later cannon round — the one deliberate
+  // way to get a second missile-firing window). Player-only (no enemy part
+  // grants this), so no player ship can die mid-volley from enemy fire —
+  // a plain `isAlive` check per ship (fireShip's default when no
+  // `missileAliveAtPhaseStart` is passed) is correct, no snapshot needed.
+  // Uses the SAME flakState object already threaded through this round, so
+  // enemy flak draws from the real per-combat pool automatically (see
+  // CombatState.flakRemaining's own comment) — no special-casing. Runs
+  // before the stalemate check, same reasoning as Outspeed above: a
+  // finishing blow on round 30 should still win, not stalemate.
+  if (!winner && roundModifiers.reloadDronesArmed) {
+    const reloaders = order.filter((s) => s.side === 'player' && isAlive(s) && s.stats.missiles.length > 0);
+    if (reloaders.length > 0) {
+      log.push({ kind: 'part-effect', text: "Reload drones — the fleet's missiles fire once more." });
+    }
+    for (const ship of reloaders) {
+      winner = fireShip(
+        ship,
+        'missile',
+        roundNumber,
+        rng,
+        log,
+        opponentsOf,
+        roundModifiers,
+        flakState,
+        state.targetingStance,
+        state.priorityTargetIndex,
+        checkWinner,
+        state.seed,
+      );
+      if (winner) break;
+    }
+  }
+
   if (!winner && !isMissilePhase && roundNumber === MAX_CANNON_ROUNDS) {
     log.push({ kind: 'stalemate' });
     winner = 'enemy';
@@ -1052,6 +1120,7 @@ export function advanceRound(state: CombatState): CombatState {
     enemyShips,
     roundModifiers: freshRoundModifiers(),
     usedActives: state.usedActives,
+    flakRemaining: { player: flakState.playerRemaining, enemy: flakState.enemyRemaining },
     targetingStance: state.targetingStance,
     priorityTargetIndex: state.priorityTargetIndex,
     log,
@@ -1489,6 +1558,19 @@ export function useActive(state: CombatState, shipIndex: number, abilityIndex: n
           ...state.roundModifiers,
           overrideShipIndices: [...state.roundModifiers.overrideShipIndices, shipIndex],
         },
+      };
+    // Iteration 63.3 (Reload drones): a round modifier like uplink2/
+    // modulator above, just consumed by advanceRound's own dedicated block
+    // (right before the stalemate check) instead of a per-die formula —
+    // the effect isn't "bigger dice this round," it's "fire a whole
+    // second missile volley," which doesn't fit the additive-bonus shape
+    // the other round modifiers use.
+    case 'reloaddrones':
+      return {
+        ...state,
+        usedActives,
+        log: armed('Reload drones armed — the fleet fires its missiles once more at the end of this round.'),
+        roundModifiers: { ...state.roundModifiers, reloadDronesArmed: true },
       };
     case 'thrusters':
       return {

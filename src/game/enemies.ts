@@ -413,6 +413,37 @@ export const EASY_POOL_ACT2: EnemyDef[] = [RAIDER_WING, TORPEDO_BOATS, LANCE_FRI
 export const MID_POOL_ACT2: EnemyDef[] = [RIFT_CULT, FLAK_FORTRESS, ANTIMATTER_BATTERY];
 export const HARD_POOL_ACT2: EnemyDef[] = [GUARDIAN_PAIR, WARDEN, SWARM_ARMADA];
 
+// 2026-08-12 (iteration 55, mechanism A — act-seam trim): at act 2's own
+// local cols 0-1, the easy pool drops its priciest entry (Raider wing,
+// 73cr — the act's own "baseline damage check", but also the single
+// biggest lever behind the act-1/act-2 seam's +43% value jump measured in
+// plans/iteration-55.md's Motivation section). The cheaper two-entry pool
+// (Torpedo boats / Lance frigate) is what a fresh, act-1-worn fleet
+// actually meets for its first two act-2 fights; Raider wing rejoins the
+// pool from local col 2 on. `withCounterProtocol` (reducer.ts) ramps in on
+// the same column window — see that function's own comment — so both
+// halves of the seam trim share one constant and can't drift apart.
+export const ACT2_SEAM_RAMP_COLS = 1; // local cols 0..ACT2_SEAM_RAMP_COLS are ramped
+const EASY_POOL_ACT2_RAMP: EnemyDef[] = [TORPEDO_BOATS, LANCE_FRIGATE];
+
+// The 1-indexed sector-column ordinal players see in copy ("takes effect
+// from the Nth sector column") — derived from ACT2_SEAM_RAMP_COLS so the UI
+// copy can never silently drift from the mechanism's actual threshold.
+// Ramped columns are local 0..ACT2_SEAM_RAMP_COLS (1-indexed: 1st through
+// ACT2_SEAM_RAMP_COLS+1th); the mechanism activates the column after that.
+function ordinal(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+export const ACT2_COUNTER_ACTIVE_FROM_COLUMN = ACT2_SEAM_RAMP_COLS + 2;
+export const ACT2_COUNTER_RAMP_COPY = `(takes effect from the ${ordinal(ACT2_COUNTER_ACTIVE_FROM_COLUMN)} sector column)`;
+
 // --- Mixed formations (iteration 9) -----------------------------------------
 // EnemyDef generalizes to a composition of sub-groups so a fight can pair a
 // real threat with a screen that exploits greedy targeting — the doctrine
@@ -590,13 +621,74 @@ function hardestInPool(pool: EnemyDef[]): EnemyDef {
   return pool.reduce((best, e) => (totalHp(e) > totalHp(best) ? e : best), pool[0]);
 }
 
+// 2026-08-12 (iteration 55, mechanism B — band-entry ramp, act 1): the
+// same pool-filter idea as mechanism A, applied to a band's OPENING column
+// instead of the act seam. The band's hardest entry by `totalHp` — the
+// same metric `hardestInPool` already uses for elite selection — sits out
+// that one column; every other column of the band draws from the full
+// pool. Excluding the totalHp-hardest entry (not the enemyValue-worst one
+// enemyValue.ts's report ranks by) is deliberate: because
+// `eliteEnemyForColumn`'s general branch calls `hardestInPool(
+// combatEnemyPool(act, col))` internally, ramping THIS metric's hardest
+// entry out of the band-entry column moves the elite pick too — at act 1
+// col 5 that flips the elite from Sniper pair (the death-histogram spike
+// plans/iteration-55.md's Motivation section calls out, ~119% budget
+// share) to Shield cruiser (30cr/66% — a real, measured cut). `worstNodeValue`
+// (difficultyCurve.ts's T1/T2/T3 measure) is enemyValue-based and untouched
+// by this exclusion — confirmed by measurement, not assumed — because the
+// enemyValue-worst entry at c5 (Interceptor swarm) isn't the totalHp-
+// hardest one and so stays in the ramped pool either way. That's fine: act
+// 1's T1 check was already passing before this stage (see the stage-A
+// table) — this mechanism's job is the death-histogram/elite-difficulty
+// spike, not the T1 metric.
+//
+// ONLY applied at act 1's MID band (col 5) — measured, not assumed: the
+// same mechanism tried at the HARD band's opening column (col 8) was
+// reverted after measurement showed it made things WORSE, not better —
+// removing Plasma tank (the totalHp-hardest HARD_POOL entry) left Ancient
+// guardian as the tie-break winner, and Ancient guardian's own elite
+// (61cr/73% share) turned out to be a harder fight than Plasma tank's elite
+// (37cr/44%) had been, exactly the "makes a band-entry column harder" wrong
+// direction plans/iteration-55.md's "reframe" section calls out as a stop-
+// and-reconsider condition. See that file's stage-B status notes for the
+// full before/after numbers and the death-histogram corroboration (c8
+// deaths rose, not fell, with the reverted version in place).
+function bandEntryRamp(pool: EnemyDef[], col: number, bandStartCol: number): EnemyDef[] {
+  if (col !== bandStartCol || pool.length <= 1) return pool;
+  const hardest = hardestInPool(pool);
+  const ramped = pool.filter((e) => e !== hardest);
+  return ramped.length > 0 ? ramped : pool;
+}
+
+const MID_BAND_START = 5;
+const HARD_BAND_START = 8;
+
+// 2026-08-12 (iteration 55, mechanism B — a discovered extension, act 2's
+// hard band): the difficulty-curve self-check instrument (55.3) built for
+// this iteration found a genuine, unanticipated T1 violation at act 2's
+// OWN hard-band entry — c7->c8's worst-node VALUE jumps 61.5% (Carrier
+// group 76cr -> Swarm armada 122cr), the single largest band-entry jump
+// measured anywhere in the game, well past even the loose 30% gate. Unlike
+// act 1's ramp above, this one has to remove the enemyValue-worst entry
+// specifically (Swarm armada, not the totalHp-hardest Command wing — see
+// `bandEntryRamp`'s comment for why those differ) for the T1 metric to
+// actually move, so it's hand-curated the same way mechanism A curated
+// EASY_POOL_ACT2_RAMP rather than reusing `bandEntryRamp`. Measured
+// against the post-A/B enemyValue snapshot; see plans/iteration-55.md's
+// stage-B status notes for the before/after numbers.
+const HARD_POOL_ACT2_RAMP: EnemyDef[] = [GUARDIAN_PAIR, WARDEN, COMMAND_WING];
+
 // Enemy pool for a combat node at the given act + column.
 export function combatEnemyPool(act: 1 | 2, col: number): EnemyDef[] {
   const band = poolBand(col);
   if (act === 1) {
-    return band === 'easy' ? EASY_POOL : band === 'mid' ? MID_POOL : HARD_POOL;
+    if (band === 'easy') return EASY_POOL;
+    if (band === 'mid') return bandEntryRamp(MID_POOL, col, MID_BAND_START);
+    return HARD_POOL; // col-8 ramp reverted — see bandEntryRamp's comment
   }
-  return band === 'easy' ? EASY_POOL_ACT2 : band === 'mid' ? MID_POOL_ACT2 : HARD_POOL_ACT2;
+  if (band === 'easy') return col <= ACT2_SEAM_RAMP_COLS ? EASY_POOL_ACT2_RAMP : EASY_POOL_ACT2;
+  if (band === 'mid') return MID_POOL_ACT2;
+  return col === HARD_BAND_START ? HARD_POOL_ACT2_RAMP : HARD_POOL_ACT2;
 }
 
 // The elite enemy for an elite node at the given act + column. Act 1 keeps
@@ -664,21 +756,95 @@ export function hunterKillerForAmbush(act: 1 | 2, col: number): EnemyDef {
 // steps. Never applied to the opener or bosses (bosses are hand-tuned).
 //
 // Iteration 22: shifted to stay aligned with poolBand above (see its
-// comment) — both step at columns 5 and 8 now, alongside the first two
+// comment) — both step at columns 5 and 8, alongside the first two
 // escalations (escalations.ts drawEscalationSchedule).
-export function veterancyBonus(col: number): number {
-  if (col <= 4) return 0;
-  if (col <= 7) return 1;
-  return 2; // cols 8-9
+//
+// 2026-08-13 (iteration 55, mechanism C): the 3-step function above is
+// replaced by `COLUMN_SCALING`, a per-(act, col) table — pure data, same
+// determinism contract (a function of (act, col) alone, iteration 9's
+// rule) but continuous instead of 3 flat steps, and reaching computer at
+// each act's top end rather than HP only. See plans/iteration-55.md's
+// stage-C status notes for the derivation against the post-A/B budget
+// snapshot. Never set at a band-entry column (5 or 8, either act) — those
+// columns keep whatever mechanisms A/B already left them at; the scaling
+// table's job is the BACK HALF (T2, "harder where rich"), not the
+// entries (T1, already handled).
+export interface ColumnScaling {
+  hp: number;
+  computer: number;
 }
 
-export function applyVeterancy(enemy: EnemyDef, col: number): EnemyDef {
-  const bonus = veterancyBonus(col);
-  if (bonus === 0) return enemy;
+const NO_SCALING: ColumnScaling = { hp: 0, computer: 0 };
+
+export const COLUMN_SCALING: Record<1 | 2, ColumnScaling[]> = {
+  // Act 1: 10 lane columns (0-9). Ramps from column 5 (the mid-band entry
+  // mechanism B already eased) through column 9 (the act's last lane
+  // column, immediately before the boss). Computer only appears at column
+  // 9 — the "genuinely harder, not just longer" lever the spec calls for,
+  // reserved for the one column no band-entry mechanism touches.
+  1: [
+    NO_SCALING, // c0 (opener — never scaled anyway)
+    NO_SCALING, // c1
+    NO_SCALING, // c2
+    NO_SCALING, // c3
+    NO_SCALING, // c4
+    { hp: 1, computer: 0 }, // c5 — mid-band entry, HP only (same as the old 3-step schedule)
+    { hp: 1, computer: 0 }, // c6 (same as the old schedule — unchanged, avoids compounding across c6-c8)
+    { hp: 1, computer: 0 }, // c7 (same as the old schedule — unchanged)
+    { hp: 3, computer: 0 }, // c8 — hard-band entry, HP only (+1 over the old schedule's 2)
+    { hp: 8, computer: 0 }, // c9 — act top end (concentrates the increase in the ONE column T2 measures, not spread across the whole back half)
+  ],
+  // Act 2: 12 lane columns (0-11). Columns 0-1 stay at NO_SCALING —
+  // mechanism A's seam ramp already trims this stretch; adding a
+  // COLUMN_SCALING bonus on top would reopen the exact cliff A closed.
+  2: [
+    NO_SCALING, // c0 — seam ramp (mechanism A)
+    NO_SCALING, // c1 — seam ramp (mechanism A)
+    NO_SCALING, // c2
+    NO_SCALING, // c3
+    NO_SCALING, // c4
+    { hp: 1, computer: 0 }, // c5 — mid-band entry, HP only
+    { hp: 2, computer: 0 }, // c6
+    { hp: 3, computer: 0 }, // c7
+    { hp: 4, computer: 0 }, // c8 — hard-band entry, HP only
+    { hp: 4, computer: 0 }, // c9 (flat vs c8 — the increase concentrates at c11)
+    { hp: 4, computer: 0 }, // c10 (flat)
+    { hp: 7, computer: 1 }, // c11 — act top end
+  ],
+};
+
+function columnScaling(act: 1 | 2, col: number): ColumnScaling {
+  return COLUMN_SCALING[act][col] ?? NO_SCALING;
+}
+
+// Kept for display/wiki surfaces (per the spec's explicit instruction) —
+// the HP portion of the column's scaling entry. Now act-aware, since the
+// table itself is act-specific (the old function was shared because the
+// 3-step schedule happened to be identical for both acts; the continuous
+// table is not).
+export function veterancyBonus(act: 1 | 2, col: number): number {
+  return columnScaling(act, col).hp;
+}
+
+function bumpGroupHpAndComputer(enemy: EnemyDef, hp: number, computer: number): EnemyGroup[] {
+  return enemy.groups.map((g) => ({
+    ...g,
+    stats: { ...g.stats, hp: g.stats.hp + hp, computer: g.stats.computer + computer },
+  }));
+}
+
+export function applyVeterancy(enemy: EnemyDef, act: 1 | 2, col: number): EnemyDef {
+  const { hp, computer } = columnScaling(act, col);
+  if (hp === 0 && computer === 0) return enemy;
   return {
     ...enemy,
-    groups: bumpGroupHp(enemy, bonus),
-    veterancyBonus: bonus,
+    groups: bumpGroupHpAndComputer(enemy, hp, computer),
+    // Display field stays HP-only, matching its existing "+N HP" wording
+    // on the enemy panel (EnemyPanel.tsx) — the computer bonus (when any)
+    // is folded into the ship's own computer stat directly, same as every
+    // other computer-affecting bonus (escalations, counter-protocols),
+    // which the panel already reads off actual stats rather than a badge.
+    veterancyBonus: hp,
   };
 }
 

@@ -70,7 +70,12 @@ export type PartId =
   | 'reactor1'
   | 'reactor2'
   | 'reactor3'
-  | 'reactor4';
+  | 'reactor4'
+  | 'commandmatrix'
+  | 'vectorsync'
+  | 'citadelplating'
+  | 'reloaddrones'
+  | 'ablativemesh';
 
 // Iteration 40 weapon repricing: the Ion cannon (1 cannon die, 1 damage,
 // 3cr) is the price anchor for every other weapon in the roster — 3cr per
@@ -111,6 +116,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '1 missile die, 1 damage (fires once, before cannons)',
     cost: 2,
     weapon: { kind: 'missile', diceCount: 1, damage: 1 },
+    buildTags: ['alpha'],
   },
   {
     id: 'plasma',
@@ -129,6 +135,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '2 missile dice, 1 damage each (fires once, before cannons)',
     cost: 5, // missile discount off the 2-dmg cannon-equivalent price (6cr)
     weapon: { kind: 'missile', diceCount: 2, damage: 1 },
+    buildTags: ['alpha'],
   },
   {
     id: 'comp1',
@@ -175,6 +182,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+1 piloting',
     cost: 3,
     shield: 1,
+    buildTags: ['tank'],
   },
   {
     id: 'shield2',
@@ -184,6 +192,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+2 piloting',
     cost: 5,
     shield: 2,
+    buildTags: ['tank'],
   },
   {
     id: 'hull1',
@@ -211,6 +220,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+1 initiative',
     cost: 3,
     initiative: 1,
+    buildTags: ['speed'],
   },
   // Iteration 36 (the stat-item ladder): fills the +2 initiative rung that
   // used to be missing between Ion thruster (+1) and Fusion drive (+3).
@@ -222,6 +232,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+2 initiative',
     cost: 5,
     initiative: 2,
+    buildTags: ['speed'],
   },
   // Iteration 36: reprice 7 -> 9cr — see comp3's note above.
   {
@@ -232,6 +243,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+3 initiative',
     cost: 9,
     initiative: 3,
+    buildTags: ['speed'],
   },
 
   // --- Exotic weapons + taunt (iteration 5) ---
@@ -286,6 +298,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: 'While this ship is alive, all enemy weapons target it',
     cost: 5,
     taunt: true,
+    buildTags: ['tank'],
   },
   {
     id: 'reactive',
@@ -295,6 +308,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: 'Negates the first hit this ship takes this combat (stacks)',
     cost: 5,
     reactiveArmor: 1,
+    buildTags: ['tank'],
   },
 
   // --- Passive arsenal (iteration 7) ---
@@ -306,6 +320,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '1 cannon die, 2 damage, ignores 2 points of enemy piloting',
     cost: 7, // 2 dmg (6cr) + a real pierce-2 premium — bumped to epic (was rare, 6cr)
     weapon: { kind: 'cannon', diceCount: 1, damage: 2, shieldPierce: 2 },
+    buildTags: ['pierce'],
   },
   {
     id: 'torpedo',
@@ -315,6 +330,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '1 missile die, 3 damage (fires once, before cannons)',
     cost: 7, // 3 dmg cannon-equivalent (9cr) minus the missile discount — bumped to epic (was rare, 5cr)
     weapon: { kind: 'missile', diceCount: 1, damage: 3 },
+    buildTags: ['alpha'],
   },
   {
     id: 'arc',
@@ -324,6 +340,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '1 cannon die; on hit, deals 1 damage to every enemy ship',
     cost: 6, // 1 dmg base (3cr) + a flat AOE premium
     weapon: { kind: 'cannon', diceCount: 1, damage: 0, aoeDamage: 1 },
+    buildTags: ['swarm', 'attrition'],
   },
   // Iteration 40: "always targets the highest-HP enemy" read as a
   // restriction, not a benefit, once it was sitting next to a strictly
@@ -376,6 +393,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '3 missile dice, 1 damage each (fires once, before cannons)',
     cost: 8, // missile-discounted off Twin autocannon's 9cr
     weapon: { kind: 'missile', diceCount: 3, damage: 1 },
+    buildTags: ['alpha'],
   },
   {
     id: 'protoovercharge',
@@ -407,6 +425,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '1 cannon die, 2 damage. A miss still deals 1 damage anyway',
     cost: 7, // 2 dmg (6cr) + a consistency premium for the guaranteed floor
     weapon: { kind: 'cannon', diceCount: 1, damage: 2, chipOnMiss: 1 },
+    buildTags: ['attrition'],
   },
   // 2026-08-07: executeAtHp raised 1 -> 2 after a test caught the launch
   // numbers making the clause numerically inert — a target at exactly 1 HP
@@ -421,6 +440,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '1 cannon die, 1 damage. A hit against a target at 2 HP or less deals its full remaining HP',
     cost: 5, // priced as a situational finisher, not a routine damage multiplier
     weapon: { kind: 'cannon', diceCount: 1, damage: 1, executeAtHp: 2 },
+    buildTags: ['pierce'],
   },
   {
     id: 'flechette',
@@ -430,6 +450,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '1 cannon die, 1 damage; on a hit, also deals 1 damage to a second target',
     cost: 5, // cheap and shotgun-flavored — splash only lands when the primary pellet does
     weapon: { kind: 'cannon', diceCount: 1, damage: 1, cleaveDamage: 1 },
+    buildTags: ['attrition'],
   },
   {
     id: 'homing',
@@ -439,6 +460,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '1 missile die, 2 damage. Ignores taunt and priority targeting — always finds the lowest-HP enemy',
     cost: 7, // Missile rack's 2dmg/5cr precedent + a real premium for bypassing taunt/priority entirely
     weapon: { kind: 'missile', diceCount: 1, damage: 2, bypassTaunt: true },
+    buildTags: ['alpha'],
   },
 
   {
@@ -458,6 +480,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+2 temporary HP each combat, absorbed before real HP (does not persist between fights, stacks)',
     cost: 5,
     ablative: 2,
+    buildTags: ['tank'],
   },
   {
     id: 'capacitor',
@@ -472,6 +495,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+3 piloting during the missile phase and the first cannon round only',
     cost: 4,
     capacitorShield: 3,
+    buildTags: ['tank'],
   },
   {
     id: 'cloak',
@@ -507,15 +531,26 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     cost: 5,
     hull: 1,
     active: true,
+    buildTags: ['attrition'],
   },
+  // 2026-08-12 (63.2): every epic active in the roster used to carry only
+  // +1 of its base stat — the same +1 a common-tier item gives, plus a
+  // once-per-combat button, at a price close to the +3 flat epic item of
+  // the same stat (comp3/shield3/hull3, 9cr). That made the button worth
+  // roughly HALF a flat stat point rather than a real alternative to it
+  // (user report: Targeting uplink read as strictly worse than Gluon
+  // computer). New anchor, applied to every epic active below: the base
+  // stat is +2, not +1 — a rare active (injector/thrusters above) stays at
+  // +1, already fairly priced against the +2 rare flat items. Costs,
+  // actives, and rarities are unchanged; only the passive number moved.
   {
     id: 'uplink2',
     name: 'Targeting uplink',
     type: 'computer',
     rarity: 'epic',
-    description: '+1 computer. Active (1/combat): this round, all your ships gain +2 computer.',
+    description: '+2 computer. Active (1/combat): this round, all your ships gain +2 computer.',
     cost: 8,
-    computer: 1,
+    computer: 2,
     active: true,
   },
   {
@@ -523,20 +558,22 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     name: 'Damage control bay',
     type: 'hull',
     rarity: 'epic',
-    description: '+1 HP. Active (1/combat): repair 2 damage on this ship immediately.',
+    description: '+2 HP. Active (1/combat): repair 2 damage on this ship immediately.',
     cost: 7,
-    hull: 1,
+    hull: 2,
     active: true,
+    buildTags: ['attrition'],
   },
   {
     id: 'override',
     name: 'Fire-control override',
     type: 'computer',
     rarity: 'epic',
-    description: '+1 computer. Active (1/combat): this round, each missed die from this ship is rerolled once.',
+    description: '+2 computer. Active (1/combat): this round, each missed die from this ship is rerolled once.',
     cost: 8,
-    computer: 1,
+    computer: 2,
     active: true,
+    buildTags: ['alpha'],
   },
   {
     id: 'thrusters',
@@ -548,6 +585,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     cost: 6,
     initiative: 1,
     active: true,
+    buildTags: ['speed'],
   },
   // 2026-08-07: renamed off "Shield modulator" — see shield1/shield2's note.
   {
@@ -555,9 +593,9 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     name: 'Piloting modulator',
     type: 'shield',
     rarity: 'epic',
-    description: '+1 piloting. Active (1/combat): this round, all your ships gain +2 piloting.',
+    description: '+2 piloting. Active (1/combat): this round, all your ships gain +2 piloting.',
     cost: 7,
-    shield: 1,
+    shield: 2,
     active: true,
   },
   {
@@ -566,9 +604,9 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     type: 'shield',
     rarity: 'epic',
     description:
-      '+1 piloting. Active (1/combat): this round, natural 6s against this ship are not automatic hits — they resolve as normal rolls.',
+      '+2 piloting. Active (1/combat): this round, natural 6s against this ship are not automatic hits — they resolve as normal rolls.',
     cost: 7,
-    shield: 1,
+    shield: 2,
     active: true,
   },
 
@@ -581,10 +619,11 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     name: 'Tactical relay',
     type: 'computer',
     rarity: 'epic',
-    description: '+1 computer. Active (1/combat): this round, all allies gain +1 computer and +1 initiative.',
+    description: '+2 computer. Active (1/combat): this round, all allies gain +1 computer and +1 initiative.',
     cost: 8,
-    computer: 1,
+    computer: 2,
     active: true,
+    buildTags: ['swarm'],
   },
   // Iteration 36: reprice 9 -> 12cr — the rarity system's launch legendary.
   // A fleet-wide always-on aura (not a once-per-combat button, not a
@@ -599,26 +638,29 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: 'While equipped, +1 piloting to every ship in the fleet, for the whole fight.',
     cost: 12,
     fleetShieldAura: 1,
+    buildTags: ['swarm'],
   },
   {
     id: 'repairbay',
     name: 'Repair drone bay',
     type: 'hull',
     rarity: 'epic',
-    description: "+1 HP. Active (1/combat): repairs 3 damage on the fleet's most-damaged ship.",
+    description: "+2 HP. Active (1/combat): repairs 3 damage on the fleet's most-damaged ship.",
     cost: 8,
-    hull: 1,
+    hull: 2,
     active: true,
+    buildTags: ['attrition'],
   },
   {
     id: 'ecm',
     name: 'ECM pod',
     type: 'computer',
     rarity: 'epic',
-    description: "+1 computer. Active (1/combat): this round, the enemy fleet's computer is reduced by 2.",
+    description: "+2 computer. Active (1/combat): this round, the enemy fleet's computer is reduced by 2.",
     cost: 8,
-    computer: 1,
+    computer: 2,
     active: true,
+    buildTags: ['pierce'],
   },
   // 2026-08-07: reworked from "Shield disruptor" (enemy piloting -2 for a
   // round) into a pure player-side piloting bonus — the "piloting &
@@ -635,9 +677,9 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     name: 'Evasion suite',
     type: 'shield',
     rarity: 'epic',
-    description: '+1 piloting. Active (1/combat): this ship gains +3 piloting for the rest of the fight.',
+    description: '+2 piloting. Active (1/combat): this ship gains +3 piloting for the rest of the fight.',
     cost: 8,
-    shield: 1,
+    shield: 2,
     active: true,
   },
 
@@ -656,6 +698,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+3 piloting',
     cost: 9,
     shield: 3,
+    buildTags: ['tank'],
   },
   {
     id: 'hull3',
@@ -665,6 +708,7 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: '+3 HP',
     cost: 9,
     hull: 3,
+    buildTags: ['tank'],
   },
 
   // --- Iteration 58.2: the reactor ladder — power as an upgradeable item.
@@ -711,6 +755,84 @@ const PART_DEFS: Omit<Part, 'power'>[] = [
     description: 'Generates 9 power.',
     cost: 15,
     powerGen: 9,
+  },
+
+  // --- Iteration 63.1: a legendary in every category. Before this, weapon
+  // had 2 (antimatter, railgun), piloting had 1 (shieldharmonic), reactor
+  // had 1 (reactor4) — computer, hull, and drive had ZERO (the Ancient
+  // artifact is a legendary computer-type part, but it's quest-only, never
+  // in a shop, so it doesn't count toward the shop catalog's own coverage).
+  // Command matrix and Vector sync array are fleet-wide auras on
+  // shieldharmonic's exact pattern (ship.ts's fleetAuraBonus) —
+  // deliberately, since a fleet-wide always-on aura is
+  // this roster's one effect that reads as legendary-grade rather than
+  // just an expensive rare (shieldharmonic's own launch reasoning).
+  // Citadel plating needed no new engine hook at all — both `hull` and
+  // `ablative` already exist on Part/ShipStats.
+  {
+    id: 'commandmatrix',
+    name: 'Command matrix',
+    type: 'computer',
+    rarity: 'legendary',
+    description: 'While equipped, +2 computer to this ship and +1 computer to every other ship in the fleet.',
+    cost: 13,
+    computer: 2,
+    fleetComputerAura: 1,
+    buildTags: ['swarm'],
+  },
+  {
+    id: 'vectorsync',
+    name: 'Vector sync array',
+    type: 'drive',
+    rarity: 'legendary',
+    description: 'While equipped, +2 initiative to this ship and +1 initiative to every other ship in the fleet.',
+    cost: 12,
+    initiative: 2,
+    fleetInitAura: 1,
+    buildTags: ['speed', 'swarm'],
+  },
+  {
+    id: 'citadelplating',
+    name: 'Citadel plating',
+    type: 'hull',
+    rarity: 'legendary',
+    description: '+4 HP, +2 temporary HP each combat (absorbed before real HP, does not persist between fights)',
+    cost: 13,
+    hull: 4,
+    ablative: 2,
+    buildTags: ['tank'],
+  },
+
+  // --- Iteration 63.3: the two named-build gap-fillers. Reload drones is
+  // the one non-trivial engine hook this iteration adds — a missiles-only
+  // bonus activation at the end of the armed round, the same shape as
+  // Outspeed's existing cannons-only bonus activation (combatEngine.ts's
+  // computeOutspeedShips/the outspeed branch in advanceRound), just player-
+  // side, once-per-combat, and gated on an active button instead of an
+  // initiative gap. Enemy flak still cancels dice from the extra volley —
+  // it reads from the same per-combat flakState pool, no special-casing
+  // needed. ---
+  {
+    id: 'reloaddrones',
+    name: 'Reload drones',
+    type: 'hull',
+    rarity: 'epic',
+    description:
+      '+2 HP. Active (1/combat): arm this round — at the end of it, every ship in your fleet fires its missile weapons once more.',
+    cost: 8,
+    hull: 2,
+    active: true,
+    buildTags: ['alpha'],
+  },
+  {
+    id: 'ablativemesh',
+    name: 'Ablative mesh',
+    type: 'hull',
+    rarity: 'epic',
+    description: '+4 temporary HP each combat, absorbed before real HP (does not persist between fights, stacks)',
+    cost: 8, // priced on the rare -> epic stat-ladder gap off Ablative coating's 5cr/+2 — never dominates it
+    ablative: 4,
+    buildTags: ['tank'],
   },
 ];
 

@@ -11,6 +11,7 @@ import type { CounterProtocolDef } from '../game/counterProtocols';
 import {
   BOSS_IDS,
   BOSSES,
+  COLUMN_SCALING,
   EASY_POOL,
   EASY_POOL_ACT2,
   FINAL_BOSS_IDS,
@@ -20,7 +21,6 @@ import {
   MID_POOL,
   MID_POOL_ACT2,
   OPENER,
-  veterancyBonus,
 } from '../game/enemies';
 import { getEnemyLore } from '../game/enemyLore';
 import { ESCALATIONS } from '../game/escalations';
@@ -32,7 +32,7 @@ import { PROTOCOLS } from '../game/protocols';
 import type { ProtocolDef } from '../game/protocols';
 import { effectiveSlotLayout, weaponCeiling } from '../game/ship';
 import { UPGRADES } from '../game/upgrades';
-import type { EnemyDef, Part, Rarity, WeaponStats } from '../game/types';
+import type { BuildTag, EnemyDef, Part, Rarity, WeaponStats } from '../game/types';
 // Reused straight from the game's own presentation layer — same code-
 // authored inline-SVG ship/enemy art and commander crests the game itself
 // renders, so the wiki never needs its own art asset pipeline or drifts
@@ -219,6 +219,7 @@ const NAV = [
   ['rules', 'Core rules'],
   ['additional-rules', 'Additional rules'],
   ['parts', 'Parts'],
+  ['builds', 'Builds'],
   ['hulls', 'Hulls'],
   ['upgrades', 'Upgrades'],
   ['commanders', 'Commanders'],
@@ -241,8 +242,46 @@ const PART_TYPE_SECTIONS: { title: string; types: Part['type'][] }[] = [
   { title: 'Reactors', types: ['reactor'] },
 ];
 
+// Iteration 63.3: prose per build is hand-written (the game plan and the
+// hull/commander pairing aren't derivable data), but each build's PART
+// LIST is rendered from `Part.buildTags` (below, in the Builds section)
+// rather than hand-typed here — the two can never drift apart the way a
+// second hand-maintained id list would risk.
+const BUILD_INFO: Record<BuildTag, { name: string; plan: string; pairing: string }> = {
+  alpha: {
+    name: 'Missile alpha strike',
+    plan: 'Win the opening volley before the enemy can shoot back — missiles fire once, before any cannon round.',
+    pairing: "Gunboat/Frigate's weapon-heavy layouts; the Spymaster's Forewarned (+1 fleet computer during the opening exchange).",
+  },
+  speed: {
+    name: 'Outspeed',
+    plan: `A ${OUTSPEED_GAP}+ initiative gap over the enemy's fastest survivor earns a bonus cannon activation every round — denying return fire outright.`,
+    pairing: "Interceptor (2)/Destroyer (3)/Valkyrie (4)'s base initiative; the Ace pipeline protocol.",
+  },
+  tank: {
+    name: 'Single tank',
+    plan: 'One durable ship soaks the whole fight while the rest of the fleet works — negate, absorb, or force every hit onto it.',
+    pairing: "Bastion into Aegis (innate taunt); the Warlord's 3-augment Flagship and hull marks.",
+  },
+  swarm: {
+    name: 'Swarm',
+    plan: 'Fleet-wide auras multiply by ship count — the more hulls carrying one (or complementary ones), the bigger the payoff.',
+    pairing: "The Admiral's wider fleet cap and cheap common hulls; mercenaries.",
+  },
+  pierce: {
+    name: 'Pierce',
+    plan: "Ignore enemy piloting outright instead of out-rolling it — beats a stacked-piloting build head-on.",
+    pairing: 'Any weapon-heavy hull.',
+  },
+  attrition: {
+    name: 'Attrition',
+    plan: 'Guaranteed chip damage plus repairs — grind a fight out rather than win it in one exchange.',
+    pairing: "The Engineer's over-repair banking.",
+  },
+};
+const BUILD_TAG_ORDER: BuildTag[] = ['alpha', 'speed', 'tank', 'swarm', 'pierce', 'attrition'];
+
 export function Wiki() {
-  const veterancyCols = Array.from({ length: 10 }, (_, col) => col);
   return (
     <div className="wiki">
       {/* A sidebar on desktop (sticky, left column via wiki.css's default
@@ -352,7 +391,29 @@ export function Wiki() {
             </div>
           ))}
         </section>
-  
+
+        <section id="builds">
+          <h2>Builds</h2>
+          <p className="wiki-note">
+            Six named ways to build a fleet, each with its own complete kit of parts and a natural hull/commander
+            pairing. A part can belong to none, one, or two of these — untagged just means "generically good," not
+            missing.
+          </p>
+          {BUILD_TAG_ORDER.map((tag) => {
+            const info = BUILD_INFO[tag];
+            const parts = PARTS.filter((p) => p.buildTags?.includes(tag));
+            return (
+              <div key={tag}>
+                <h3>{info.name}</h3>
+                <p className="wiki-note">
+                  {info.plan} <em>Pairs well with:</em> {info.pairing}
+                </p>
+                <PartsTable parts={parts} />
+              </div>
+            );
+          })}
+        </section>
+
         <section id="hulls">
           <h2>Hulls — the shipyard pool</h2>
           <TableWrap>
@@ -505,29 +566,41 @@ export function Wiki() {
           <h2>How fights scale</h2>
           <ul className="wiki-rules">
             <li>
-              <strong>Veterancy</strong> — flat bonus HP on every enemy ship, by column within each act:
-              <TableWrap>
-                <table className="wiki-table wiki-table--inline">
-                  <tbody>
-                    <tr>
-                      <th>Column</th>
-                      {veterancyCols.map((c) => (
-                        <td key={c} className="wiki-num">
-                          {c}
-                        </td>
-                      ))}
-                    </tr>
-                    <tr>
-                      <th>+HP</th>
-                      {veterancyCols.map((c) => (
-                        <td key={c} className="wiki-num">
-                          {veterancyBonus(c)}
-                        </td>
-                      ))}
-                    </tr>
-                  </tbody>
-                </table>
-              </TableWrap>
+              <strong>Veterancy</strong> — a bonus on every enemy ship that grows by column within each act (HP
+              throughout; computer only at each act's very last lane column, before the boss):
+              {([1, 2] as const).map((act) => (
+                <TableWrap key={act}>
+                  <table className="wiki-table wiki-table--inline">
+                    <caption>Act {act}</caption>
+                    <tbody>
+                      <tr>
+                        <th>Column</th>
+                        {COLUMN_SCALING[act].map((_, c) => (
+                          <td key={c} className="wiki-num">
+                            {c}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <th>+HP</th>
+                        {COLUMN_SCALING[act].map((s, c) => (
+                          <td key={c} className="wiki-num">
+                            {s.hp}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <th>+Computer</th>
+                        {COLUMN_SCALING[act].map((s, c) => (
+                          <td key={c} className="wiki-num">
+                            {s.computer}
+                          </td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </TableWrap>
+              ))}
             </li>
             <li>
               <strong>Escalations</strong> — 4 per run (2 per act, landing after columns 4 and 7), drawn without

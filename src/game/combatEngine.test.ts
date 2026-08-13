@@ -2377,3 +2377,86 @@ describe('command point regeneration (iteration 62)', () => {
     expect(state.commandPoints).toBe(2 + 3); // +1 at round 4, +1 at round 8, +1 at round 12
   });
 });
+
+describe('Reload drones (iteration 63.3)', () => {
+  it('fires missiles again at the end of the round it was armed in, WITHOUT touching that round\'s normal cannon fire', () => {
+    const fleet = [
+      {
+        stats: blankStats({
+          hp: 20,
+          missiles: [{ diceCount: 1, damage: 1 }],
+          cannons: [{ diceCount: 1, damage: 1 }],
+          actives: ['reloaddrones'],
+        }),
+        initialDamage: 0,
+      },
+    ];
+    const foe = enemy({}, { hp: 20 });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // round 0: the normal opening missile volley
+    expect(state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile')).toHaveLength(1);
+
+    // Armed AFTER round 0 resolves (freshRoundModifiers() would otherwise
+    // wipe it) — for round 1, a LATER round than the real missile phase,
+    // proving this isn't hardcoded to round 0.
+    state = useActive(state, 0, 0);
+    state = advanceRound(state); // round 1: normal cannon fire, THEN the reload volley
+
+    const cannonRolls = state.log.filter((e) => e.kind === 'roll' && e.phase === 'cannon');
+    const allMissileRolls = state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile');
+    expect(cannonRolls).toHaveLength(1); // round 1's own cannon fire, untouched
+    expect(allMissileRolls).toHaveLength(2); // round 0's volley + the reload volley
+
+    const announcement = state.log.filter(
+      (e) => e.kind === 'part-effect' && e.text.includes("missiles fire once more"),
+    );
+    expect(announcement).toHaveLength(1);
+  });
+
+  it('is once-per-combat, like every other active', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, missiles: [{ diceCount: 1, damage: 1 }], actives: ['reloaddrones'] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 20 });
+    let state = initCombat(fleet, foe, 1);
+    expect(canUseActive(state, 0, 0)).toBe(true);
+    state = useActive(state, 0, 0);
+    expect(canUseActive(state, 0, 0)).toBe(false);
+  });
+
+  it('a ship with no missiles fires nothing extra and no announcement is logged', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, cannons: [{ diceCount: 1, damage: 1 }], actives: ['reloaddrones'] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 20 });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // round 0
+    state = useActive(state, 0, 0);
+    state = advanceRound(state); // round 1
+    expect(state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile')).toHaveLength(0);
+    expect(state.log.some((e) => e.kind === 'part-effect' && e.text.includes('missiles fire once more'))).toBe(false);
+  });
+
+  it('enemy flak still cancels dice from the reload volley — the same per-combat pool the real missile phase drew from', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, missiles: [{ diceCount: 1, damage: 1 }], actives: ['reloaddrones'] }), initialDamage: 0 },
+    ];
+    // 2 flak charges: exactly enough to cancel one die from EACH volley,
+    // proving the pool persists across advanceRound calls instead of
+    // silently refilling for the reload volley (which would let flak
+    // over-cancel — more than its own "per combat" budget promises).
+    const foe = enemy({}, { hp: 20, flak: 2 });
+    let state = initCombat(fleet, foe, 1);
+    state = advanceRound(state); // round 0: the real missile phase
+    expect(state.log.filter((e) => e.kind === 'part-effect' && e.text.includes('Enemy flak'))).toHaveLength(1);
+    expect(state.flakRemaining.enemy).toBe(1); // 2 - 1 spent
+
+    state = useActive(state, 0, 0);
+    state = advanceRound(state); // round 1: the reload volley draws from what's left
+
+    expect(state.log.filter((e) => e.kind === 'part-effect' && e.text.includes('Enemy flak'))).toHaveLength(2);
+    expect(state.flakRemaining.enemy).toBe(0);
+    // Both dice were cancelled, so neither volley actually rolled through.
+    expect(state.log.filter((e) => e.kind === 'roll' && e.phase === 'missile')).toHaveLength(0);
+  });
+});
