@@ -46,7 +46,15 @@ export type EventId =
   | 'debt-collectors'
   | 'colony-ship'
   | 'colony-raiders'
-  | 'colony-arrival';
+  | 'colony-arrival'
+  // Iteration 56: act-2-exclusive (stages: ['late']) events. The two berth
+  // events (56.1/56.2) —
+  | 'naval-yard'
+  | 'derelict-flotilla'
+  // — and three further late events with no early/mid counterpart (56.3).
+  | 'counter-relay-breach'
+  | 'blackout-run'
+  | 'black-site-vault';
 
 // Iteration 49.1: which slice of the run an event node belongs to, keyed
 // off the entered node's GLOBAL column (act 1 as-is, act 2 offset — see
@@ -60,6 +68,27 @@ export function eventStage(act: 1 | 2, col: number): EventStage {
   return g <= 3 ? 'early' : g <= 10 ? 'mid' : 'late';
 }
 
+// Iteration 56.1/56.2: the hard per-run ceiling on RunState.bonusFleetBerths
+// — exactly 1. A 7-ship fleet (Admiral + Armada mandate + a berth) already
+// strains the combat theater's layout, and the point of the berth is a
+// memorable one-time unlock, not a fleet-size race. The most likely knob
+// here to want retuning later, so it's named rather than inlined.
+export const BONUS_BERTH_CAP = 1;
+
+// Iteration 56.2: naval-yard's price — deliberately the single largest
+// one-off purchase in the game (every purchasable hull tops out at 48cr,
+// the Titan; every other single-node spend in this file is well under
+// 15cr). Derived, not guessed, against the actual act-2 income curve
+// (`npx tsx scripts/enemyValue.ts`'s budget model / `winReward` directly):
+// act-2 winReward ranges 21cr (col 0, the act-2 difficulty wall) to 32cr
+// (the last lane column), averaging 26.5cr across the 12 columns. Target
+// was "a full act-2 fight's income several times over" (3-4x): that band is
+// 80-106cr. 90cr sits inside it (~3.4x the act-2 average, ~4.3x the
+// wall-column reward) and reads as a real decision — arriving at the act-2
+// wall with act 1 fully banked leaves ~122cr total (see enemyValue.ts's
+// act1FullClearIncome), so the berth costs most of it.
+export const NAVAL_YARD_BERTH_PRICE = 90;
+
 // --- Requirement predicate library (14.1) -----------------------------
 // A small reusable set, deliberately limited to what the 14.2 content table
 // actually asks for — no speculative kinds. Every check derives from real
@@ -71,7 +100,15 @@ export type EventRequirement =
   | { kind: 'framePresent'; frameId: FrameId }
   | { kind: 'inventoryAtLeast'; value: number }
   | { kind: 'inventoryAtMost'; value: number }
-  | { kind: 'creditsAtLeast'; value: number };
+  | { kind: 'creditsAtLeast'; value: number }
+  // Iteration 56.2: true only while the run hasn't already claimed its one
+  // bonus fleet berth — see BONUS_BERTH_CAP below. Used on
+  // derelict-flotilla's "cut a hull free" option; drawEvent also excludes
+  // both berth events from the pool outright once a berth is held (the
+  // actual "never appear" mechanism — see drawEvent's own comment), so this
+  // requirement is defense-in-depth plus the one place a describeRequirement
+  // string is needed for it.
+  | { kind: 'noBonusBerth' };
 
 export function meetsRequirement(req: EventRequirement, state: RunState): boolean {
   switch (req.kind) {
@@ -94,6 +131,8 @@ export function meetsRequirement(req: EventRequirement, state: RunState): boolea
       return state.inventory.length <= req.value;
     case 'creditsAtLeast':
       return state.credits >= req.value;
+    case 'noBonusBerth':
+      return (state.bonusFleetBerths ?? 0) < BONUS_BERTH_CAP;
     default:
       return false;
   }
@@ -130,6 +169,8 @@ export function describeRequirement(req: EventRequirement): string {
       return `requires ${req.value}+ spare part${req.value === 1 ? '' : 's'}`;
     case 'inventoryAtMost':
       return `requires ${req.value} or fewer spare parts`;
+    case 'noBonusBerth':
+      return 'requires the bonus berth slot to still be open';
     default:
       return '';
   }
@@ -545,6 +586,94 @@ export const EVENTS: EventDef[] = [
       { label: 'Cash settlement (+14 credits)' },
     ],
   },
+  // --- Iteration 56: act-2-exclusive events (stages: ['late'] only) -------
+  // The two berth events (56.1/56.2) — both require BONUS_BERTH_CAP to
+  // still be open (drawEvent excludes both outright once it isn't; see its
+  // own comment) so a run that finds both can never stack a second berth.
+  {
+    id: 'naval-yard',
+    title: 'Fleet requisition office',
+    flavor: 'A rear-area naval yard will authorize a berth on your fleet charter, for a price.',
+    stages: ['late'],
+    options: [
+      { label: 'Move on' },
+      {
+        label: `Buy the berth (-${NAVAL_YARD_BERTH_PRICE} credits)`,
+        // Affordability, not noBonusBerth, is this option's gate — the
+        // player-relevant reason a purchase is locked is always "can't
+        // afford it" (every other paid option in this file uses
+        // creditsAtLeast the same way). The berth-uniqueness rule is
+        // enforced a level up: drawEvent never even draws this event once
+        // bonusFleetBerths is held, so this option is never reachable in a
+        // state where noBonusBerth would say no.
+        requirement: { kind: 'creditsAtLeast', value: NAVAL_YARD_BERTH_PRICE },
+      },
+    ],
+  },
+  {
+    id: 'derelict-flotilla',
+    title: 'Derelict flotilla',
+    flavor:
+      'A drifting cluster of half-dead hulls. Nothing here flies, but the berthing rights are unclaimed — cutting one loose costs work, not money.',
+    stages: ['late'],
+    options: [
+      { label: 'Leave it' },
+      {
+        label: 'Cut a hull free (+1 heat, and a fight)',
+        // The natural home for the shown-locked noBonusBerth requirement
+        // (see naval-yard's own comment on why IT uses creditsAtLeast
+        // instead): this option has no credit cost at all, so its one
+        // requirement slot is free for the berth-uniqueness rule.
+        requirement: { kind: 'noBonusBerth' },
+      },
+      { label: 'Strip it for parts instead' },
+    ],
+  },
+  // --- Iteration 56.3: three further act-2-only events ---------------------
+  {
+    id: 'counter-relay-breach',
+    title: 'Counter-relay breach',
+    flavor:
+      'Every enemy squadron out here answers to the same broadcast — the counter-protocol drilled in after the boss draft. The relay coordinating it is running on a skeleton guard.',
+    stages: ['late'],
+    options: [
+      { label: 'Leave the relay broadcasting' },
+      { label: 'Storm the relay — a HARD detachment guards the antenna farm' },
+    ],
+  },
+  {
+    id: 'blackout-run',
+    title: 'Blackout run',
+    flavor:
+      "The pursuit is close enough now to read your hull markings. Killing main power could shake it loose — but going dark costs you somewhere else.",
+    stages: ['late'],
+    options: [
+      { label: 'Hold course' },
+      {
+        label: 'Cut main power — go fully dark (-3 heat, -6 credits in wasted life support)',
+        requirement: { kind: 'creditsAtLeast', value: 6 },
+      },
+      {
+        label: 'Push the reactor into the red instead — pick a ship to bear the strain (-2 heat, that ship takes damage)',
+        chooseShip: true,
+      },
+    ],
+  },
+  {
+    id: 'black-site-vault',
+    title: 'The black-site vault',
+    flavor:
+      "Deep-war intel says this bunker holds requisition credits meant for a fleet that never came home. The door's still sealed, and something is dug in to keep it that way.",
+    stages: ['late'],
+    options: [
+      { label: 'Leave the vault sealed' },
+      { label: 'Blow the door — a HARD detachment is dug in' },
+      {
+        label: 'Cloaking field: bypass the guard and crack the door quietly (a working part, no fight)',
+        requirement: { kind: 'partEquipped', partId: 'cloak' },
+      },
+    ],
+  },
 ];
 
 const EVENTS_BY_ID: Record<EventId, EventDef> = Object.fromEntries(EVENTS.map((e) => [e.id, e])) as Record<
@@ -611,6 +740,14 @@ export function drawEvent(rng: RngFn, state: RunState, col: number): EventId {
   const excluded = new Set<EventId>();
   if (state.lastEventId) excluded.add(state.lastEventId);
   if (fragments > 0) excluded.add('relic-signal');
+  // Iteration 56.2: once the run's one bonus berth is already claimed,
+  // neither berth event has anything left to offer — excluded from the pool
+  // outright (not just their key option locked) so they genuinely "never
+  // appear" rather than showing up with a permanently-dead option.
+  if ((state.bonusFleetBerths ?? 0) >= BONUS_BERTH_CAP) {
+    excluded.add('naval-yard');
+    excluded.add('derelict-flotilla');
+  }
   const stagePool = RANDOM_EVENTS.filter((e) => e.stages.includes(stage));
   const pool = stagePool.filter((e) => !excluded.has(e.id));
   const options = pool.length > 0 ? pool : stagePool.length > 0 ? stagePool : RANDOM_EVENTS;
@@ -1248,6 +1385,103 @@ export function resolveEventChoice(
         state: { ...state, credits: state.credits + 14, colonyStage: undefined },
         outcomeText: 'The settlement wires over a 14-credit cash payment.',
       };
+    }
+
+    case 'naval-yard': {
+      if (choiceIndex === 0) {
+        return { state, outcomeText: 'You move on.' };
+      }
+      // choiceIndex 1: buy the berth. Deliberately NOT routed through the
+      // pay() helper (which only ever returns {state, outcomeText}) — this
+      // also has to set bonusFleetBerths in the same update. A direct
+      // credits: state-spread with a named constant, not a literal, so this
+      // never appears in rewardTiers.test.ts's source-scrape regardless —
+      // a cost was never in scope of that guardrail (it only classifies
+      // POSITIVE payouts), and this one isn't even the literal-number shape
+      // the scrape looks for.
+      return {
+        state: {
+          ...state,
+          credits: clampCredits(state.credits - NAVAL_YARD_BERTH_PRICE),
+          bonusFleetBerths: 1,
+        },
+        outcomeText: `You pay ${NAVAL_YARD_BERTH_PRICE} credits and the yard authorizes a new berth on your fleet charter.`,
+      };
+    }
+
+    case 'derelict-flotilla': {
+      if (choiceIndex === 0) {
+        return { state, outcomeText: 'You leave the flotilla adrift.' };
+      }
+      if (choiceIndex === 1) {
+        return {
+          state: { ...state, heat: addHeat(state.heat, 1) },
+          outcomeText:
+            'You cut a hull free and power up its emergency thrusters — the drifting cluster is not as dead as it looks. Win, and the berthing rights are yours.',
+          ambushEnemy: easyRaidersForAmbush(state.act, rng),
+          ambushBonus: { chainEffect: 'berth-unlocked' },
+        };
+      }
+      // choiceIndex 2: strip it for parts instead — no berth, no fight.
+      const partId = randomPart(rng, FIVE_CREDIT_PARTS);
+      return grant(state, partId, `You strip the flotilla for parts — no berth, but a working ${getPart(partId).name}.`);
+    }
+
+    case 'counter-relay-breach': {
+      if (choiceIndex === 0) {
+        return { state, outcomeText: 'You leave the relay broadcasting.' };
+      }
+      // choiceIndex 1: storm the relay.
+      return {
+        state,
+        outcomeText: 'You turn to breach the relay. Win, and the counter-protocol goes dark for the rest of the war.',
+        ambushEnemy: huntSquadForAmbush(state.act, rng),
+        ambushBonus: { chainEffect: 'counter-protocol-jammed' },
+      };
+    }
+
+    case 'blackout-run': {
+      if (choiceIndex === 0) {
+        return { state, outcomeText: 'You hold course.' };
+      }
+      if (choiceIndex === 1) {
+        return {
+          state: {
+            ...state,
+            credits: clampCredits(state.credits - 6),
+            heat: addHeat(state.heat, -3),
+          },
+          outcomeText: 'You cut main power and go fully dark — the pursuit loses your trail, but the wasted life support costs 6 credits.',
+        };
+      }
+      // choiceIndex 2: push the reactor into the red instead.
+      const shipIndex = selection.shipIndex ?? 0;
+      return {
+        state: {
+          ...state,
+          fleet: applyCappedDamage(state.fleet, shipIndex, 2, state.protocols),
+          heat: addHeat(state.heat, -2),
+        },
+        outcomeText: 'You push the reactor into the red — the strain damages the ship, but the pursuit loses you in the flare.',
+      };
+    }
+
+    case 'black-site-vault': {
+      if (choiceIndex === 0) {
+        return { state, outcomeText: 'You leave the vault sealed.' };
+      }
+      if (choiceIndex === 1) {
+        return {
+          state,
+          outcomeText: 'You blow the door. Win, and the requisition credits inside are yours.',
+          ambushEnemy: huntSquadForAmbush(state.act, rng),
+          ambushBonus: { credits: 6 },
+        };
+      }
+      // choiceIndex 2: cloaked bypass — safe, capped at rare like every
+      // other cloak-gated no-fight option in this file.
+      const partId = randomPart(rng, FIVE_CREDIT_PARTS);
+      return grant(state, partId, `Cloaked, you crack the door quietly and pull a ${getPart(partId).name} from the vault.`);
     }
 
     default:

@@ -42,6 +42,9 @@ interface ShopScreenProps {
   commanderId?: CommanderId;
   protocols?: ProtocolId[];
   counterProtocol?: CounterProtocolId;
+  // Iteration 56.1: RunState.bonusFleetBerths — folded into the displayed
+  // fleet cap below, same as the Admiral base / Armada mandate already are.
+  bonusFleetBerths?: number;
   // Iteration 20 (commodity runs): whether the fleet's currently-carried lot
   // (if any) was bought at an earlier station than this one — the shop
   // itself doesn't know the global column math, so App.tsx precomputes it.
@@ -73,6 +76,7 @@ export function ShopScreen({
   commanderId,
   protocols,
   counterProtocol,
+  bonusFleetBerths,
   commodityLotSellable,
   onBuyPart,
   onSellPart,
@@ -90,7 +94,7 @@ export function ShopScreen({
 }: ShopScreenProps) {
   const [selectedShipIndex, setSelectedShipIndex] = useState(0);
   const safeSelectedIndex = Math.min(selectedShipIndex, fleet.length - 1);
-  const currentFleetCap = fleetCap(commanderId, protocols);
+  const currentFleetCap = fleetCap(commanderId, protocols, bonusFleetBerths ?? 0);
   // 2026-08-08: mercenary escorts don't count toward the displayed cap —
   // see reducer/shop.ts's BUY_SHIP gate, the same rule applied here.
   const fleetFull = commissionedFleetSize(fleet) >= currentFleetCap;
@@ -144,6 +148,14 @@ export function ShopScreen({
       )}
 
       <h3>{isShipyard ? 'Ships' : 'Expand your fleet'}</h3>
+      {/* Iteration 56.1: the one visible marker for a bought/unlocked bonus
+          berth — the cap warning below already reflects it via
+          currentFleetCap, but that only ever shows once the fleet is
+          actually full; this confirms the charter change any time it's
+          relevant, full fleet or not. */}
+      {!!bonusFleetBerths && (
+        <p className="hint">Fleet charter carries a bonus berth — max fleet size is {currentFleetCap}.</p>
+      )}
       {/* 2026-08-06: what's for sale used to disappear entirely once the
           fleet hit its cap — a player at cap could never see (let alone
           plan around) what was in dock this visit, even though scuttling

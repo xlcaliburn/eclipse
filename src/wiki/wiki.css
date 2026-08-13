@@ -208,6 +208,96 @@ body {
   white-space: nowrap;
 }
 
+/* Every column except Innate/Notes should read as one line per hull — the
+   long ones are full sentences and are expected to wrap; the rest are a
+   name, a tier word, or a number and look cramped if they ever break. The
+   table already scrolls horizontally on its own lane (.wiki-table-wrap)
+   when a row's forced-nowrap columns don't all fit, so this never forces
+   the page itself to scroll sideways. */
+.wiki-nowrap {
+  white-space: nowrap;
+}
+
+/* SlotRow/PartIcon (src/components) render bare SVG shapes and a flex chip
+   layout that expect their sizing/color/positioning from CSS classes
+   normally supplied by styles.css. This page never loads styles.css (see
+   the file header) — without these, the Hulls table's slot chips fell
+   back to an unstyled inline flow (default-black icons, no chip box, a
+   `position: absolute` letter badge with no positioning context to anchor
+   to), which is what actually made that column look cramped/jumbled.
+   Duplicated here, same precedent as .silhouette above; `flex-wrap:
+   nowrap` (not styles.css's `wrap`) since this is the wiki's one
+   reference-table use, where each hull's shape reading as one row matters
+   more than fitting a narrow column. */
+.part-icon {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 3;
+  flex-shrink: 0;
+}
+
+.slot-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.slot-chip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.slot-chip .part-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.slot-chip__letter {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 2px;
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.slot-chip--filled {
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 16%, var(--panel-2));
+}
+
+.slot-chip--empty {
+  border: 1px dashed currentColor;
+  background: transparent;
+  opacity: 0.75;
+}
+
+.slot-chip--weapon {
+  color: var(--danger);
+}
+
+.slot-chip--defense {
+  color: var(--success);
+}
+
+.slot-chip--systems {
+  color: var(--accent);
+}
+
+.slot-chip--universal {
+  color: var(--text-dim);
+}
+
 /* Tags & tiers */
 .wiki-tag {
   font-family: var(--font-mono);

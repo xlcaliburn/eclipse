@@ -2,7 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { actColumns, generateMap } from './map';
 import { mulberry32 } from './rng';
 import type { RngFn } from './rng';
-import { describeRequirement, drawEvent, eventStage, EVENTS, meetsRequirement, nextUnrevealedIndex, reqTextFor, resolveEventChoice } from './events';
+import {
+  describeRequirement,
+  drawEvent,
+  eventStage,
+  EVENTS,
+  meetsRequirement,
+  NAVAL_YARD_BERTH_PRICE,
+  nextUnrevealedIndex,
+  reqTextFor,
+  resolveEventChoice,
+} from './events';
 import type { EventId } from './events';
 import { ANCIENT_ARTIFACT_PART_ID, getPart } from './parts';
 import type { RunState } from './types';
@@ -103,6 +113,14 @@ describe('meetsRequirement — predicate library', () => {
   it('creditsAtLeast', () => {
     expect(meetsRequirement({ kind: 'creditsAtLeast', value: 6 }, baseState({ credits: 5 }))).toBe(false);
     expect(meetsRequirement({ kind: 'creditsAtLeast', value: 6 }, baseState({ credits: 6 }))).toBe(true);
+  });
+
+  // Iteration 56.2: the bonus berth's per-run cap (BONUS_BERTH_CAP, 1).
+  it('noBonusBerth: met when absent, unmet once the run holds a bonus berth', () => {
+    const req = { kind: 'noBonusBerth' } as const;
+    expect(meetsRequirement(req, baseState())).toBe(true);
+    expect(meetsRequirement(req, baseState({ bonusFleetBerths: 0 }))).toBe(true);
+    expect(meetsRequirement(req, baseState({ bonusFleetBerths: 1 }))).toBe(false);
   });
 });
 
@@ -714,6 +732,10 @@ describe('describeRequirement', () => {
     );
     expect(describeRequirement({ kind: 'creditsAtLeast', value: 6 })).toBe('requires 6+ credits');
   });
+
+  it('names the bonus-berth cap requirement (56.2)', () => {
+    expect(describeRequirement({ kind: 'noBonusBerth' })).toBe('requires the bonus berth slot to still be open');
+  });
 });
 
 describe('reqTextFor', () => {
@@ -846,6 +868,44 @@ describe('drawEvent — stage filtering (49.1/49.7.2)', () => {
       seen.add(drawEvent(mulberry32(seed), s0, 1));
     }
     for (const id of earlyOnly) expect(seen.has(id)).toBe(true);
+  });
+});
+
+describe('drawEvent — the five iteration-56 late-only events (56.3)', () => {
+  const lateOnly: EventId[] = ['naval-yard', 'derelict-flotilla', 'counter-relay-breach', 'blackout-run', 'black-site-vault'];
+
+  it('an early column never yields one, across many seeds', () => {
+    const s0 = baseState({ relicFragments: 0 });
+    for (let seed = 1; seed <= 300; seed++) {
+      const drawn = drawEvent(mulberry32(seed), s0, 1); // act-1 col 1 -> global 1 -> early
+      expect(lateOnly).not.toContain(drawn);
+    }
+  });
+
+  it('a mid column never yields one, across many seeds', () => {
+    const s0 = baseState({ relicFragments: 0 });
+    for (let seed = 1; seed <= 300; seed++) {
+      const drawn = drawEvent(mulberry32(seed), s0, 5); // act-1 col 5 -> global 5 -> mid
+      expect(lateOnly).not.toContain(drawn);
+    }
+  });
+
+  it('a late column reaches all five, across many seeds', () => {
+    const s0 = baseState({ act: 2, position: { col: 0, row: 0 }, relicFragments: 0 });
+    const seen = new Set<EventId>();
+    for (let seed = 1; seed <= 2000; seed++) {
+      seen.add(drawEvent(mulberry32(seed), s0, 0)); // act-2 col 0 -> global 11 -> late
+    }
+    for (const id of lateOnly) expect(seen.has(id)).toBe(true);
+  });
+
+  it('once a bonus berth is held, neither berth event is ever drawn — they truly never appear, not just show locked', () => {
+    const s0 = baseState({ act: 2, position: { col: 0, row: 0 }, relicFragments: 0, bonusFleetBerths: 1 });
+    for (let seed = 1; seed <= 500; seed++) {
+      const drawn = drawEvent(mulberry32(seed), s0, 0);
+      expect(drawn).not.toBe('naval-yard');
+      expect(drawn).not.toBe('derelict-flotilla');
+    }
   });
 });
 
@@ -1073,5 +1133,50 @@ describe('drawEvent — the colony chain continuation check (49.5/49.7.7)', () =
     for (const roll of [0, 0.1, 0.49]) {
       expect(drawEvent(fixedRng([roll]), s0, 4)).toBe('debt-collectors');
     }
+  });
+});
+
+// =========================================================================
+// Iteration 56: act-2-exclusive events + the bonus fleet berth.
+// =========================================================================
+
+describe('resolveEventChoice — naval-yard (56.2)', () => {
+  it('option 0: move on changes nothing', () => {
+    const s0 = baseState({ credits: 10 });
+    const { state } = resolveEventChoice('naval-yard', 0, s0, fixedRng([]));
+    expect(state).toEqual(s0);
+  });
+
+  it('option 1: buying pays NAVAL_YARD_BERTH_PRICE and grants the berth', () => {
+    const s0 = baseState({ credits: NAVAL_YARD_BERTH_PRICE });
+    const { state } = resolveEventChoice('naval-yard', 1, s0, fixedRng([]));
+    expect(state.credits).toBe(0);
+    expect(state.bonusFleetBerths).toBe(1);
+  });
+});
+
+describe('resolveEventChoice — derelict-flotilla (56.2)', () => {
+  it('option 0: leave it changes nothing', () => {
+    const s0 = baseState();
+    const { state } = resolveEventChoice('derelict-flotilla', 0, s0, fixedRng([]));
+    expect(state).toEqual(s0);
+  });
+
+  it('option 1: cutting a hull free costs 1 heat and sets an easy-pool ambush with the berth-unlocked chainEffect', () => {
+    const s0 = baseState({ act: 2, heat: 1 });
+    const { state, ambushEnemy, ambushBonus } = resolveEventChoice('derelict-flotilla', 1, s0, fixedRng([0.1]));
+    expect(state.heat).toBe(2);
+    expect(ambushEnemy).toBeDefined();
+    expect(ambushBonus).toEqual({ chainEffect: 'berth-unlocked' });
+    // No berth yet at choice time — win-conditional, applied only on a real
+    // CONTINUE win (see reducer.test.ts's iteration-56 chainEffect tests).
+    expect(state.bonusFleetBerths).toBeUndefined();
+  });
+
+  it('option 2: stripping for parts grants a part, no berth', () => {
+    const s0 = baseState();
+    const { state } = resolveEventChoice('derelict-flotilla', 2, s0, fixedRng([0.1]));
+    expect(state.inventory).toHaveLength(1);
+    expect(state.bonusFleetBerths).toBeUndefined();
   });
 });

@@ -104,6 +104,14 @@ export const REWARD_SOURCES: RewardSourceEntry[] = [
     grantsPart: true, // ambushBonus.partId, a random FIVE_CREDIT_PARTS pick
     measure: { kind: 'event', eventId: 'distress-beacon', choiceIndex: 1 },
   },
+  // Iteration 56.3: the black-site vault's "blow the door" fight — 6cr,
+  // upper-middle of the high-risk band, matching its "real risk, real
+  // payoff" billing (a HARD_POOL_ACT2 detachment, same strength as
+  // defector-pursuit's/debt-collectors' hunt squads). Verified 2026-08-12:
+  // this test file's completeness tripwire genuinely FAILS with this entry
+  // omitted (the literal `ambushBonus: { credits: 6 }` in events.ts has no
+  // covering entry then) — confirmed before adding this one.
+  { id: 'black-site-vault-fight', tier: 'high-risk', measure: { kind: 'event', eventId: 'black-site-vault', choiceIndex: 1 } },
 
   // --- Flat, no-fight event payouts ---------------------------------------
   // Every positive pay(state, N, ...) reachable from a non-chain event

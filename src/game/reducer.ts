@@ -1087,12 +1087,20 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // discipline as ambushBonus itself. Never reached on a boss fight
       // (an event ambush is always a plain 'combat' enemy), so only this
       // non-boss win branch needs it.
+      // Iteration 56: 'berth-unlocked' (derelict-flotilla) and
+      // 'counter-protocol-jammed' (counter-relay-breach) reuse this exact
+      // machinery — same "consumed regardless of outcome, applied only on a
+      // real win" discipline as the two 49.x chains above.
       const chainEffectPatch: Partial<RunState> =
         ambushBonus?.chainEffect === 'debt-cleared'
           ? { loanOutstanding: undefined }
           : ambushBonus?.chainEffect === 'colony-defended'
             ? { colonyStage: 2 }
-            : {};
+            : ambushBonus?.chainEffect === 'berth-unlocked'
+              ? { bonusFleetBerths: 1 }
+              : ambushBonus?.chainEffect === 'counter-protocol-jammed'
+                ? { counterProtocol: undefined }
+                : {};
 
       const startingInventory = ambushBonus?.partId ? [...state.inventory, ambushBonus.partId] : [...state.inventory];
       // Iteration 28 (Ghost fleet protocol): a ship that would be destroyed

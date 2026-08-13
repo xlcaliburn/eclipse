@@ -286,7 +286,11 @@ function buyAndEquipFromOffers(state: RunState, config: PolicyConfig, commanderI
 
 function buyHull(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
   let s = state;
-  const cap = Math.min(config.fleetCap, commanderFleetCap(commanderId, s.protocols));
+  // Iteration 56.1: a bought/unlocked bonus berth (RunState.bonusFleetBerths)
+  // raises the commander's real hard cap the same way it does everywhere
+  // else — omitting it here would mean the agent could never actually use a
+  // berth it earned, understating its measured effect on the balance floor.
+  const cap = Math.min(config.fleetCap, commanderFleetCap(commanderId, s.protocols, s.bonusFleetBerths ?? 0));
   for (const frameId of config.framePriority) {
     if (s.fleet.length >= cap) break;
     if (!s.shopFrameOffers?.includes(frameId)) continue;
@@ -318,7 +322,11 @@ function buyHull(state: RunState, config: PolicyConfig, commanderId: CommanderId
 // whatever room it has, so a filled slot is its normal follow-on
 // behavior regardless of which ship got it).
 function upgradeMark(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
-  const cap = Math.min(config.fleetCap, commanderFleetCap(commanderId, state.protocols));
+  // Same bonusFleetBerths threading as buyHull above — otherwise a fleet
+  // sitting at the OLD cap (but under the new, berth-raised one) would look
+  // "full" here and mark-upgrade a hull instead of buying the room it
+  // actually has.
+  const cap = Math.min(config.fleetCap, commanderFleetCap(commanderId, state.protocols, state.bonusFleetBerths ?? 0));
   if (state.fleet.length < cap) return state; // buyHull already covers this case
   const candidates = state.fleet
     .map((ship, index) => ({ ship, index }))
@@ -379,7 +387,11 @@ function buyMercenary(state: RunState, config: PolicyConfig, commanderId: Comman
   if (state.position?.col !== bossColumn(state.act) - 1) return state;
   const cost = mercenaryCost(commanderId);
   if (cost > state.credits) return state;
-  if (state.fleet.length >= config.fleetCap + 1) return state; // a mercenary is a bonus hull, not a fleet-cap slot — +1 headroom
+  // +1 headroom for the mercenary itself (it's a rental, not a fleet-cap
+  // slot — see the comment above), plus any bonusFleetBerths the run has
+  // earned (iteration 56.1) so a berth doesn't shrink the effective
+  // headroom this heuristic leaves for a hire.
+  if (state.fleet.length >= config.fleetCap + 1 + (state.bonusFleetBerths ?? 0)) return state;
   return dispatch(state, { type: 'BUY_MERCENARY' }, tracker);
 }
 

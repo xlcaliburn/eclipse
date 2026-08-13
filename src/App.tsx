@@ -370,6 +370,7 @@ function App() {
               commanderId={state.commanderId}
               protocols={state.protocols}
               counterProtocol={state.counterProtocol}
+              bonusFleetBerths={state.bonusFleetBerths}
               commodityLotSellable={commodityLotSellable}
               onBuyPart={(offerIndex) => dispatchWithToast({ type: 'BUY_PART', offerIndex })}
               onSellPart={(partId) => dispatch({ type: 'SELL_PART', partId })}

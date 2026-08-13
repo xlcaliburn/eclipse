@@ -61,6 +61,7 @@ function baseState(overrides: Partial<RunState> = {}): RunState {
 const EVENT_RNG_NEEDS: Partial<Record<EventId, number>> = {
   'distress-beacon': 2, // choiceIndex 1: randomPart + easyRaidersForAmbush
   'defector-pursuit': 1, // choiceIndex 0: huntSquadForAmbush
+  'black-site-vault': 1, // choiceIndex 1: huntSquadForAmbush
 };
 
 // Resolves a manifest 'event' measure for real and returns the live credit

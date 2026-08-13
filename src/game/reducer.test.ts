@@ -10,6 +10,7 @@ import { MAX_HEAT } from './heat';
 import { bossColumn, globalColumn, laneColumns } from './map';
 import { getProtocol } from './protocols';
 import type { CargoTag, GameMap, MapPosition, NodeType } from './map';
+import { NAVAL_YARD_BERTH_PRICE } from './events';
 import type { EventId } from './events';
 import { CAPTURED_SCHEMATIC_PART_ID, getPart } from './parts';
 import { deriveStats } from './ship';
@@ -626,6 +627,29 @@ describe('BUY_SHIP — Interceptor and Bastion, the Flagship is never purchasabl
 
     const plain = stateWithMap('shop', { phase: 'shop', credits: 100, fleet: fullFleet, shopFrameOffers: ['interceptor'] });
     expect(runReducer(plain, { type: 'BUY_SHIP', frameId: 'interceptor' }).fleet).toHaveLength(4);
+  });
+
+  // Iteration 56.1: BUY_SHIP is the one fleetCap call site every purchase
+  // actually flows through — a berth that didn't reach here would exist but
+  // be unusable, the spec's own named failure mode.
+  it('a bonus berth raises the fleet cap by 1 — BUY_SHIP succeeds at the old cap (4) with a berth held', () => {
+    const fullFleet: PlayerShipState[] = Array.from({ length: 4 }, () => ({
+      frameId: 'interceptor' as const,
+      equipped: [],
+      damage: 0,
+      upgrades: [],
+    }));
+    const noBerth = stateWithMap('shop', { phase: 'shop', credits: 100, fleet: fullFleet, shopFrameOffers: ['interceptor'] });
+    expect(runReducer(noBerth, { type: 'BUY_SHIP', frameId: 'interceptor' }).fleet).toHaveLength(4); // refused, at cap
+
+    const withBerth = stateWithMap('shop', {
+      phase: 'shop',
+      credits: 100,
+      fleet: fullFleet,
+      shopFrameOffers: ['interceptor'],
+      bonusFleetBerths: 1,
+    });
+    expect(runReducer(withBerth, { type: 'BUY_SHIP', frameId: 'interceptor' }).fleet).toHaveLength(5);
   });
 
   // 2026-08-08: mercenary escorts are hired outside the fleet cap (see
@@ -3576,6 +3600,20 @@ describe('iteration 28: Protocols', () => {
     expect(fleetCap('admiral', ['lone-flagship'])).toBe(1);
   });
 
+  // Iteration 56.1: bonusFleetBerths composes with everything above rather
+  // than overriding it — except Lone flagship, whose entire premise ("exactly
+  // one ship") must win outright even with a berth held.
+  it('fleetCap: a bonus berth adds +1, composing with the Admiral base and Armada mandate; Lone flagship still wins outright', () => {
+    expect(fleetCap(undefined, [], 1)).toBe(5);
+    expect(fleetCap('admiral', [], 1)).toBe(6);
+    expect(fleetCap(undefined, ['armada-mandate'], 1)).toBe(7);
+    expect(fleetCap('admiral', ['armada-mandate'], 1)).toBe(8);
+    expect(fleetCap(undefined, ['lone-flagship'], 1)).toBe(1);
+    expect(fleetCap('admiral', ['lone-flagship'], 1)).toBe(1);
+    // Absent bonusBerths defaults to 0 — every pre-56 call site unaffected.
+    expect(fleetCap(undefined, [], 0)).toBe(fleetCap(undefined));
+  });
+
   it('partCost: Munitions contracts subtracts 2cr, floored at 1cr, and stacks with a signature discount', () => {
     const base = partCost('plasma', undefined);
     expect(partCost('plasma', undefined, ['munitions-contracts'])).toBe(base - 2);
@@ -4023,5 +4061,85 @@ describe('iteration 49.5: the colony ship chain', () => {
     );
     expect(cash.colonyStage).toBeUndefined();
     expect(cash.credits).toBe(14);
+  });
+});
+
+describe('iteration 56: the two berth events', () => {
+  it('naval-yard: buying pays NAVAL_YARD_BERTH_PRICE and grants the berth; refused one credit short', () => {
+    const flush = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'naval-yard' },
+      credits: NAVAL_YARD_BERTH_PRICE,
+    });
+    const bought = runReducer(flush, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    expect(bought.credits).toBe(0);
+    expect(bought.bonusFleetBerths).toBe(1);
+
+    const poor = stateWithMap('event', {
+      phase: 'event',
+      currentEvent: { eventId: 'naval-yard' },
+      credits: NAVAL_YARD_BERTH_PRICE - 1,
+    });
+    const refused = runReducer(poor, { type: 'EVENT_CHOOSE', choiceIndex: 1 });
+    expect(refused).toBe(poor); // requirement gate rejects — unchanged state, same reference
+  });
+
+  it('EVENT_CONTINUE carries the berth-unlocked chainEffect onto RunState.pendingAmbushBonus', () => {
+    let state = stateWithMap('event', { phase: 'event', currentEvent: { eventId: 'derelict-flotilla' } });
+    state = runReducer(state, { type: 'EVENT_CHOOSE', choiceIndex: 1 }); // cut a hull free
+    expect(state.currentEvent?.ambushBonus).toEqual({ chainEffect: 'berth-unlocked' });
+
+    const result = runReducer(state, { type: 'EVENT_CONTINUE' });
+    expect(result.phase).toBe('prep');
+    expect(result.pendingAmbushBonus).toEqual({ chainEffect: 'berth-unlocked' });
+  });
+
+  it('winning the derelict-flotilla fight grants the berth via chainEffect (a real ambush -> CONTINUE win, the ambush-bonus precedent)', () => {
+    const enemy = GAUNTLET[0];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      enemy,
+      1,
+    );
+    const wonCombat = { ...combat, winner: 'player' as const };
+    const base = stateWithMap('event');
+    const state: RunState = {
+      ...base,
+      map: forceNodeType(base.map, 1, 0, 'event', base.act),
+      phase: 'combat',
+      position: { col: 1, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      currentEnemy: enemy,
+      combat: wonCombat,
+      pendingAmbushBonus: { chainEffect: 'berth-unlocked' },
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('reward');
+    expect(result.bonusFleetBerths).toBe(1);
+    expect(result.pendingAmbushBonus).toBeUndefined();
+  });
+
+  it('losing the derelict-flotilla fight grants no berth — no chainEffect applies on a loss', () => {
+    const enemy = GAUNTLET[0];
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      enemy,
+      1,
+    );
+    const lostCombat = { ...combat, winner: 'enemy' as const };
+    const base = stateWithMap('event');
+    const state: RunState = {
+      ...base,
+      map: forceNodeType(base.map, 1, 0, 'event', base.act),
+      phase: 'combat',
+      position: { col: 1, row: 0 },
+      fleet: [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }],
+      currentEnemy: enemy,
+      combat: lostCombat,
+      pendingAmbushBonus: { chainEffect: 'berth-unlocked' },
+    };
+    const result = runReducer(state, { type: 'CONTINUE' });
+    expect(result.phase).toBe('defeat');
+    expect(result.bonusFleetBerths).toBeUndefined();
   });
 });

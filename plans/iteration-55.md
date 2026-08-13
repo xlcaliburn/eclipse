@@ -1,7 +1,9 @@
 # Iteration 55 — Flatten the difficulty curve against the wealth curve (specced 2026-08-08, rescoped 2026-08-12)
 
-> **Status: specced (deep), not implemented.** Implementer: record
-> deviations and verification results here, per the established style.
+> **Status: specced (deep), all 3 user decisions resolved (2026-08-12) —
+> ready to implement once the baseline gate below is satisfied.**
+> Implementer: record deviations and verification results here, per the
+> established style.
 >
 > **Sequencing (load-bearing): baseline AFTER iterations 56 and 62 land.**
 > Both are in flight as of this rescope, and both move the numbers this
@@ -141,8 +143,9 @@ T2 is satisfied mostly by raising the back half (where the surplus is);
 T1 and T3 mostly by shaving the entry spikes (where the deaths are). The
 outcome checks are 55.4's: act-1 clear moves toward 20–40%, act-2
 conditional becomes non-zero, and the c5–c7 / act-2-c0 histogram spikes
-flatten. **Decision point 1 (user)**: confirm the 60% / 1.15× numbers or
-adjust before tuning starts.
+flatten. Decision resolved (user, 2026-08-12): the 60% / 1.15× numbers
+are **confirmed** as the tuning targets; the vitest gate enforces looser
+bounds — see 55.3.
 
 ## 55.2 Mechanisms — three, independently measurable, staged in this order
 
@@ -156,11 +159,12 @@ adjust before tuning starts.
    "Raider patrol" understrength variant (2 raiders, not 3) that only
    appears at c0–1. Prefer the filter first — measure before authoring
    content.
-2. **Counter-protocol ramp-in**: `withCounterProtocol` skips application
-   at act-2 local col ≤1 (deterministic, data-only, engine untouched).
-   Show it honestly: the prep/draft UI already displays the counter —
-   add "(takes effect from the 3rd sector column)" style copy rather
-   than letting it silently not-apply.
+2. **Counter-protocol ramp-in** (decision resolved — user approved,
+   2026-08-12): `withCounterProtocol` skips application at act-2 local
+   col ≤1 (deterministic, data-only, engine untouched). Show it
+   honestly: the prep/draft UI already displays the counter — add
+   "(takes effect from the 3rd sector column)" style copy rather than
+   letting it silently not-apply.
 
 ### B. Band-entry ramp, act 1 (attacks T1, the c5–c7 cluster)
 
@@ -200,16 +204,26 @@ const COLUMN_SCALING: Record<1 | 2, { hp: number; computer: 0 | 1 }[]> = ...
   keep the `veterancyBonus` field on `EnemyDef` populated (it's display
   surface), even if the function behind it changes.
 
-## 55.3 Instrument upgrade: make the curve self-checking
+## 55.3 Instrument upgrade: make the curve self-checking (two-tier)
 
-- `enemyValue.ts` output gains **target vs actual vs delta** columns for
-  T1–T3, so the tuning loop is one command.
-- **Decision point 2 (user)**: additionally promote T1–T3 to a
-  `src/game/` vitest gate (a `difficultyCurve.test.ts` computing shares
-  from the real pools/scaling/reward functions, iteration-50-style) so
-  future content changes can't silently regress the curve — or leave it
-  a script-level report. The gate is the better long-term answer; it
-  does make every future enemy/pool edit answerable to this test.
+Decision resolved (user, 2026-08-12): the vitest gate is IN, but **loose
+by design** — *"loose enough that it doesn't get easily triggered, but
+major disruptions should be caught."* So two tiers, tight-to-tune and
+loose-to-gate:
+
+- **Tuning tier (script report)**: `enemyValue.ts` output gains
+  **target vs actual vs delta** columns against the TIGHT targets
+  (T1 ≤ +15% band-entry jump, T2 ≥ 60%, T3 ≤ 1.15×). This is the
+  instrument the tuning loop drives to green; it never fails a build.
+- **Gate tier (vitest)**: new `src/game/difficultyCurve.test.ts`
+  computes the same shares from the real pools/scaling/reward functions
+  (iteration-50-style — a real gate, not an advisory script) but
+  enforces LOOSE bounds at roughly 2× slack: **T1 ≤ +30%** band-entry
+  jump, **T2 ≥ 45%**, **T3 ≤ 1.35×**. A routine enemy tweak or reward
+  nudge inside that slack passes silently; a change that re-opens a
+  cliff or re-inverts the curve fails loudly. Each loose bound is a
+  named constant with a comment pointing here, so tightening later is a
+  one-line decision.
 
 ## 55.4 Measurement protocol (staged; every stage n=500 `balance:full`)
 
@@ -253,12 +267,15 @@ the death histogram before reaching for bigger hammers.
   income drops; if a reward change turns out to be wanted anyway, it's
   its own iteration with this one's post-measurements as baseline.
 
-## Open decisions for the user (confirm before implementation starts)
+## Decisions (all resolved by the user, 2026-08-12)
 
-1. **T2/T3 numbers** — 60% within-act floor, 1.15× seam cap: confirm or
-   adjust (55.1).
-2. **Vitest gate vs script report** for the curve invariants (55.3).
-3. **Counter-protocol ramp-in** (A.2) — comfortable with the drafted
-   counter not applying for act-2's first two columns, with honest UI
-   copy? (The alternative — halving its stats there — touches more data
-   for the same effect.)
+1. **T2/T3 tuning targets** — 60% within-act floor, 1.15× seam cap:
+   **confirmed** as specced.
+2. **Vitest gate**: **yes, but loose** — *"loose enough that it doesn't
+   get easily triggered, but major disruptions should be caught."*
+   Implemented as the two-tier design in 55.3: tight targets in the
+   script report (the tuning instrument), ~2× slack in the gate
+   (T1 ≤ +30%, T2 ≥ 45%, T3 ≤ 1.35×).
+3. **Counter-protocol ramp-in**: **approved** — the drafted counter
+   skips act-2's first two columns, with honest UI copy stating when it
+   takes effect (A.2).

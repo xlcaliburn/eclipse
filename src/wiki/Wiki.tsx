@@ -217,6 +217,7 @@ function ProtocolTable({ defs }: { defs: (ProtocolDef | CounterProtocolDef)[] })
 
 const NAV = [
   ['rules', 'Core rules'],
+  ['additional-rules', 'Additional rules'],
   ['parts', 'Parts'],
   ['hulls', 'Hulls'],
   ['upgrades', 'Upgrades'],
@@ -272,6 +273,11 @@ export function Wiki() {
 
         <section id="rules">
           <h2>Core rules</h2>
+          <p className="wiki-note">
+            The mechanics behind every single fight, no exceptions. Situational and build-dependent rules — the
+            ones that only come up sometimes — are in{' '}
+            <a href="#additional-rules">Additional rules</a> below.
+          </p>
           <ul className="wiki-rules">
             <li>
               <strong>Hit rule:</strong> a die hits when <code>roll + computer − target's piloting ≥ 6</code>. A
@@ -279,15 +285,29 @@ export function Wiki() {
               one die face.
             </li>
             <li>
+              <strong>Phase order:</strong> every fight opens with one missile phase (all missiles fire once), then
+              repeating cannon rounds until one side is destroyed. Within a phase, ships act in initiative order.
+            </li>
+            <li>
+              <strong>Enemy targeting:</strong> by default, enemies shoot your lowest-remaining-HP ship.
+            </li>
+          </ul>
+        </section>
+
+        <section id="additional-rules">
+          <h2>Additional rules</h2>
+          <p className="wiki-note">
+            Mechanics that only apply under specific conditions — a long fight, a particular build, or a specific
+            part or upgrade — plus the fleet-building rules that shape what you bring INTO a fight rather than what
+            happens during one.
+          </p>
+          <ul className="wiki-rules">
+            <li>
               <strong>Fire-control convergence:</strong> from round {CONVERGENCE_ONSET_ROUND} on, every ship on both
               sides gains a cumulative +1 computer each round (round {CONVERGENCE_ONSET_ROUND} is +{convergenceBonus(CONVERGENCE_ONSET_ROUND)},
               round {CONVERGENCE_ONSET_ROUND + 1} is +{convergenceBonus(CONVERGENCE_ONSET_ROUND + 1)}, and so on,
               uncapped) — a fight that would otherwise stall on bare natural-6 hits converges on a result instead of
-              running forever.
-            </li>
-            <li>
-              <strong>Phase order:</strong> every fight opens with one missile phase (all missiles fire once), then
-              repeating cannon rounds until one side is destroyed. Within a phase, ships act in initiative order.
+              running forever. Only matters once a fight actually runs that long.
             </li>
             <li>
               <strong>Outspeed:</strong> a ship whose initiative beats the fastest surviving enemy by{' '}
@@ -295,8 +315,9 @@ export function Wiki() {
               Works both ways — fast enemies can outspeed you.
             </li>
             <li>
-              <strong>Enemy targeting:</strong> enemies always shoot your lowest-remaining-HP ship. Taunt (Lure
-              beacon) overrides everything; cloaked ships can't be targeted while a non-cloaked ally lives.
+              <strong>Targeting overrides:</strong> Taunt (Lure beacon) forces every enemy die onto the taunting ship,
+              overriding the default lowest-HP pick entirely; a cloaked ship can't be targeted at all while a
+              non-cloaked ally is still alive.
             </li>
             <li>
               <strong>Power:</strong> every equipped part except a reactor draws power (rarity-derived: common 1 /
@@ -317,7 +338,7 @@ export function Wiki() {
             </li>
           </ul>
         </section>
-  
+
         <section id="parts">
           <h2>Parts — the shop pool</h2>
           <p className="wiki-note">
@@ -360,7 +381,7 @@ export function Wiki() {
                         {f.name}
                         {id === 'cruiser' && <span className="wiki-tag">start only</span>}
                       </td>
-                      <td>
+                      <td className="wiki-nowrap">
                         {id === 'cruiser' ? (
                           '—'
                         ) : (
@@ -369,8 +390,11 @@ export function Wiki() {
                       </td>
                       <td className="wiki-num">{f.cost}cr</td>
                       {/* Iteration 52.1: typed slots, not a bare count — the
-                          layout itself IS the identity now. */}
-                      <td>
+                          layout itself IS the identity now. `wiki-nowrap`
+                          keeps the chip row on one line (see wiki.css's
+                          duplicated .slot-row for why it needs a forced
+                          `flex-wrap: nowrap` here specifically). */}
+                      <td className="wiki-nowrap">
                         <SlotRow layout={f.slotLayout} size={18} />
                       </td>
                       {/* Iteration 57.1: the hull's own power budget — a
