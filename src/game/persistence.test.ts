@@ -170,6 +170,52 @@ describe('save / load roundtrip (iteration 9.2)', () => {
     expect(loadRun(storage)).toBeNull();
   });
 
+  // Iteration 64/66: 'interlude-reinforcement' and 'order-draft' both
+  // existed as real Phase values with no case in isValidRunState's switch
+  // — a reload mid-choice silently lost the run (falls to `default: false`)
+  // instead of blanking or erroring loudly. Found during 66's own mobile
+  // verification pass, fixed alongside it.
+  it('a save mid-interlude-reinforcement roundtrips (iteration 64)', () => {
+    const storage = fakeStorage();
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'interlude-reinforcement',
+      act: 2,
+      pendingReinforcementOptions: ['interceptor', 'corvette', 'frigate'],
+    };
+    expect(saveRun(state, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(state);
+  });
+
+  it('loadRun discards an interlude-reinforcement-phase save missing pendingReinforcementOptions (iteration 64)', () => {
+    const storage = fakeStorage();
+    const state: RunState = { ...initialRunState(), phase: 'interlude-reinforcement', act: 2 };
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state }));
+    expect(loadRun(storage)).toBeNull();
+  });
+
+  it('a save mid-order-draft roundtrips, including a short (< 3) offer list (iteration 66)', () => {
+    const storage = fakeStorage();
+    const state: RunState = {
+      ...initialRunState(),
+      phase: 'order-draft',
+      orderDraftOffers: ['pd-screen', 'jamming-sweep'],
+    };
+    expect(saveRun(state, storage)).toBe(true);
+    expect(loadRun(storage)).toEqual(state);
+  });
+
+  it('loadRun discards an order-draft-phase save missing/empty orderDraftOffers (iteration 66)', () => {
+    const storage = fakeStorage();
+    const missing: RunState = { ...initialRunState(), phase: 'order-draft' };
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state: missing }));
+    expect(loadRun(storage)).toBeNull();
+
+    const empty: RunState = { ...initialRunState(), phase: 'order-draft', orderDraftOffers: [] };
+    storage.setItem('eclipse.save.v1', JSON.stringify({ version: SAVE_VERSION, state: empty }));
+    expect(loadRun(storage)).toBeNull();
+  });
+
   it('a save mid-protocol-draft with counter offers roundtrips (iteration 30)', () => {
     const storage = fakeStorage();
     const state: RunState = {

@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   advanceRound,
   canIssueOrder,
+  canUnissueOrder,
   canUseActive,
   combatOutcome,
   CONVERGENCE_ONSET_ROUND,
   convergenceBonus,
+  DEFAULT_KNOWN_ORDERS,
   hasMissilePhase,
   incomingFirePreview,
   initCombat,
@@ -16,6 +18,7 @@ import {
   qualifiesForOutspeed,
   runToEnd,
   setPriorityTarget,
+  unissueOrder,
   useActive,
 } from './combatEngine';
 import type { EnemyDef, ShipStats } from './types';
@@ -2035,7 +2038,7 @@ describe('Fleet orders (iteration 48)', () => {
     // so the enemy gets exactly one activation (no bonus cannon round to
     // complicate the roll count this test is checking).
     const foe = enemy({}, { initiative: 8, hp: 5, computer: 0, cannons: [{ diceCount: 1, damage: 1 }] });
-    let state = initCombat(fleet, foe, 1);
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'brace'] });
     state = advanceRound(state); // missile (no-op)
     state = issueOrder(state, 'brace', 0);
     expect(state.roundModifiers.bracingShipIndices).toEqual([0]);
@@ -2052,7 +2055,7 @@ describe('Fleet orders (iteration 48)', () => {
       { stats: blankStats({ initiative: 5, hp: 2 }), initialDamage: 0 },
     ];
     const foe = enemy({}, { initiative: 10, hp: 5, cannons: [{ diceCount: 1, damage: 1 }] });
-    let state = initCombat(fleet, foe, 1);
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'brace'] });
     state = advanceRound(state); // missile (no-op)
     state = issueOrder(state, 'brace', 0);
     state = advanceRound(state); // cannon round 1
@@ -2064,7 +2067,7 @@ describe('Fleet orders (iteration 48)', () => {
   it('brace: only +1 piloting during the missile phase (down from +2) — the missile round is a one-time volley, not a repeating cost like a cannon round', () => {
     const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
     const foe = enemy({}, { initiative: 8, hp: 5, computer: 0, missiles: [{ diceCount: 1, damage: 1 }] });
-    let state = initCombat(fleet, foe, 1);
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'brace'] });
     state = issueOrder(state, 'brace', 0);
     expect(state.log.some((e) => e.kind === 'part-effect' && e.text.includes('+1 piloting'))).toBe(true);
     state = advanceRound(state); // round 0 resolves — missile phase
@@ -2081,7 +2084,7 @@ describe('Fleet orders (iteration 48)', () => {
     control = advanceRound(control); // round 0, no order — missiles fire normally
     expect(control.log.some((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'missile')).toBe(true);
 
-    let braced = initCombat(fleet, foe, 1);
+    let braced = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'brace'] });
     braced = issueOrder(braced, 'brace', 0);
     braced = advanceRound(braced); // round 0, braced — no missiles at all
     expect(braced.log.some((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'missile')).toBe(false);
@@ -2092,7 +2095,10 @@ describe('Fleet orders (iteration 48)', () => {
       { stats: blankStats({ hp: 20, computer: 0, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
     ];
     const foe = enemy({ count: 2 }, { hp: 20, shield: 0 });
-    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { exploitEnabled: true });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      exploitEnabled: true,
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'exploit-weakness'],
+    });
     state = advanceRound(state); // missile (no-op)
     state = issueOrder(state, 'exploit-weakness', 0);
     state = advanceRound(state); // cannon round 1
@@ -2114,7 +2120,10 @@ describe('Fleet orders (iteration 48)', () => {
     const foe = enemy({ count: 2 }, { hp: 3, shield: 0 }); // dies outright to any hit
     let found = false;
     for (let seed = 1; seed <= 200 && !found; seed++) {
-      let state = initCombat(fleet, foe, seed, 'weakest', undefined, { exploitEnabled: true });
+      let state = initCombat(fleet, foe, seed, 'weakest', undefined, {
+        exploitEnabled: true,
+        knownOrders: [...DEFAULT_KNOWN_ORDERS, 'exploit-weakness'],
+      });
       state = advanceRound(state); // missile (no-op)
       state = issueOrder(state, 'exploit-weakness', 0);
       state = advanceRound(state); // cannon round 1 — 2 dice from the one ship
@@ -2159,7 +2168,10 @@ describe('Fleet orders (iteration 48)', () => {
     const noExploit = initCombat(fleet, foe, 1);
     expect(canIssueOrder(noExploit, 'exploit-weakness', 0)).toBe(false);
 
-    const enabled = initCombat(fleet, foe, 1, 'weakest', undefined, { exploitEnabled: true });
+    const enabled = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      exploitEnabled: true,
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'exploit-weakness', 'brace'],
+    });
     expect(canIssueOrder(enabled, 'exploit-weakness')).toBe(false); // no targetIndex given
     expect(canIssueOrder(enabled, 'exploit-weakness', 0)).toBe(true);
     expect(canIssueOrder(enabled, 'exploit-weakness', 99)).toBe(false); // no such enemy ship
@@ -2170,7 +2182,10 @@ describe('Fleet orders (iteration 48)', () => {
   it('round-modifier order fields (bracingShipIndices, markedEnemyIndex) reset every round, same as orderThisRound', () => {
     const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
     const foe = enemy({}, { hp: 5 });
-    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { exploitEnabled: true });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      exploitEnabled: true,
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'exploit-weakness'],
+    });
     state = issueOrder(state, 'exploit-weakness', 0);
     expect(state.roundModifiers.markedEnemyIndex).toBe(0);
     state = advanceRound(state);
@@ -2203,6 +2218,335 @@ describe('Fleet orders (iteration 48)', () => {
     // of the order armed (attack-run only changes whether a given raw value
     // resolves as a hit, never the sequence of raws itself).
     expect(orderedRaws).toEqual(controlRaws);
+  });
+});
+
+describe('Fleet doctrine progression — new orders (iteration 66)', () => {
+  it('an order not in knownOrders is refused, even with CP available — refused issueOrder returns the exact same state reference', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    const state = initCombat(fleet, foe, 1); // default knownOrders = DEFAULT_KNOWN_ORDERS
+    expect(canIssueOrder(state, 'patch-crews', 0)).toBe(false);
+    expect(canIssueOrder(state, 'attack-run')).toBe(true); // a known baseline order still works
+    const refused = issueOrder(state, 'patch-crews', 0);
+    expect(refused).toBe(state);
+  });
+
+  it('an order granted via CombatOrderOptions.knownOrders becomes issuable', () => {
+    const fleet = [{ stats: blankStats({ hp: 10 }), initialDamage: 3 }];
+    const foe = enemy({}, { hp: 5 });
+    const state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'patch-crews'],
+    });
+    expect(canIssueOrder(state, 'patch-crews', 0)).toBe(true);
+  });
+
+  it('patch-crews: heals 1 hull damage instantly and holds fire, WITHOUT the piloting bonus Brace grants', () => {
+    const fleet = [{ stats: blankStats({ hp: 10 }), initialDamage: 3 }];
+    const foe = enemy({}, { hp: 5, computer: 0, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'patch-crews'],
+    });
+    state = advanceRound(state); // missile (no-op)
+    state = issueOrder(state, 'patch-crews', 0);
+    expect(state.playerShips[0].damage).toBe(2); // 3 -> 2
+    expect(state.roundModifiers.heldFireShipIndices).toEqual([0]);
+    state = advanceRound(state); // cannon round 1
+    expect(state.log.filter((e) => e.kind === 'roll' && e.side === 'player')).toHaveLength(0); // holds fire
+    const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(enemyRolls.length).toBeGreaterThan(0);
+    expect(enemyRolls.every((e) => e.kind === 'roll' && e.shield === 0)).toBe(true); // NOT +2, unlike Brace
+  });
+
+  it('patch-crews refuses an already-undamaged ship (a no-op heal costs nothing)', () => {
+    const fleet = [{ stats: blankStats({ hp: 10 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    const state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'patch-crews'],
+    });
+    expect(canIssueOrder(state, 'patch-crews', 0)).toBe(false);
+  });
+
+  it('patch-crews floors healing at 0 damage', () => {
+    const fleet = [{ stats: blankStats({ hp: 10 }), initialDamage: 1 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'patch-crews'],
+    });
+    state = issueOrder(state, 'patch-crews', 0);
+    expect(state.playerShips[0].damage).toBe(0);
+  });
+
+  it('patch-crews: UNISSUE_ORDER reverses the heal exactly, refunds the command point', () => {
+    const fleet = [{ stats: blankStats({ hp: 10 }), initialDamage: 3 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'patch-crews'],
+    });
+    state = issueOrder(state, 'patch-crews', 0);
+    expect(state.playerShips[0].damage).toBe(2);
+    expect(canUnissueOrder(state)).toBe(true);
+    state = unissueOrder(state);
+    expect(state.playerShips[0].damage).toBe(3); // back to the original
+    expect(state.roundModifiers.heldFireShipIndices).toEqual([]);
+    expect(state.commandPoints).toBe(2);
+  });
+
+  it('countermeasures: +1 to flakRemaining.player immediately, -1 computer this round; UNISSUE reverses both', () => {
+    const fleet = [{ stats: blankStats({ hp: 5, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'countermeasures'],
+    });
+    const flakBefore = state.flakRemaining.player;
+    state = issueOrder(state, 'countermeasures');
+    expect(state.flakRemaining.player).toBe(flakBefore + 1);
+    expect(state.roundModifiers.computerBonus).toBe(-1);
+    state = unissueOrder(state);
+    expect(state.flakRemaining.player).toBe(flakBefore);
+    expect(state.roundModifiers.computerBonus).toBe(0);
+  });
+
+  it('attack-run-2: +2 computer, -1 piloting — double the baseline order\'s upside, the same drawback', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'attack-run-2'],
+    });
+    state = issueOrder(state, 'attack-run-2');
+    expect(state.roundModifiers.computerBonus).toBe(2);
+    expect(state.roundModifiers.playerShieldBonus).toBe(-1);
+    state = unissueOrder(state);
+    expect(state.roundModifiers.computerBonus).toBe(0);
+    expect(state.roundModifiers.playerShieldBonus).toBe(0);
+  });
+
+  it('evasive-pattern-2: +2 piloting, -1 computer', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'evasive-pattern-2'],
+    });
+    state = issueOrder(state, 'evasive-pattern-2');
+    expect(state.roundModifiers.computerBonus).toBe(-2);
+    expect(state.roundModifiers.playerShieldBonus).toBe(1);
+    state = unissueOrder(state);
+    expect(state.roundModifiers.computerBonus).toBe(0);
+    expect(state.roundModifiers.playerShieldBonus).toBe(0);
+  });
+
+  it('focus-fire: +1 computer vs the marked enemy, -1 computer vs every OTHER enemy', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 2, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({ count: 2 }, { hp: 20, shield: 0 });
+
+    // 'weakest' targeting with tied HP always lands on the first candidate
+    // (index 0) — marking index 0 puts the roll ON the mark; marking index
+    // 1 leaves the roll landing on the OFF-mark enemy instead.
+    let marked = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'focus-fire'] });
+    marked = advanceRound(marked);
+    marked = issueOrder(marked, 'focus-fire', 0);
+    marked = advanceRound(marked);
+    const markedRolls = marked.log.filter((e) => e.kind === 'roll' && e.side === 'player');
+    expect(markedRolls).toHaveLength(1);
+    expect(markedRolls[0].kind === 'roll' && markedRolls[0].targetIndex).toBe(0);
+    expect(markedRolls[0].kind === 'roll' && markedRolls[0].computer).toBe(3); // 2 base +1
+
+    let offMark = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'focus-fire'] });
+    offMark = advanceRound(offMark);
+    offMark = issueOrder(offMark, 'focus-fire', 1);
+    offMark = advanceRound(offMark);
+    const offRolls = offMark.log.filter((e) => e.kind === 'roll' && e.side === 'player');
+    expect(offRolls).toHaveLength(1);
+    expect(offRolls[0].kind === 'roll' && offRolls[0].targetIndex).toBe(0); // still lands off the mark (index 1)
+    expect(offRolls[0].kind === 'roll' && offRolls[0].computer).toBe(1); // 2 base -1
+  });
+
+  it('focus-fire: UNISSUE_ORDER clears both the mark and the off-target penalty', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'focus-fire'] });
+    state = issueOrder(state, 'focus-fire', 0);
+    expect(state.roundModifiers.markedEnemyBonus).toBe(1);
+    expect(state.roundModifiers.markedEnemyOffPenalty).toBe(1);
+    state = unissueOrder(state);
+    expect(state.roundModifiers.markedEnemyIndex).toBeNull();
+    expect(state.roundModifiers.markedEnemyBonus).toBe(0);
+    expect(state.roundModifiers.markedEnemyOffPenalty).toBe(0);
+  });
+
+  it('jamming-sweep: enemy fleet -1 computer, player fleet -1 initiative this round; UNISSUE reverses both', () => {
+    const fleet = [{ stats: blankStats({ hp: 20, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 20, computer: 2, shield: 0, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'jamming-sweep'] });
+    state = advanceRound(state);
+    state = issueOrder(state, 'jamming-sweep');
+    expect(state.roundModifiers.enemyComputerPenalty).toBe(1);
+    expect(state.roundModifiers.initiativeBonus).toBe(-1);
+    let cancelled = state;
+    cancelled = unissueOrder(cancelled);
+    expect(cancelled.roundModifiers.enemyComputerPenalty).toBe(0);
+    expect(cancelled.roundModifiers.initiativeBonus).toBe(0);
+    state = advanceRound(state);
+    const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(enemyRolls.length).toBeGreaterThan(0);
+    expect(enemyRolls.every((e) => e.kind === 'roll' && e.computer === 1)).toBe(true); // 2 - 1
+  });
+
+  it('jamming-sweep drawback: its own -1 initiative can cost the player an Outspeed activation that would otherwise qualify', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, initiative: OUTSPEED_GAP, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 20, initiative: 0, cannons: [] });
+
+    let control = initCombat(fleet, foe, 1);
+    control = advanceRound(control);
+    control = advanceRound(control);
+    expect(control.log.some((e) => e.kind === 'outspeed')).toBe(true); // qualifies without jamming
+
+    let jammed = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'jamming-sweep'] });
+    jammed = advanceRound(jammed); // missile
+    jammed = issueOrder(jammed, 'jamming-sweep');
+    jammed = advanceRound(jammed); // cannon round 1 — self-jammed below the gap
+    expect(jammed.log.some((e) => e.kind === 'outspeed')).toBe(false);
+  });
+
+  it('pd-screen: +3 to flakRemaining.player immediately, no drawback; UNISSUE reverses it', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'pd-screen'] });
+    const flakBefore = state.flakRemaining.player;
+    state = issueOrder(state, 'pd-screen');
+    expect(state.flakRemaining.player).toBe(flakBefore + 3);
+    expect(state.roundModifiers.computerBonus).toBe(0);
+    expect(state.roundModifiers.playerShieldBonus).toBe(0);
+    state = unissueOrder(state);
+    expect(state.flakRemaining.player).toBe(flakBefore);
+  });
+
+  it('pd-screen: the added flak actually cancels enemy missile dice', () => {
+    const fleet = [{ stats: blankStats({ hp: 20 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 20, missiles: [{ diceCount: 3, damage: 5 }] });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'pd-screen'] });
+    state = issueOrder(state, 'pd-screen'); // +3 flak, before the missile phase resolves
+    state = advanceRound(state); // missile phase
+    const cancels = state.log.filter(
+      (e) => e.kind === 'part-effect' && e.text === 'Flak battery shoots down a missile.',
+    );
+    expect(cancels).toHaveLength(3);
+    const enemyMissileRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy' && e.phase === 'missile');
+    expect(enemyMissileRolls).toHaveLength(0);
+  });
+
+  it('focused-barrage: +1 damage per die THIS ship fires this round, visible in the roll log', () => {
+    const fleet = [{ stats: blankStats({ hp: 20, computer: 6, cannons: [{ diceCount: 3, damage: 2 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 30, shield: 0 });
+    let found = false;
+    for (let seed = 1; seed <= 50 && !found; seed++) {
+      let state = initCombat(fleet, foe, seed, 'weakest', undefined, {
+        knownOrders: [...DEFAULT_KNOWN_ORDERS, 'focused-barrage'],
+      });
+      state = advanceRound(state); // missile (no-op)
+      state = issueOrder(state, 'focused-barrage', 0);
+      expect(state.roundModifiers.damageBoostShipIndex).toBe(0);
+      state = advanceRound(state); // cannon round 1
+      const hits = state.log.filter((e) => e.kind === 'roll' && e.side === 'player' && e.hit);
+      if (hits.length === 0) continue;
+      found = true;
+      expect(hits.every((e) => e.kind === 'roll' && e.damage === 3)).toBe(true); // 2 base +1 boost
+    }
+    expect(found).toBe(true);
+  });
+
+  it('focused-barrage only boosts the targeted ship — a second ship firing the same round deals its normal damage', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, computer: 6, cannons: [{ diceCount: 3, damage: 2 }] }), initialDamage: 0 },
+      { stats: blankStats({ hp: 20, computer: 6, cannons: [{ diceCount: 3, damage: 2 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({ count: 2 }, { hp: 30, shield: 0 });
+    let found = false;
+    for (let seed = 1; seed <= 50 && !found; seed++) {
+      let state = initCombat(fleet, foe, seed, 'weakest', undefined, {
+        knownOrders: [...DEFAULT_KNOWN_ORDERS, 'focused-barrage'],
+      });
+      state = advanceRound(state);
+      state = issueOrder(state, 'focused-barrage', 0); // boost ship 0 only
+      state = advanceRound(state);
+      const shipZeroHits = state.log.filter(
+        (e) => e.kind === 'roll' && e.side === 'player' && e.shooterIndex === 0 && e.hit,
+      );
+      const shipOneHits = state.log.filter(
+        (e) => e.kind === 'roll' && e.side === 'player' && e.shooterIndex === 1 && e.hit,
+      );
+      if (shipZeroHits.length === 0 || shipOneHits.length === 0) continue;
+      found = true;
+      expect(shipZeroHits.every((e) => e.kind === 'roll' && e.damage === 3)).toBe(true);
+      expect(shipOneHits.every((e) => e.kind === 'roll' && e.damage === 2)).toBe(true);
+    }
+    expect(found).toBe(true);
+  });
+
+  it('focused-barrage: UNISSUE_ORDER clears the boost', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'focused-barrage'],
+    });
+    state = issueOrder(state, 'focused-barrage', 0);
+    state = unissueOrder(state);
+    expect(state.roundModifiers.damageBoostShipIndex).toBeNull();
+    expect(state.commandPoints).toBe(2);
+  });
+
+  it('all-ahead-full: +1 initiative this round, no drawback — can push a borderline gap into qualifying for Outspeed', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 20, initiative: OUTSPEED_GAP - 1, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 20, initiative: 0, cannons: [] });
+
+    let control = initCombat(fleet, foe, 1);
+    control = advanceRound(control);
+    control = advanceRound(control);
+    expect(control.log.some((e) => e.kind === 'outspeed')).toBe(false); // one short of the gap, no order
+
+    let boosted = initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'all-ahead-full'],
+    });
+    boosted = advanceRound(boosted); // missile
+    boosted = issueOrder(boosted, 'all-ahead-full');
+    expect(boosted.roundModifiers.initiativeBonus).toBe(1);
+    boosted = advanceRound(boosted); // cannon round 1
+    expect(boosted.log.some((e) => e.kind === 'outspeed')).toBe(true);
+
+    const unissued = unissueOrder(issueOrder(initCombat(fleet, foe, 1, 'weakest', undefined, {
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'all-ahead-full'],
+    }), 'all-ahead-full'));
+    expect(unissued.roundModifiers.initiativeBonus).toBe(0);
+  });
+
+  it('bulwark: the target ship keeps firing (unlike Brace) and gains +2 piloting in ANY phase, including the missile phase', () => {
+    const fleet = [{ stats: blankStats({ hp: 10, missiles: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { initiative: 8, hp: 20, computer: 0, missiles: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'bulwark'] });
+    state = issueOrder(state, 'bulwark', 0); // armed before round 0 (the missile phase)
+    expect(state.roundModifiers.bulwarkShipIndices).toEqual([0]);
+    state = advanceRound(state); // missile phase resolves
+    const playerMissileRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'player' && e.phase === 'missile');
+    expect(playerMissileRolls.length).toBeGreaterThan(0); // still fires, unlike Brace
+    const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(enemyRolls.length).toBeGreaterThan(0);
+    expect(enemyRolls.every((e) => e.kind === 'roll' && e.shield === 2)).toBe(true); // +2 even in the missile phase, unlike Brace's +1
+  });
+
+  it('bulwark: UNISSUE_ORDER reverses cleanly, refunds the command point', () => {
+    const fleet = [{ stats: blankStats({ hp: 10 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { knownOrders: [...DEFAULT_KNOWN_ORDERS, 'bulwark'] });
+    state = issueOrder(state, 'bulwark', 0);
+    state = unissueOrder(state);
+    expect(state.roundModifiers.bulwarkShipIndices).toEqual([]);
+    expect(state.commandPoints).toBe(2);
   });
 });
 

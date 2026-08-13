@@ -3487,6 +3487,35 @@ h3 .info-dot,
   color: var(--danger);
 }
 
+/* Command drafts (iteration 66, fleet doctrine progression) — reuses
+   .protocol-draft-screen's panel/offers-row layout wholesale (see
+   OrderDraftScreen.tsx) and .card-tile for the offer cards themselves
+   (same tiles the command bar renders), plus .part-card--rarity-* for the
+   rarity accent — "shows rarity the same way part cards do." The rarity
+   rule's own selector targets .part-card__name specifically (a class this
+   card doesn't have — it's a .card-tile, not a .part-card), so the name
+   color needs its own one-line bridge per tier below; the border-left
+   accent already applies for free since it's set on the card element
+   itself, not a descendant. */
+.order-draft-card {
+  width: 200px;
+}
+.order-draft-card.part-card--rarity-common .card-tile__name {
+  color: var(--rarity-common);
+}
+.order-draft-card.part-card--rarity-rare .card-tile__name {
+  color: var(--rarity-rare);
+}
+.order-draft-card.part-card--rarity-epic .card-tile__name {
+  color: var(--rarity-epic);
+}
+.order-draft-card.part-card--rarity-legendary .card-tile__name {
+  color: var(--rarity-legendary);
+}
+.order-draft-screen__decline {
+  margin-top: 4px;
+}
+
 /* Flagship recovery (iteration 24) */
 .flagship-recovery-screen {
   background: var(--panel);

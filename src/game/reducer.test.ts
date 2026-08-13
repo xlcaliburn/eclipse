@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { initCombat, runToEnd } from './combatEngine';
+import { DEFAULT_KNOWN_ORDERS, initCombat, runToEnd } from './combatEngine';
+import type { FleetOrderId } from './combatEngine';
 import { shipName } from './shipNames';
 import { getCounterProtocol } from './counterProtocols';
 import type { CounterProtocolId } from './counterProtocols';
@@ -253,7 +254,7 @@ describe('PICK_NODE — map flow', () => {
   });
 });
 
-describe('EQUIP/UNEQUIP — works in both prep and shop phases', () => {
+describe('EQUIP/UNEQUIP — works everywhere except live combat', () => {
   it('equips in prep phase', () => {
     let state = stateWithMap('combat');
     state = { ...state, phase: 'prep', inventory: ['plasma'] };
@@ -267,6 +268,27 @@ describe('EQUIP/UNEQUIP — works in both prep and shop phases', () => {
     state = { ...state, phase: 'shop', inventory: ['plasma'] };
     state = runReducer(state, { type: 'EQUIP', shipIndex: 0, partId: 'plasma' });
     expect(state.fleet[0].equipped).toContain('plasma');
+  });
+
+  // 2026-08-13 (player reports: "it doesn't let me switch them out" /
+  // "clicking ion cannon doesn't take it out" / "i thought i'd be able to
+  // take off items if i clicked them... now i'm hardstuck again"): the
+  // Fleet overlay (App.tsx) offers equip/unequip from the Map phase too —
+  // it's the one always-available fleet-management surface, withheld only
+  // during live combat — but this reducer used to refuse silently outside
+  // prep/shop specifically, a stale guard predating that overlay. Every
+  // click from the Map phase (where a player spends most of the run)
+  // looked interactive and did nothing, no error, no block reason shown.
+  it('equips and unequips from the map phase (the Fleet overlay is reachable there — this used to silently no-op)', () => {
+    let state = stateWithMap('combat');
+    state = { ...state, phase: 'map', inventory: ['plasma'] };
+    state = runReducer(state, { type: 'EQUIP', shipIndex: 0, partId: 'plasma' });
+    expect(state.fleet[0].equipped).toContain('plasma');
+    expect(state.inventory).not.toContain('plasma');
+
+    state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'plasma' });
+    expect(state.fleet[0].equipped).not.toContain('plasma');
+    expect(state.inventory).toContain('plasma');
   });
 
   it('refuses to equip during combat', () => {
@@ -3161,6 +3183,13 @@ describe('ISSUE_ORDER (iteration 48, fleet orders)', () => {
       fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }],
       currentEnemy: GAUNTLET[0],
       currentCombatSeed: 1,
+      // Iteration 66: mirrors what CHOOSE_COMMANDER actually seeds — this
+      // helper bypasses that action, so it has to replicate its
+      // commander-conditional knownOrders itself (a Spymaster override
+      // without this would have exploitEnabled but never actually KNOW
+      // exploit-weakness, tripping the new knownOrders gate).
+      knownOrders:
+        overrides.commanderId === 'spymaster' ? [...DEFAULT_KNOWN_ORDERS, 'exploit-weakness'] : DEFAULT_KNOWN_ORDERS,
       ...overrides,
     };
     return runReducer(prepped, { type: 'ENGAGE' });
@@ -3234,6 +3263,141 @@ describe('Forewarned (iteration 51.1): ENGAGE wires openingComputerBonus', () =>
       const state = engagedState({ commanderId });
       expect(state.combat?.openingComputerBonus).toBe(0);
     }
+  });
+});
+
+describe('Command drafts (iteration 66, fleet doctrine progression)', () => {
+  // `wins` is RunStats.fightsWon BEFORE the win about to resolve — CONTINUE
+  // increments it, so winningStateAtWins(3) resolves to fightsWon 4. Map
+  // seed pinned (stateWithMap's 3rd arg) — the offer draw is keyed off
+  // state.map.seed, so an unpinned (truly random) map seed would make
+  // several of these tests themselves nondeterministic, not just the code
+  // under test.
+  function winningStateAtWins(wins: number, overrides: Partial<RunState> = {}): RunState {
+    const combat = initCombat(
+      [{ stats: { initiative: 0, hp: 5, computer: 0, shield: 0, cannons: [], missiles: [] }, initialDamage: 0 }],
+      GAUNTLET[0],
+      1,
+    );
+    return {
+      ...stateWithMap('combat', {}, 12345),
+      phase: 'combat',
+      position: { col: 1, row: 0 }, // not a boss column
+      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }],
+      currentEnemy: GAUNTLET[0],
+      combat: { ...combat, winner: 'player' as const },
+      runStats: { fightsWon: wins, shipsLost: [], damageDealt: 0, damageTaken: 0 },
+      ...overrides,
+    };
+  }
+
+  it('a win landing on exactly 4 wins draws 3 pending offers; landing on 3 or 5 does not', () => {
+    const to4 = runReducer(winningStateAtWins(3), { type: 'CONTINUE' });
+    expect(to4.runStats?.fightsWon).toBe(4);
+    expect(to4.orderDraftOffers).toHaveLength(3);
+
+    const to3 = runReducer(winningStateAtWins(2), { type: 'CONTINUE' });
+    expect(to3.runStats?.fightsWon).toBe(3);
+    expect(to3.orderDraftOffers).toBeUndefined();
+
+    const to5 = runReducer(winningStateAtWins(4), { type: 'CONTINUE' });
+    expect(to5.runStats?.fightsWon).toBe(5);
+    expect(to5.orderDraftOffers).toBeUndefined();
+  });
+
+  it('also triggers at exactly 8 and 12 wins (not >=, not a range)', () => {
+    expect(runReducer(winningStateAtWins(7), { type: 'CONTINUE' }).orderDraftOffers).toHaveLength(3);
+    expect(runReducer(winningStateAtWins(11), { type: 'CONTINUE' }).orderDraftOffers).toHaveLength(3);
+    expect(runReducer(winningStateAtWins(9), { type: 'CONTINUE' }).orderDraftOffers).toBeUndefined();
+    expect(runReducer(winningStateAtWins(13), { type: 'CONTINUE' }).orderDraftOffers).toBeUndefined();
+  });
+
+  it('offers never contain an order the fleet already knows', () => {
+    const known: FleetOrderId[] = [...DEFAULT_KNOWN_ORDERS, 'brace', 'patch-crews'];
+    const result = runReducer(winningStateAtWins(3, { knownOrders: known }), { type: 'CONTINUE' });
+    expect(result.orderDraftOffers).toBeDefined();
+    for (const id of result.orderDraftOffers!) {
+      expect(known).not.toContain(id);
+    }
+  });
+
+  it('the same seed + win count always draws the same offers — a reload can never reroll them (9.1)', () => {
+    const a = runReducer(winningStateAtWins(3), { type: 'CONTINUE' });
+    const b = runReducer(winningStateAtWins(3), { type: 'CONTINUE' });
+    expect(a.orderDraftOffers).toEqual(b.orderDraftOffers);
+  });
+
+  it('the milestone draw does not perturb rngCounter — the shared stream stays identical to a non-milestone win', () => {
+    const nonMilestone = runReducer(winningStateAtWins(2), { type: 'CONTINUE' });
+    const milestone = runReducer(winningStateAtWins(3), { type: 'CONTINUE' });
+    // Otherwise-identical fights (same fleet, enemy, seed) — if the
+    // milestone draw touched rngCounter, the two would diverge here even
+    // though nothing else about the fight differs.
+    expect(milestone.rngCounter).toBe(nonMilestone.rngCounter);
+  });
+
+  it('LEAVE_REWARD detours to order-draft instead of the map when offers are pending', () => {
+    const afterWin = runReducer(winningStateAtWins(3), { type: 'CONTINUE' });
+    expect(afterWin.phase).toBe('reward');
+    const afterLeave = runReducer(afterWin, { type: 'LEAVE_REWARD' });
+    expect(afterLeave.phase).toBe('order-draft');
+    expect(afterLeave.orderDraftOffers).toEqual(afterWin.orderDraftOffers);
+  });
+
+  it('LEAVE_REWARD goes straight to the map on a non-milestone win', () => {
+    const afterWin = runReducer(winningStateAtWins(2), { type: 'CONTINUE' });
+    const afterLeave = runReducer(afterWin, { type: 'LEAVE_REWARD' });
+    expect(afterLeave.phase).toBe('map');
+  });
+
+  it('ORDER_DRAFT_CHOOSE adds the picked order to knownOrders and clears the offers, back to map', () => {
+    const drafting = runReducer(runReducer(winningStateAtWins(3), { type: 'CONTINUE' }), { type: 'LEAVE_REWARD' });
+    expect(drafting.phase).toBe('order-draft');
+    const picked = drafting.orderDraftOffers![0];
+    const result = runReducer(drafting, { type: 'ORDER_DRAFT_CHOOSE', index: 0 });
+    expect(result.phase).toBe('map');
+    expect(result.orderDraftOffers).toBeUndefined();
+    expect(result.knownOrders).toContain(picked);
+  });
+
+  it('ORDER_DRAFT_CHOOSE: a II mark REPLACES its base id in knownOrders (D4) — never coexist', () => {
+    const base = runReducer(runReducer(winningStateAtWins(3), { type: 'CONTINUE' }), { type: 'LEAVE_REWARD' });
+    const drafting: RunState = { ...base, knownOrders: [...DEFAULT_KNOWN_ORDERS], orderDraftOffers: ['attack-run-2'] };
+    const result = runReducer(drafting, { type: 'ORDER_DRAFT_CHOOSE', index: 0 });
+    expect(result.knownOrders).toContain('attack-run-2');
+    expect(result.knownOrders).not.toContain('attack-run');
+  });
+
+  it('ORDER_DRAFT_CHOOSE: Bulwark replaces Brace, same as a numbered II mark', () => {
+    const base = runReducer(runReducer(winningStateAtWins(3), { type: 'CONTINUE' }), { type: 'LEAVE_REWARD' });
+    const drafting: RunState = {
+      ...base,
+      knownOrders: [...DEFAULT_KNOWN_ORDERS, 'brace'],
+      orderDraftOffers: ['bulwark'],
+    };
+    const result = runReducer(drafting, { type: 'ORDER_DRAFT_CHOOSE', index: 0 });
+    expect(result.knownOrders).toContain('bulwark');
+    expect(result.knownOrders).not.toContain('brace');
+  });
+
+  it('ORDER_DRAFT_DECLINE returns to the map, leaving knownOrders untouched', () => {
+    const drafting = runReducer(runReducer(winningStateAtWins(3), { type: 'CONTINUE' }), { type: 'LEAVE_REWARD' });
+    const before = drafting.knownOrders;
+    const result = runReducer(drafting, { type: 'ORDER_DRAFT_DECLINE' });
+    expect(result.phase).toBe('map');
+    expect(result.orderDraftOffers).toBeUndefined();
+    expect(result.knownOrders).toEqual(before);
+  });
+
+  it('ORDER_DRAFT_CHOOSE refuses an index outside the offers; ORDER_DRAFT_DECLINE refuses outside the phase', () => {
+    const drafting = runReducer(runReducer(winningStateAtWins(3), { type: 'CONTINUE' }), { type: 'LEAVE_REWARD' });
+    const oneOffer: RunState = { ...drafting, orderDraftOffers: [drafting.orderDraftOffers![0]] };
+    const refused = runReducer(oneOffer, { type: 'ORDER_DRAFT_CHOOSE', index: 2 });
+    expect(refused).toBe(oneOffer);
+
+    const notDrafting = { ...initialRunState(), phase: 'map' as const };
+    expect(runReducer(notDrafting, { type: 'ORDER_DRAFT_DECLINE' })).toBe(notDrafting);
+    expect(runReducer(notDrafting, { type: 'ORDER_DRAFT_CHOOSE', index: 0 })).toBe(notDrafting);
   });
 });
 

@@ -1,9 +1,11 @@
 import {
   advanceRound,
   combatOutcome,
+  DEFAULT_KNOWN_ORDERS,
   hasMissilePhase,
   initCombat,
   issueOrder,
+  ORDER_REPLACES,
   setPriorityTarget,
   runToEnd,
   unissueOrder,
@@ -37,7 +39,7 @@ import type { CargoTag, GameMap, MapPosition } from './map';
 import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, isSalvageablePart, PARTS, STARTING_LOADOUT } from './parts';
 import { drawProtocolOffers, hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
-import { pickOne, randomSeed, resumeRng, runRng, shuffle } from './rng';
+import { mulberry32, pickOne, randomSeed, resumeRng, runRng, shuffle } from './rng';
 import type { RngFn } from './rng';
 import {
   applyRepairBanking,
@@ -66,7 +68,7 @@ import type { UpgradeId } from './upgrades';
 import { emptyRunStats } from './daily';
 import { mapShip, removeOnce } from './util';
 import { shipName } from './shipNames';
-import type { CombatEvent, EnemyDef, PartId, PlayerShipState, RewardSummary, RunState, RunStats } from './types';
+import type { CombatEvent, EnemyDef, PartId, PlayerShipState, Rarity, RewardSummary, RunState, RunStats } from './types';
 // 47.6: the shop cases (BUY_PART..LEAVE_SHOP) and their pricing/pool/rarity
 // helpers live in reducer/shop.ts now — see that file's header comment for
 // the full split rationale. `handleShopAction` is this file's one
@@ -130,6 +132,13 @@ export type RunAction =
   // ADVANCE_ROUND (see combatEngine's canUnissueOrder/unissueOrder).
   | { type: 'UNISSUE_ORDER' }
   | { type: 'CONTINUE' }
+  // Iteration 66 (fleet doctrine progression): resolves a command draft —
+  // `index` picks one of the 3 offers on RunState.orderDraftOffers, mirrors
+  // PROTOCOL_CHOOSE's shape. DECLINE is the courtesy every other draft in
+  // the game extends (repair-yard's "full" branch, protocol-draft has no
+  // decline since it's mandatory — this one, like a shop visit, isn't).
+  | { type: 'ORDER_DRAFT_CHOOSE'; index: 0 | 1 | 2 }
+  | { type: 'ORDER_DRAFT_DECLINE' }
   | { type: 'PICK_UPGRADE'; upgradeId: UpgradeId; shipIndex: number }
   | { type: 'LEAVE_REWARD' }
   | { type: 'INTERLUDE_CHOOSE'; shipIndex: number }
@@ -205,6 +214,116 @@ export const SPYMASTER_COMMAND_POINTS = 3;
 // same "one source of truth" reasoning as BASE_COMMAND_POINTS, in case any
 // UI copy wants the number.
 export const SPYMASTER_FOREWARNED_COMPUTER = 1;
+
+// --- Command drafts (iteration 66: fleet doctrine progression) -----------
+// The fleet "gains experience" as fights won this run — RunStats.fightsWon
+// (iteration 18's existing run-level counter, reused rather than
+// duplicated: it already increments in every CONTINUE win branch this
+// iteration touches — combat, elite, boss, interception all share the one
+// mergeRunStats call). At exactly 4/8/12 wins, the next post-combat flow
+// offers a 1-of-3 command draft instead of returning straight to the map.
+
+// Rarity bands per milestone, weights summing to 1 — mirrors reducer/
+// shop.ts's RARITY_WEIGHTS shape (roll a float, walk cumulative weights).
+// Listed low-to-high WITHIN each milestone's own row; a band whose pool is
+// already fully known falls through toward the FRONT of this same array
+// (never outside the milestone's own row — a milestone-4 draft can never
+// offer a legendary, by design; see plans/iteration-66.md's 66.2 table).
+const ORDER_DRAFT_BANDS: Record<4 | 8 | 12, { tier: Rarity; weight: number }[]> = {
+  4: [
+    { tier: 'common', weight: 0.5 },
+    { tier: 'rare', weight: 0.4 },
+    { tier: 'epic', weight: 0.1 },
+  ],
+  8: [
+    { tier: 'rare', weight: 0.5 },
+    { tier: 'epic', weight: 0.4 },
+    { tier: 'legendary', weight: 0.1 },
+  ],
+  12: [
+    { tier: 'epic', weight: 0.5 },
+    { tier: 'legendary', weight: 0.5 },
+  ],
+};
+
+// The draftable catalog by rarity (66.1's table) — deliberately excludes
+// the two baseline orders (never themselves drafted, only their II marks
+// are) and 'exploit-weakness' (Spymaster-exclusive, D3 — granted at
+// CHOOSE_COMMANDER, never offered by a draft). Order within each tier
+// matches combatEngine.ts's ORDER_RARITY declaration order, kept in sync
+// by hand (small, stable catalog — not worth a runtime derivation).
+const ORDER_DRAFT_POOLS: Record<Rarity, FleetOrderId[]> = {
+  common: ['brace', 'patch-crews', 'countermeasures'],
+  rare: ['attack-run-2', 'evasive-pattern-2', 'focus-fire', 'jamming-sweep'],
+  epic: ['pd-screen', 'focused-barrage'],
+  legendary: ['all-ahead-full', 'bulwark'],
+};
+
+function rollDraftTier(rng: RngFn, bands: { tier: Rarity; weight: number }[]): Rarity {
+  const roll = rng();
+  let cumulative = 0;
+  for (const { tier, weight } of bands) {
+    cumulative += weight;
+    if (roll < cumulative) return tier;
+  }
+  return bands[bands.length - 1].tier; // floating-point guard, mirrors shop.ts's rollRarity
+}
+
+// A derived, independently-seeded generator for "which 3 orders does this
+// milestone win offer" — deliberately NOT drawn from the run's shared,
+// incrementing rngCounter stream (unlike shop/protocol offers), so that
+// the balance sim's fixed "always decline every draft" policy (see
+// scripts/sim/agent.ts) leaves every LATER draw in the run bit-identical
+// to a pre-66 run on the same seed — `npm run balance:full` stays a
+// meaningful regression tripwire instead of drifting on pure plumbing
+// noise. Still fully deterministic and reload-proof (9.1): the win count
+// itself is deterministic run history, so (seed, wins) always resolves to
+// the same 3 offers. Same technique combatEngine.ts's enemyTargetRng
+// already uses for the identical reason.
+function orderDraftRng(seed: number, wins: number): RngFn {
+  return mulberry32((seed ^ Math.imul(wins + 1, 0x9e3779b1)) >>> 0);
+}
+
+// Draws this milestone's 3 offers, or undefined if `wins` isn't exactly
+// 4/8/12, or if every order the milestone's band could possibly reach is
+// already known (66.2: "no consolation prize — keep it simple"). Each of
+// the 3 slots independently rolls a tier, then falls through toward the
+// front of `bands` (the milestone's own listed tiers only) until it finds
+// an unknown/unoffered candidate; a slot that finds nothing even at the
+// bottom of its band is simply skipped, so a near-complete catalog can
+// still legitimately return 1 or 2 offers instead of 3.
+function drawOrderDraftOffers(seed: number, wins: number, knownOrders: FleetOrderId[]): FleetOrderId[] | undefined {
+  if (wins !== 4 && wins !== 8 && wins !== 12) return undefined;
+  const rng = orderDraftRng(seed, wins);
+  const bands = ORDER_DRAFT_BANDS[wins];
+  const taken = new Set<FleetOrderId>(knownOrders);
+  const offers: FleetOrderId[] = [];
+  for (let slot = 0; slot < 3; slot++) {
+    // rollDraftTier is called exactly ONCE per slot — inlining it straight
+    // into findIndex's predicate would call it once per element CHECKED
+    // (an impure predicate), consuming a variable, wrong number of rng()
+    // draws depending on which index matched first.
+    const rolledTier = rollDraftTier(rng, bands);
+    const rolledIdx = bands.findIndex((b) => b.tier === rolledTier);
+    let picked: FleetOrderId | undefined;
+    for (let i = rolledIdx; i >= 0 && !picked; i--) {
+      const candidates = ORDER_DRAFT_POOLS[bands[i].tier].filter((id) => !taken.has(id));
+      if (candidates.length > 0) picked = pickOne(candidates, rng);
+    }
+    if (!picked) continue;
+    offers.push(picked);
+    taken.add(picked);
+  }
+  return offers.length > 0 ? offers : undefined;
+}
+
+// Where CONTINUE's post-fight flow eventually returns to the map — 'map'
+// normally, or 'order-draft' when a milestone win just stored pending
+// offers (see LEAVE_REWARD and PROTOCOL_CHOOSE, the two seams every win
+// path funnels through on its way back to the map).
+function mapOrDraftPhase(state: RunState): 'map' | 'order-draft' {
+  return state.orderDraftOffers && state.orderDraftOffers.length > 0 ? 'order-draft' : 'map';
+}
 
 // Iteration 46.2 (2026-08-08): a flat, free heal on every won fight,
 // universal (every commander, stacks with regen/the Engineer's bonus) —
@@ -792,6 +911,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         commanderId: action.commanderId,
         fleet: finalFleet,
         shipsCommissioned: action.commanderId === 'admiral' ? commissioned + 2 : state.shipsCommissioned,
+        // Iteration 66 (fleet doctrine progression): the fleet's earned
+        // order set for this run — D2's baseline two, plus the Spymaster's
+        // exclusive Exploit weakness (D3), seeded here (not NEW_RUN) since
+        // this is the first moment commanderId is actually known.
+        knownOrders:
+          action.commanderId === 'spymaster' ? [...DEFAULT_KNOWN_ORDERS, 'exploit-weakness'] : DEFAULT_KNOWN_ORDERS,
         rngCounter: nextCounter(),
       };
     }
@@ -968,7 +1093,16 @@ export function runReducer(state: RunState, action: RunAction): RunState {
     }
 
     case 'EQUIP': {
-      if (state.phase !== 'prep' && state.phase !== 'shop') return state;
+      // 2026-08-13 (player reports: "it doesn't let me switch them out" /
+      // "clicking ion cannon doesn't take it out"): this guard predates the
+      // Fleet overlay (2026-08-12) — back when equip/unequip only ever
+      // happened literally on the Prep/Shop screens. The overlay's own
+      // comment states the real rule now ("the one equip surface in the
+      // game — withheld only during live combat"), reachable from the Map
+      // via the Fleet tab at any time, but this reducer guard was never
+      // loosened to match — so every click from the Map silently no-opped
+      // with no error, no block reason, nothing. Fixed to the actual rule.
+      if (state.phase === 'combat') return state;
       const ship = state.fleet[action.shipIndex];
       if (!ship) return state;
       if (!state.inventory.includes(action.partId)) return state;
@@ -1005,7 +1139,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
     }
 
     case 'UNEQUIP': {
-      if (state.phase !== 'prep' && state.phase !== 'shop') return state;
+      // 2026-08-13: same fix as EQUIP above, same stale pre-Fleet-overlay
+      // guard, same player-facing symptom (a silently swallowed click).
+      if (state.phase === 'combat') return state;
       if (action.partId === COMMODITY_LOT_PART_ID) return state; // sold via SELL_COMMODITY_LOT, never unequipped to inventory
       const ship = state.fleet[action.shipIndex];
       if (!ship || !ship.equipped.includes(action.partId)) return state;
@@ -1083,6 +1219,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           commandPoints: state.commanderId === 'spymaster' ? SPYMASTER_COMMAND_POINTS : BASE_COMMAND_POINTS,
           exploitEnabled: state.commanderId === 'spymaster',
           openingComputerBonus: state.commanderId === 'spymaster' ? SPYMASTER_FOREWARNED_COMPUTER : 0,
+          // Iteration 66 (fleet doctrine progression): this run's earned
+          // order set — see combatEngine.ts's own comment on
+          // CombatOrderOptions.knownOrders for the no-SAVE_VERSION-bump
+          // default-at-every-read discipline this degrades under.
+          knownOrders: state.knownOrders ?? DEFAULT_KNOWN_ORDERS,
         },
       );
       // Neither fleet has a missile weapon — round 0 is a guaranteed no-op,
@@ -1184,6 +1325,18 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
       // Iteration 18: the run's cumulative record, after this win.
       const runStatsAfterWin = mergeRunStats(baseStats, fightStats, { won: true, lostShips });
+      // Iteration 66 (fleet doctrine progression): checked on EVERY win
+      // (combat, elite, boss, interception all reach this same line) —
+      // drawOrderDraftOffers itself no-ops (returns undefined, no rng
+      // drawn) unless runStatsAfterWin.fightsWon is exactly 4/8/12, so a
+      // normal win costs nothing extra. Drawn here, at the moment the win
+      // resolves — not lazily once the player reaches the draft screen —
+      // so a reload can never reroll the offers (9.1).
+      const orderDraftOffers = drawOrderDraftOffers(
+        state.map.seed,
+        runStatsAfterWin.fightsWon,
+        state.knownOrders ?? DEFAULT_KNOWN_ORDERS,
+      );
       const col = state.position?.col ?? 0;
       const globalCol = globalColumn(state.act, col);
       const isBoss = state.position?.col === bossColumn(state.act);
@@ -1210,6 +1363,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           heat: heatAfterWin,
           interceptionActive: undefined,
           runStats: runStatsAfterWin,
+          orderDraftOffers,
           rngCounter: nextCounter(),
         });
       }
@@ -1243,6 +1397,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
           heat: heatAfterWin, // moot — INTERLUDE_CHOOSE resets to 0 regardless, kept for consistency
           interceptionActive: undefined,
           runStats: runStatsAfterWin,
+          orderDraftOffers,
           rngCounter: nextCounter(),
           protocolOffers,
           protocolCounterOffers,
@@ -1382,6 +1537,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         heat: heatAfterWin,
         interceptionActive: undefined,
         runStats: runStatsAfterWin,
+        orderDraftOffers,
         rngCounter: nextCounter(),
       });
     }
@@ -1406,7 +1562,27 @@ export function runReducer(state: RunState, action: RunAction): RunState {
     case 'LEAVE_REWARD': {
       if (state.phase !== 'reward') return state;
       if (state.pendingReward?.upgradeOptions) return state; // must resolve the upgrade pick first
-      return { ...state, phase: 'map', pendingReward: undefined };
+      // Iteration 66: a milestone win stored pending offers on the way
+      // here — detour through the command draft instead of the map.
+      return { ...state, phase: mapOrDraftPhase(state), pendingReward: undefined };
+    }
+
+    case 'ORDER_DRAFT_CHOOSE': {
+      if (state.phase !== 'order-draft' || !state.orderDraftOffers) return state;
+      const chosen = state.orderDraftOffers[action.index];
+      if (!chosen) return state;
+      // D4: a II (or Bulwark, Brace's legendary replacement) REPLACES its
+      // base id outright — the two never coexist. Every other order is a
+      // pure addition.
+      const replaces = ORDER_REPLACES[chosen];
+      const current = state.knownOrders ?? DEFAULT_KNOWN_ORDERS;
+      const knownOrders = replaces ? [...current.filter((id) => id !== replaces), chosen] : [...current, chosen];
+      return { ...state, phase: 'map', knownOrders, orderDraftOffers: undefined };
+    }
+
+    case 'ORDER_DRAFT_DECLINE': {
+      if (state.phase !== 'order-draft') return state;
+      return { ...state, phase: 'map', orderDraftOffers: undefined };
     }
 
     case 'INTERLUDE_CHOOSE': {
@@ -1497,9 +1673,13 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // 47.5e: shared once — every branch below records the pick the same
       // way, differing only in what else (if anything) the specific
       // protocol does immediately.
+      // Iteration 66: this is the last seam the act-1-boss reward chain
+      // (interlude -> [interlude-reinforcement] -> protocol-draft) passes
+      // through before the map — same detour LEAVE_REWARD makes for every
+      // other win path.
       const resolved: RunState = {
         ...state,
-        phase: 'map',
+        phase: mapOrDraftPhase(state),
         protocols,
         protocolOffers: undefined,
         counterProtocol,

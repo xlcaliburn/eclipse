@@ -1,4 +1,4 @@
-import { canUseActive } from '../game/combatEngine';
+import { canUseActive, DEFAULT_KNOWN_ORDERS, ORDER_NEEDS_TARGET } from '../game/combatEngine';
 import type { CombatState, FleetOrderId } from '../game/combatEngine';
 import type { FrameId } from '../game/frames';
 import { getPart } from '../game/parts';
@@ -15,37 +15,110 @@ interface ActiveAbility {
   partId: PartId;
 }
 
-// Iteration 48 (fleet orders): the fixed order menu — pure UI copy, no
-// engine logic. `needsTarget` drives whether a tile click starts a pick
-// (see CombatScreen's handleOrderTileClick) or issues immediately.
-const ORDER_INFO: Record<FleetOrderId, { name: string; description: string; needsTarget: boolean }> = {
+// Iteration 48 (fleet orders), expanded iteration 66 (fleet doctrine
+// progression): pure UI copy for every order id — no engine logic, and no
+// `needsTarget` field any more (combatEngine.ts's ORDER_NEEDS_TARGET is
+// the one source of truth for that; a second boolean here could drift from
+// it). Exported so OrderDraftScreen shares the exact same name/description
+// text instead of re-deriving it.
+export const ORDER_INFO: Record<FleetOrderId, { name: string; description: string }> = {
   'attack-run': {
     name: 'Attack run',
     description: 'The fleet commits to the attack: +1 computer, −1 piloting this round.',
-    needsTarget: false,
   },
   'evasive-pattern': {
     name: 'Evasive pattern',
     description: 'The fleet flies defensively: +1 piloting, −1 computer this round.',
-    needsTarget: false,
   },
   brace: {
     name: 'Brace',
     description:
       'Pick a ship: it holds all fire this round — including missiles, if braced for the opening volley — and gains +2 piloting.',
-    needsTarget: true,
   },
   'exploit-weakness': {
     name: 'Exploit weakness',
     description: "Pick an enemy ship: your fleet's dice gain +2 computer against it this round.",
-    needsTarget: true,
+  },
+  'patch-crews': {
+    name: 'Patch crews',
+    description: "Pick a ship: repair 1 hull damage now — its crews are on the hull, so it holds fire this round.",
+  },
+  countermeasures: {
+    name: 'Countermeasures',
+    description:
+      "The fleet burns a round of sensor time on intercept: +1 flak against this fight's remaining missiles, −1 computer this round.",
+  },
+  'attack-run-2': {
+    name: 'Attack run II',
+    description: 'The fleet commits hard: +2 computer, −1 piloting this round.',
+  },
+  'evasive-pattern-2': {
+    name: 'Evasive pattern II',
+    description: 'The fleet flies defensively, hard: +2 piloting, −1 computer this round.',
+  },
+  'focus-fire': {
+    name: 'Focus fire',
+    description: 'Pick an enemy ship: +1 computer against it this round, −1 against everything else.',
+  },
+  'jamming-sweep': {
+    name: 'Jamming sweep',
+    description: 'Wide-band jamming: enemy fleet −1 computer this round, your fleet −1 initiative.',
+  },
+  'pd-screen': {
+    name: 'Point-defense screen',
+    description: "The escorts weave a screen: +3 flak against this fight's remaining missiles.",
+  },
+  'focused-barrage': {
+    name: 'Focused barrage',
+    description: 'Pick a ship: its weapons hit +1 harder this round.',
+  },
+  'all-ahead-full': {
+    name: 'All ahead full',
+    description: 'The whole fleet surges: +1 initiative this round.',
+  },
+  bulwark: {
+    name: 'Bulwark',
+    description: 'Pick a ship: +2 piloting this round — and it keeps firing.',
   },
 };
 
-// A fixed display order — Spymaster's exclusive 4th slot only ever appears
-// when combat.exploitEnabled is true (never shown-but-locked; see
+// A fixed display order. II marks sit right after their base tile — since
+// RunState.knownOrders never holds both halves of a replace-pair at once
+// (D4), the render filter below naturally shows only whichever one the
+// fleet actually knows, in this same relative slot. The Spymaster's
+// exclusive 'exploit-weakness' slot only ever appears when
+// combat.exploitEnabled is true (never shown-but-locked; see
 // plans/iteration-48.md's decision point D).
-const ORDER_DISPLAY_ORDER: FleetOrderId[] = ['attack-run', 'evasive-pattern', 'brace', 'exploit-weakness'];
+const ORDER_DISPLAY_ORDER: FleetOrderId[] = [
+  'attack-run',
+  'attack-run-2',
+  'evasive-pattern',
+  'evasive-pattern-2',
+  'brace',
+  'bulwark',
+  'patch-crews',
+  'countermeasures',
+  'focus-fire',
+  'jamming-sweep',
+  'pd-screen',
+  'focused-barrage',
+  'all-ahead-full',
+  'exploit-weakness',
+];
+
+// Iteration 66: which round-modifier list (if any) carries the ARMED
+// target of a player-side targeted order — used only to append "own the
+// ship's name" to an armed tile's label, same as Brace already did. The
+// two enemy-targeted orders (Exploit weakness, Focus fire) don't get the
+// same treatment: the command bar has no enemy-label prop to draw from,
+// and Exploit weakness already shipped without one — Focus fire just
+// follows that same precedent rather than plumbing a new prop through.
+const PLAYER_TARGET_INDEX: Partial<Record<FleetOrderId, (rm: CombatState['roundModifiers']) => number | undefined>> = {
+  brace: (rm) => rm.bracingShipIndices[0],
+  'patch-crews': (rm) => rm.heldFireShipIndices[0],
+  bulwark: (rm) => rm.bulwarkShipIndices[0],
+  'focused-barrage': (rm) => rm.damageBoostShipIndex ?? undefined,
+};
 
 // Whether `order` could be issued right now, IGNORING the target
 // requirement (a targeted order becomes real only once a pick completes —
@@ -56,6 +129,7 @@ function orderAvailable(combat: CombatState, order: FleetOrderId): boolean {
   if (combat.winner) return false;
   if (combat.commandPoints <= 0) return false;
   if (combat.orderThisRound !== null) return false;
+  if (!(combat.knownOrders ?? DEFAULT_KNOWN_ORDERS).includes(order)) return false;
   if (order === 'exploit-weakness' && !combat.exploitEnabled) return false;
   return true;
 }
@@ -116,9 +190,13 @@ export function CombatCommandBar({
             </span>
           </h3>
           <div className="combat-hand__cards">
-            {ORDER_DISPLAY_ORDER.filter((order) => order !== 'exploit-weakness' || combat.exploitEnabled).map(
-              (order) => {
+            {ORDER_DISPLAY_ORDER.filter(
+              (order) =>
+                (combat.knownOrders ?? DEFAULT_KNOWN_ORDERS).includes(order) &&
+                (order !== 'exploit-weakness' || combat.exploitEnabled),
+            ).map((order) => {
                 const info = ORDER_INFO[order];
+                const needsTarget = ORDER_NEEDS_TARGET[order] !== null;
                 const armed = combat.orderThisRound === order;
                 const picking = pickingOrder === order;
                 const available = orderAvailable(combat, order);
@@ -129,15 +207,14 @@ export function CombatCommandBar({
                 // braced, wrong order entirely) cost the command point
                 // with no way back. It's now clickable specifically to
                 // cancel, refunding the point via UNISSUE_ORDER.
-                const bracingIndex =
-                  order === 'brace' && armed ? combat.roundModifiers.bracingShipIndices[0] : undefined;
+                const targetIndex = armed ? PLAYER_TARGET_INDEX[order]?.(combat.roundModifiers) : undefined;
                 const kindLabel = armed
                   ? order === 'brace'
                     ? 'Bracing'
                     : 'Armed'
                   : picking
                     ? 'Pick a target…'
-                    : info.needsTarget
+                    : needsTarget
                       ? 'Pick a target'
                       : '1 command point';
                 return (
@@ -151,16 +228,15 @@ export function CombatCommandBar({
                   >
                     <span className="card-tile__kind">
                       {kindLabel}
-                      {bracingIndex !== undefined && playerLabels[bracingIndex]
-                        ? `: ${playerLabels[bracingIndex]}`
+                      {targetIndex !== undefined && playerLabels[targetIndex]
+                        ? `: ${playerLabels[targetIndex]}`
                         : ''}
                     </span>
                     <span className="card-tile__name">{info.name}</span>
                     <span className="card-tile__desc">{armed ? 'Tap to cancel.' : info.description}</span>
                   </button>
                 );
-              },
-            )}
+            })}
           </div>
         </div>
         {/* 2026-08-12: an empty "Ship actives" section (no active parts

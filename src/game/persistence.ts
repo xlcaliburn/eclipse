@@ -187,6 +187,23 @@ function isValidRunState(state: RunState): boolean {
     // never actually finished computing the state this save claims to be.
     case 'protocol-draft':
       return Array.isArray(state.protocolOffers) && state.protocolOffers.length === 3;
+    // Iteration 64 (found + fixed during 66's mobile verification pass,
+    // 2026-08-13): an interlude-reinforcement save needs the hull options
+    // it's supposed to be choosing between — missing means CONTINUE's
+    // act-2-entry branch never actually finished computing this state. This
+    // phase existed since 64 without a case here, which the exhaustive
+    // switch's `default: false` silently turned into "reload = lost run"
+    // for anyone who closed the tab mid-choice; never caught because no
+    // pass had specifically reloaded during this one phase before now.
+    case 'interlude-reinforcement':
+      return Array.isArray(state.pendingReinforcementOptions) && state.pendingReinforcementOptions.length > 0;
+    // Iteration 66: a command-draft save needs the offers it's supposed to
+    // be choosing between. Unlike protocol-draft's fixed 3, a near-complete
+    // catalog can legitimately draw fewer (reducer.ts's
+    // drawOrderDraftOffers falls through bands and can come up short) —
+    // any nonzero count is valid, an empty/missing array is not.
+    case 'order-draft':
+      return Array.isArray(state.orderDraftOffers) && state.orderDraftOffers.length > 0;
     // Every other phase (map, prep, interlude, victory, defeat, commander)
     // has no extra companion-field requirement of its own. But the switch
     // must still be exhaustive over *known* phases and reject anything

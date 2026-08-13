@@ -1,4 +1,4 @@
-import type { CombatState, TargetingStance } from './combatEngine';
+import type { CombatState, FleetOrderId, TargetingStance } from './combatEngine';
 import type { CounterProtocolId } from './counterProtocols';
 import type { EscalationId, ScheduledEscalation } from './escalations';
 import type { EventId } from './events';
@@ -386,7 +386,12 @@ export type Phase =
   | 'protocol-draft'
   | 'flagship-recovery'
   | 'victory'
-  | 'defeat';
+  | 'defeat'
+  // Iteration 66 (fleet doctrine progression): a command draft — pick 1 of
+  // 3 orders from RunState.orderDraftOffers, or decline — entered from
+  // CONTINUE's win branch at the seam where the post-fight flow would
+  // otherwise return to 'map' (a milestone win at 4/8/12 combatsWon).
+  | 'order-draft';
 // 2026-08-07: the 'setup' phase (a customize-your-flagship screen between
 // commander pick and map) was removed — CHOOSE_COMMANDER now lands
 // straight on 'map'. See CommanderSelectScreen for the starting-ship
@@ -594,4 +599,21 @@ export interface RunState {
   // clears this field. One-time per run by construction: the act-1 boss is
   // only ever beaten once, so INTERLUDE_CHOOSE only ever runs once.
   pendingReinforcementOptions?: Exclude<FrameId, 'cruiser'>[];
+  // Iteration 66 (fleet doctrine progression): the orders this run's fleet
+  // has earned — read as `(state.knownOrders ?? DEFAULT_KNOWN_ORDERS)` at
+  // EVERY consuming site (combatEngine.ts's DEFAULT_KNOWN_ORDERS), never
+  // assumed present. Deliberately no SAVE_VERSION bump: a save from before
+  // this iteration simply loads as a baseline-kit fleet from here on (see
+  // combatEngine.ts's CombatState.knownOrders for the full discipline this
+  // mirrors — the iteration-48 bracingShipIndices lesson). Seeded at
+  // CHOOSE_COMMANDER (Spymaster: + 'exploit-weakness', D3); grows only via
+  // ORDER_DRAFT_CHOOSE, permanently, for the rest of the run (66.0 — never
+  // per-fight, never consumed on use).
+  knownOrders?: FleetOrderId[];
+  // Set by CONTINUE's win branch the moment RunStats.fightsWon (reused as
+  // this run's win-count milestone — see reducer.ts, no duplicate counter)
+  // hits exactly 4, 8, or 12 — drawn once, at that moment, so a reload can
+  // never reroll the offers (9.1), same lifecycle as repairUpgradeOptions.
+  // Cleared by ORDER_DRAFT_CHOOSE/ORDER_DRAFT_DECLINE, either way.
+  orderDraftOffers?: FleetOrderId[];
 }

@@ -4,7 +4,15 @@
 // up here on the next build with no manual upkeep. Prose is kept to rules the
 // data can't express (the hit formula, phase order); anything that could
 // drift is computed, not written.
-import { CONVERGENCE_ONSET_ROUND, convergenceBonus, OUTSPEED_GAP } from '../game/combatEngine';
+import {
+  CONVERGENCE_ONSET_ROUND,
+  convergenceBonus,
+  DEFAULT_KNOWN_ORDERS,
+  OUTSPEED_GAP,
+  ORDER_RARITY,
+} from '../game/combatEngine';
+import type { FleetOrderId } from '../game/combatEngine';
+import { ORDER_INFO } from '../components/CombatCommandBar';
 import { COMMANDERS } from '../game/commanders';
 import { COUNTER_PROTOCOLS } from '../game/counterProtocols';
 import type { CounterProtocolDef } from '../game/counterProtocols';
@@ -212,11 +220,55 @@ function ProtocolTable({ defs }: { defs: (ProtocolDef | CounterProtocolDef)[] })
   );
 }
 
+// Iteration 66 (fleet doctrine progression): every order id, sourced from
+// combatEngine.ts's ORDER_RARITY / CombatCommandBar's ORDER_INFO — the same
+// data the command bar and the in-run draft screen render from, so this
+// table can never drift from what a player actually sees offered.
+const ALL_ORDER_IDS = Object.keys(ORDER_RARITY) as FleetOrderId[];
+
+function OrdersTable() {
+  const sorted = byRarity(ALL_ORDER_IDS.map((id) => ({ id, rarity: ORDER_RARITY[id] })));
+  return (
+    <TableWrap>
+      <table className="wiki-table">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Rarity</th>
+            <th>Effect</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(({ id }) => {
+            const info = ORDER_INFO[id];
+            const rarity = ORDER_RARITY[id];
+            return (
+              <tr key={id}>
+                <td>
+                  {info.name}
+                  {(DEFAULT_KNOWN_ORDERS as FleetOrderId[]).includes(id) && (
+                    <span className="wiki-tag">starting kit</span>
+                  )}
+                </td>
+                <td>
+                  <span className={`wiki-rarity wiki-rarity--${rarity}`}>{rarity}</span>
+                </td>
+                <td>{info.description}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </TableWrap>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 const NAV = [
   ['rules', 'Core rules'],
   ['additional-rules', 'Additional rules'],
+  ['fleet-orders', 'Fleet orders'],
   ['parts', 'Parts'],
   ['builds', 'Builds'],
   ['hulls', 'Hulls'],
@@ -375,6 +427,22 @@ export function Wiki() {
               never be re-bought — protect it (if it dies while the fleet survives, one paid recovery is offered).
             </li>
           </ul>
+        </section>
+
+        <section id="fleet-orders">
+          <h2>Fleet orders</h2>
+          <p className="wiki-note">
+            Mid-combat tactical calls — 1 command point each (2 per fight, 3 for the Spymaster), at most one per
+            round, armed for the round about to resolve. New runs start knowing only Attack run and Evasive pattern;
+            every other order is <strong>earned permanently</strong> at a command draft — a 1-of-3 pick offered after
+            the fleet's 4th, 8th, and 12th win this run (skippable). An earned order is never lost and never
+            consumed by use — only the command point spent to issue it is. Rarity here follows a strict drawback
+            gradient: <strong>common</strong> orders carry a real cost, <strong>rare</strong> ones a lighter one, and{' '}
+            <strong>epic</strong>/<strong>legendary</strong> orders have none at all — the payoff for having earned
+            them. A II mark (or Bulwark, Brace's legendary upgrade) permanently replaces its base order rather than
+            sitting alongside it.
+          </p>
+          <OrdersTable />
         </section>
 
         <section id="parts">

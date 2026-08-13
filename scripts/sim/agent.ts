@@ -93,6 +93,15 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   EVENT_CHOOSE: true,
   EVENT_CONTINUE: true,
   REPAIR_CHOOSE: true,
+  // Iteration 66 (fleet doctrine progression): the agent always declines a
+  // command draft (see the step() 'order-draft' case below) — orders stay
+  // invisible to the balance sim by construction, same as ISSUE_ORDER.
+  // ORDER_DRAFT_CHOOSE is therefore never dispatched, but still has to be
+  // listed here (this table tracks every RunAction VARIANT, not just the
+  // ones actually dispatched — see ISSUE_ORDER/UNISSUE_ORDER above for the
+  // identical precedent).
+  ORDER_DRAFT_CHOOSE: true,
+  ORDER_DRAFT_DECLINE: true,
   NEW_RUN: true, // meta — never dispatched by the agent
   LOAD_STATE: true, // meta — never dispatched by the agent
 };
@@ -549,6 +558,16 @@ function step(state: RunState, config: PolicyConfig, commanderId: CommanderId | 
       return dispatch(state, { type: 'INTERLUDE_CHOOSE_HULL', frameId: state.pendingReinforcementOptions![0] }, tracker);
     case 'protocol-draft':
       return dispatch(state, { type: 'PROTOCOL_CHOOSE', index: DEFAULT_PROTOCOL_INDEX }, tracker);
+    // Iteration 66 (fleet doctrine progression): the floor agent always
+    // declines — same "never touched by the floor agent" policy as
+    // ISSUE_ORDER above (orders are invisible to the balance sim by
+    // construction). Declining costs no rng and changes no state besides
+    // clearing the offers, so every later draw in the run stays identical
+    // to a pre-66 run on the same seed — see reducer.ts's orderDraftRng
+    // for the matching "don't touch the shared rng stream" discipline on
+    // the OFFER side of this same feature.
+    case 'order-draft':
+      return dispatch(state, { type: 'ORDER_DRAFT_DECLINE' }, tracker);
     case 'flagship-recovery': {
       const cost = state.pendingFlagshipRecovery?.cost ?? Infinity;
       return dispatch(state, { type: 'RESOLVE_FLAGSHIP_RECOVERY', recover: state.credits >= cost }, tracker);

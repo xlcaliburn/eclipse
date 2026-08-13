@@ -1,3 +1,4 @@
+import { ORDER_NEEDS_TARGET } from '../game/combatEngine';
 import type { CombatShip, TargetedOrderId } from '../game/combatEngine';
 import type { FrameId } from '../game/frames';
 import type { Side } from '../game/types';
@@ -45,12 +46,13 @@ interface CombatFleetViewProps {
   // numbers live in the enemy panel's readout; the card badge just marks
   // "this ship gets a second activation this round."
   outspeedingIndices?: { player: number[]; enemy: number[] };
-  // Iteration 48 (fleet orders): while a targeted order (Brace/Exploit
-  // weakness) is mid-pick, exactly ONE side's ships become clickable for
-  // that purpose, replacing that side's normal click role entirely — an
-  // enemy click during Exploit's pick mode marks the target, not priority;
-  // it never sets both. Player ships are never otherwise clickable, so
-  // Brace's pick mode is a pure addition there.
+  // Iteration 48 (fleet orders), expanded 66: while a targeted order is
+  // mid-pick, exactly ONE side's ships become clickable for that purpose
+  // (which side comes from combatEngine.ts's ORDER_NEEDS_TARGET), replacing
+  // that side's normal click role entirely — an enemy click during an
+  // enemy-targeted order's pick marks the target, not priority; it never
+  // sets both. Player ships are never otherwise clickable, so a
+  // player-targeted order's pick is a pure addition there.
   orderPickMode?: { order: TargetedOrderId; onPick: (index: number) => void } | null;
 }
 
@@ -147,6 +149,27 @@ function shipCard(
   );
 }
 
+// Iteration 66: one click-title per targeted order, keyed by TargetedOrderId
+// so a new targeted order missing a line here is a compile error. Split by
+// side since ORDER_NEEDS_TARGET already says which side each order needs —
+// only that side's map is ever actually read for a given order.
+const PLAYER_PICK_TITLE: Record<TargetedOrderId, string> = {
+  brace: 'Click to brace this ship — holds fire, +2 piloting this round',
+  'exploit-weakness': '',
+  'patch-crews': 'Click to repair this ship 1 hull damage — it holds fire this round',
+  'focus-fire': '',
+  'focused-barrage': "Click to mark this ship — its dice deal +1 damage this round",
+  bulwark: 'Click to mark this ship — +2 piloting this round, and it keeps firing',
+};
+const ENEMY_PICK_TITLE: Record<TargetedOrderId, string> = {
+  brace: '',
+  'exploit-weakness': 'Click to mark this ship — your fleet gains +2 computer against it this round',
+  'patch-crews': '',
+  'focus-fire': 'Click to mark this ship — your fleet gains +1 computer against it (−1 vs everything else) this round',
+  'focused-barrage': '',
+  bulwark: '',
+};
+
 export function CombatFleetView({
   playerShips,
   enemyShips,
@@ -166,13 +189,18 @@ export function CombatFleetView({
   outspeedingIndices,
   orderPickMode,
 }: CombatFleetViewProps) {
-  // 48: while a pick mode is active, it fully owns the relevant side's
-  // click behavior — Exploit's enemy pick REPLACES priority-target
-  // clicking (never both live at once, so a click mid-pick can't be
-  // misread), and Brace's player pick is a pure addition (player ships
-  // have no other click role).
-  const playerClick = orderPickMode?.order === 'brace' ? orderPickMode.onPick : undefined;
-  const enemyClick = orderPickMode ? (orderPickMode.order === 'exploit-weakness' ? orderPickMode.onPick : undefined) : onSelectEnemy;
+  // 48, generalized 66: while a pick mode is active, it fully owns the
+  // relevant side's click behavior — an enemy-targeted order's pick
+  // REPLACES priority-target clicking (never both live at once, so a click
+  // mid-pick can't be misread), and a player-targeted order's pick is a
+  // pure addition (player ships have no other click role). Which side is
+  // "relevant" comes straight from combatEngine.ts's ORDER_NEEDS_TARGET —
+  // one source of truth, so a new targeted order never needs a matching
+  // edit here.
+  const pickSide = orderPickMode ? ORDER_NEEDS_TARGET[orderPickMode.order] : null;
+  const playerClick = pickSide === 'player' ? orderPickMode!.onPick : undefined;
+  const enemyClick = orderPickMode ? (pickSide === 'enemy' ? orderPickMode.onPick : undefined) : onSelectEnemy;
+  const enemyPickActive = pickSide === 'enemy';
 
   return (
     <div className="combat-fleets">
@@ -188,7 +216,7 @@ export function CombatFleetView({
             activeTarget,
             onShipEl,
             playerClick,
-            'Click to brace this ship — holds fire, +2 piloting this round',
+            orderPickMode ? PLAYER_PICK_TITLE[orderPickMode.order] : undefined,
             false,
             pendingDamage?.get(`player:${i}`) ?? 0,
             pendingDestroyed?.has(`player:${i}`) ?? false,
@@ -200,9 +228,8 @@ export function CombatFleetView({
       </div>
       <div className="combat-fleets__side combat-fleets__side--enemy">
         {enemyShips.map((ship, i) => {
-          const exploitPick = orderPickMode?.order === 'exploit-weakness';
-          const clickTitle = exploitPick
-            ? 'Click to mark this ship — your fleet gains +2 computer against it this round'
+          const clickTitle = enemyPickActive
+            ? ENEMY_PICK_TITLE[orderPickMode!.order]
             : priorityTargetIndex === i
               ? 'Priority target — click to clear'
               : 'Click to focus all fire here';
@@ -222,7 +249,7 @@ export function CombatFleetView({
             pendingDestroyed?.has(`enemy:${i}`) ?? false,
             cardBadges?.[`enemy:${i}`],
             outspeedingIndices?.enemy.includes(i) ?? false,
-            exploitPick,
+            enemyPickActive,
           );
         })}
       </div>

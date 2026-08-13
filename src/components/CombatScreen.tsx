@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CONVERGENCE_ONSET_ROUND, convergenceBonus, outspeedingShipIndices } from '../game/combatEngine';
+import { CONVERGENCE_ONSET_ROUND, convergenceBonus, ORDER_NEEDS_TARGET, outspeedingShipIndices } from '../game/combatEngine';
 import type { CombatState, FleetOrderId, TargetedOrderId } from '../game/combatEngine';
 import type { FrameId } from '../game/frames';
 import type { EnemyDef } from '../game/types';
@@ -23,6 +23,18 @@ import { useTheaterFx } from './useTheaterFx';
 // + CombatLog, useReplayReveal, replaySteps.ts's rollbackToRevealed,
 // useOnboardingPopup, CombatCommandBar); this file is the layout shell
 // that composes them.
+
+// Iteration 66: one line per targeted order, shown while a pick is open
+// (see the Cancel hint below). Keyed by TargetedOrderId so adding a new
+// targeted order without a line here is a compile error.
+const ORDER_PICK_HINT: Record<TargetedOrderId, string> = {
+  brace: 'Click one of your ships in the theater to brace it.',
+  'exploit-weakness': 'Click an enemy ship in the theater to mark it.',
+  'patch-crews': 'Click one of your ships in the theater to patch it.',
+  'focus-fire': 'Click an enemy ship in the theater to mark it.',
+  'focused-barrage': 'Click one of your ships in the theater to arm its barrage.',
+  bulwark: 'Click one of your ships in the theater to make it a bulwark.',
+};
 
 interface CombatScreenProps {
   combat: CombatState;
@@ -87,12 +99,17 @@ export function CombatScreen({
   // `scrollIntoView` went too: it was a second source of movement competing
   // with the first, and with the body hidden the theater is already clear.
   function handleOrderTileClick(order: FleetOrderId) {
-    if (order === 'brace' || order === 'exploit-weakness') {
+    // Iteration 66: generalized from a hardcoded brace/exploit-weakness
+    // check — ORDER_NEEDS_TARGET (combatEngine.ts) is the one source of
+    // truth for which orders need a theater click, so every new targeted
+    // order (Patch crews, Focus fire, Focused barrage, Bulwark) picks up
+    // the same pick-mode flow automatically.
+    if (ORDER_NEEDS_TARGET[order] !== null) {
       if (pickingOrder === order) {
         cancelPick();
         return;
       }
-      setPickingOrder(order);
+      setPickingOrder(order as TargetedOrderId);
       return;
     }
     onIssueOrder(order);
@@ -340,11 +357,7 @@ export function CombatScreen({
           instruction previously pointed. */}
       {!finished && pickingOrder && (
         <p className="hint combat-order-pick-hint">
-          <span>
-            {pickingOrder === 'brace'
-              ? 'Click one of your ships in the theater to brace it.'
-              : 'Click an enemy ship in the theater to mark it.'}
-          </span>
+          <span>{ORDER_PICK_HINT[pickingOrder]}</span>
           <button type="button" className="combat-order-pick-hint__cancel" onClick={cancelPick}>
             Cancel
           </button>

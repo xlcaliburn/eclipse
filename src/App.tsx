@@ -19,6 +19,7 @@ import { LandingScreen } from './components/LandingScreen';
 import { MapScreen } from './components/MapScreen';
 import { PrepScreen } from './components/PrepScreen';
 import { ProtocolDraftScreen } from './components/ProtocolDraftScreen';
+import { OrderDraftScreen } from './components/OrderDraftScreen';
 import { RepairScreen } from './components/RepairScreen';
 import { RewardScreen } from './components/RewardScreen';
 import { shopToastText } from './components/shopToastText';
@@ -409,6 +410,14 @@ function App() {
               offers={state.protocolOffers}
               counterOffers={state.protocolCounterOffers}
               onChoose={(index) => dispatch({ type: 'PROTOCOL_CHOOSE', index })}
+            />
+          )}
+
+          {state.phase === 'order-draft' && state.orderDraftOffers && (
+            <OrderDraftScreen
+              offers={state.orderDraftOffers}
+              onChoose={(index) => dispatch({ type: 'ORDER_DRAFT_CHOOSE', index })}
+              onDecline={() => dispatch({ type: 'ORDER_DRAFT_DECLINE' })}
             />
           )}
 

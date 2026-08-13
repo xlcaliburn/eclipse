@@ -3,7 +3,7 @@ import type { RngFn } from './rng';
 import { resolveHit } from './hitRule';
 import { hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
-import type { CombatEvent, EnemyDef, PartId, ShipStats, Side } from './types';
+import type { CombatEvent, EnemyDef, PartId, Rarity, ShipStats, Side } from './types';
 
 const MAX_CANNON_ROUNDS = 30;
 
@@ -40,6 +40,12 @@ export interface CombatShip {
 }
 
 export interface RoundModifiers {
+  // Iteration 66 (Jamming sweep): can now go NEGATIVE — verified sane at
+  // every read site (effectiveInitiative/byEffectiveInitiative/
+  // fastestAliveInitiative/qualifiesForOutspeed are all plain arithmetic on
+  // this value, no clamping assumed anywhere), so a jammed fleet simply
+  // sorts and outspeed-qualifies as if genuinely slower this round — no
+  // special-casing needed.
   initiativeBonus: number;
   computerBonus: number;
   playerShieldBonus: number; // shield modulator active: +2 shield to all player ships this round
@@ -71,6 +77,30 @@ export interface RoundModifiers {
   // died (dice simply never resolve against a dead target, so no explicit
   // clear is needed — see fireShip's own comment).
   markedEnemyIndex: number | null;
+  // Iteration 66 (fleet doctrine progression): the magnitude of the
+  // markedEnemyIndex bonus above — Exploit weakness sets 2 (unchanged),
+  // Focus fire (the everyone-else, drawback-carrying cousin) sets 1.
+  // Meaningless while markedEnemyIndex is null.
+  markedEnemyBonus: number;
+  // Iteration 66: Focus fire's drawback — a flat computer penalty applied
+  // to player dice landing on any enemy OTHER than markedEnemyIndex. 0 for
+  // Exploit weakness (no drawback, D3) and every other order; only Focus
+  // fire's issueOrder case ever sets this nonzero.
+  markedEnemyOffPenalty: number;
+  // Iteration 66: Patch crews' target — like Brace, fires nothing this
+  // round, but grants no piloting bonus (the ship is healing, not
+  // maneuvering), so it can't reuse bracingShipIndices.
+  heldFireShipIndices: number[];
+  // Iteration 66: Bulwark's target (Brace II) — +2 piloting in ANY phase
+  // (not phase-scoped like Brace's braceBonus) and, unlike Brace, the ship
+  // keeps firing normally — so this deliberately does NOT feed the
+  // fires-nothing checks bracingShipIndices/heldFireShipIndices do.
+  bulwarkShipIndices: number[];
+  // Iteration 66: Focused barrage's target — that ship's dice deal +1
+  // damage this round, folded in wherever weapon.damage is read (same
+  // iteration-62 convergenceBonus rule: before any downstream use/log).
+  // null when no order is armed this round.
+  damageBoostShipIndex: number | null;
   // Iteration 63.3 (Reload drones): armed by ANY one ship's active — the
   // effect itself is fleet-wide ("every ship fires its missiles once
   // more"), so this is a plain flag, not a per-ship list like
@@ -88,17 +118,83 @@ export interface RoundModifiers {
 // primitive both engines called, survives (now in hitRule.ts).
 export type TargetingStance = 'weakest' | 'strongest';
 
-// Iteration 48 (fleet orders): the fixed 3-order menu (4 for the Spymaster,
-// who alone unlocks 'exploit-weakness' — see CombatState.exploitEnabled).
-// Deliberately a closed, always-the-same menu — nothing is drawn, collected,
-// or spent from a deck (iteration 35 removed reaction cards for exactly that
-// reason; orders must not reintroduce the shape under a new name).
-export type FleetOrderId = 'attack-run' | 'evasive-pattern' | 'brace' | 'exploit-weakness';
+// Iteration 48 (fleet orders), rewritten iteration 66 (fleet doctrine
+// progression): the fleet's order menu is no longer a fixed, always-the-same
+// 3/4-order set. RunState.knownOrders tracks which of the ids below this
+// run's fleet has EARNED — via command drafts at 4/8/12 combat wins (see
+// reducer.ts) — and that set only ever grows, permanently, for the rest of
+// the run. The line that still must not be crossed (iteration 35 removed
+// reaction cards for exactly this reason, and orders must not reintroduce
+// the shape under a new name): nothing is drawn, spent, or consumed PER
+// FIGHT — an earned order is a permanent unlock, the menu is fixed within
+// any one fight, and issuing one still only spends a command point, never a
+// card from a hand. 'exploit-weakness' alone stays commander-gated on top of
+// the known-orders check — see CombatState.exploitEnabled.
+export type FleetOrderId =
+  | 'attack-run'
+  | 'evasive-pattern'
+  | 'brace'
+  | 'exploit-weakness'
+  | 'patch-crews'
+  | 'countermeasures'
+  | 'attack-run-2'
+  | 'evasive-pattern-2'
+  | 'focus-fire'
+  | 'jamming-sweep'
+  | 'pd-screen'
+  | 'focused-barrage'
+  | 'all-ahead-full'
+  | 'bulwark';
 
-// The 2 of the 4 orders that pick a ship rather than issuing immediately —
-// shared between CombatScreen's pick-mode state and CombatFleetView's
-// per-side click override, so the two can't drift on which orders need one.
-export type TargetedOrderId = Extract<FleetOrderId, 'brace' | 'exploit-weakness'>;
+// The orders that pick a ship rather than issuing immediately — shared
+// between CombatScreen's pick-mode state and CombatFleetView's per-side
+// click override, so the two can't drift on which orders need one.
+export type TargetedOrderId = Extract<
+  FleetOrderId,
+  'brace' | 'exploit-weakness' | 'patch-crews' | 'focus-fire' | 'focused-barrage' | 'bulwark'
+>;
+
+// New runs start knowing just these two (D2: Brace leaves the default kit,
+// earned back — as Bulwark's stronger legendary form, or itself — through
+// play). Exported so reducer.ts (seeding RunState.knownOrders) and every
+// `state.knownOrders ?? DEFAULT_KNOWN_ORDERS` read site share one constant.
+export const DEFAULT_KNOWN_ORDERS: FleetOrderId[] = ['attack-run', 'evasive-pattern'];
+
+// Which base order id a drafted improvement REPLACES in knownOrders (D4:
+// the two never coexist — Attack run II swaps Attack run out outright, not
+// alongside it). Bulwark is Brace's legendary replacement, not a numbered
+// mark, but follows the identical rule. Consulted by reducer.ts's
+// ORDER_DRAFT_CHOOSE and by the command bar's display filter.
+export const ORDER_REPLACES: Partial<Record<FleetOrderId, FleetOrderId>> = {
+  'attack-run-2': 'attack-run',
+  'evasive-pattern-2': 'evasive-pattern',
+  bulwark: 'brace',
+};
+
+// Rarity of each order, for the draft-offer pools (reducer.ts) and the
+// wiki's catalog table. The rarity-drawback gradient is a design LAW for
+// this catalog (common = clear drawback, rare = slight drawback, epic+ = no
+// drawback) — see plans/iteration-66.md. Attack run/Evasive pattern are the
+// two baseline orders (never themselves drafted — only their II marks are);
+// Exploit weakness is the Spymaster-exclusive epic-tier order granted at
+// commander pick, never offered by a draft (D3) — see reducer.ts's
+// ORDER_DRAFT_POOLS, which deliberately omits it.
+export const ORDER_RARITY: Record<FleetOrderId, Rarity> = {
+  'attack-run': 'common',
+  'evasive-pattern': 'common',
+  brace: 'common',
+  'patch-crews': 'common',
+  countermeasures: 'common',
+  'attack-run-2': 'rare',
+  'evasive-pattern-2': 'rare',
+  'focus-fire': 'rare',
+  'jamming-sweep': 'rare',
+  'pd-screen': 'epic',
+  'focused-barrage': 'epic',
+  'exploit-weakness': 'epic',
+  'all-ahead-full': 'legendary',
+  bulwark: 'legendary',
+};
 
 export interface CombatState {
   seed: number;
@@ -161,6 +257,18 @@ export interface CombatState {
   // (unlike iteration 48's bracingShipIndices, which needed a real bump
   // because `.includes()` throws on undefined at multiple read sites).
   openingComputerBonus: number;
+  // Iteration 66 (fleet doctrine progression): the orders THIS fight's
+  // fleet has earned, set once at initCombat from
+  // CombatOrderOptions.knownOrders and never changed mid-fight. Optional —
+  // deliberately NOT defaulted here (no SAVE_VERSION bump for this
+  // iteration) — every consuming site (canIssueOrder, the command bar)
+  // reads it as `(state.knownOrders ?? DEFAULT_KNOWN_ORDERS)`, so an old
+  // mid-fight save missing this key simply loads as a baseline-kit fleet
+  // for the rest of that one fight. See the iteration-48-lesson comment on
+  // openingComputerBonus above for why this discipline (default-at-every-
+  // read, not default-at-declaration) is required whenever a field is read
+  // with `.includes()` rather than a plain numeric add.
+  knownOrders?: FleetOrderId[];
 }
 
 export interface PlayerFleetInput {
@@ -430,7 +538,21 @@ function fireShip(
     return null;
   }
 
+  // Iteration 66 (Patch crews): the same "fires nothing, stays a legal
+  // target" shape as Brace above, but grants no piloting bonus — the crews
+  // are patching the hull, not maneuvering — so it's a separate list, not a
+  // reuse of bracingShipIndices.
+  if (ship.side === 'player' && roundModifiers.heldFireShipIndices.includes(ship.index)) {
+    return null;
+  }
+
   const weapons = phase === 'missile' ? ship.stats.missiles : ship.stats.cannons;
+
+  // Iteration 66 (Focused barrage): a flat +1 damage per die THIS ship
+  // fires this round, folded in below wherever weapon.damage is read (the
+  // convergenceBonus/exploitBonus precedent: before any downstream use,
+  // including the roll-log push, so the log always shows the real number).
+  const damageBoost = ship.side === 'player' && roundModifiers.damageBoostShipIndex === ship.index ? 1 : 0;
 
   // 2026-08-08: this ship's committed random target for the round, if it
   // has one — every die it fires this round uses the same draw (see
@@ -484,13 +606,27 @@ function fireShip(
       // attackers, symmetric with how the player's own computerBonus
       // (targeting uplink, and iteration 48's Attack run order) only ever
       // applies to player attackers.
-      // Iteration 48 (Exploit weakness): +2 computer, but only for dice
-      // that land on the marked ship specifically — computed per-die (not
-      // once per ship-activation, unlike every other term here) since which
-      // target a die lands on can change activation-to-activation, and even
-      // die-to-die once `target` starts retargeting after a kill.
+      // Iteration 48 (Exploit weakness), generalized iteration 66 (Focus
+      // fire, the everyone-else cousin): the fleet's dice gain
+      // markedEnemyBonus computer, but only for dice that land on the
+      // marked ship specifically — computed per-die (not once per
+      // ship-activation, unlike every other term here) since which target a
+      // die lands on can change activation-to-activation, and even
+      // die-to-die once `target` starts retargeting after a kill. Exploit
+      // weakness sets the bonus to 2 (unchanged); Focus fire sets it to 1.
       const exploitBonus =
-        ship.side === 'player' && roundModifiers.markedEnemyIndex === target.index ? 2 : 0;
+        ship.side === 'player' && roundModifiers.markedEnemyIndex === target.index
+          ? roundModifiers.markedEnemyBonus
+          : 0;
+      // Iteration 66 (Focus fire's drawback): "tunnel vision" — a flat
+      // computer penalty on player dice landing on any enemy OTHER than the
+      // marked one. 0 for Exploit weakness and every order but Focus fire
+      // (markedEnemyOffPenalty only ever set nonzero by its own issueOrder
+      // case), so this is a pure no-op everywhere else.
+      const offMarkPenalty =
+        ship.side === 'player' && roundModifiers.markedEnemyIndex !== null && roundModifiers.markedEnemyIndex !== target.index
+          ? roundModifiers.markedEnemyOffPenalty
+          : 0;
       // Iteration 62: convergenceBonus(round) applies to BOTH sides, folded
       // in here (before every downstream use, including the roll log push
       // below) so the iteration-29 combat-log math shows the boosted number
@@ -498,7 +634,9 @@ function fireShip(
       const attackerComputer =
         ship.stats.computer +
         convergenceBonus(round) +
-        (ship.side === 'player' ? roundModifiers.computerBonus + exploitBonus : -roundModifiers.enemyComputerPenalty);
+        (ship.side === 'player'
+          ? roundModifiers.computerBonus + exploitBonus - offMarkPenalty
+          : -roundModifiers.enemyComputerPenalty);
 
       // Piloting capacitors add bonus piloting only during the missile
       // phase and the first cannon round — gone from round 2 on. The
@@ -528,13 +666,26 @@ function fireShip(
             ? 1
             : 2
           : 0;
+      // Iteration 66 (Bulwark, "Brace but the ship keeps firing"): the same
+      // +2 piloting Brace's cannon-round bonus grants, but NOT phase-scoped
+      // (Bulwark pays no missile-phase discount — it never sits out any
+      // phase in the first place, so there's no "cheap volley" to price
+      // differently) and on a wholly separate list from bracingShipIndices,
+      // since fireShip's own hold-fire check above never consults
+      // bulwarkShipIndices.
+      const bulwarkBonus =
+        target.side === 'player' && roundModifiers.bulwarkShipIndices.includes(target.index) ? 2 : 0;
       // Alpha doctrine (iteration 28): the player's base shield stat is
       // zeroed for the opening exchange — everything else (capacitor,
       // piloting modulator) is additive and still applies on top of that 0.
       const targetBaseShield =
         target.side === 'player' && roundModifiers.playerBaseShieldZeroed ? 0 : target.stats.shield;
       const baseShield =
-        targetBaseShield + (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) + modulatorBonus + braceBonus;
+        targetBaseShield +
+        (capacitorActive ? target.stats.capacitorShield ?? 0 : 0) +
+        modulatorBonus +
+        braceBonus +
+        bulwarkBonus;
       const effectiveShield = Math.max(
         0,
         baseShield - (ship.stats.shieldPierce ?? 0) - (weapon.shieldPierce ?? 0),
@@ -685,7 +836,13 @@ function fireShip(
       const preHitHp = remainingHp(target);
       const executed = hit && weapon.executeAtHp !== undefined && preHitHp <= weapon.executeAtHp;
 
-      let damage = hit ? (executed ? preHitHp : weapon.damage + overchargeBonus) : 0;
+      // Iteration 66 (Focused barrage): damageBoost (hoisted above, once
+      // per shooter) folds in here — before the log push below — so the
+      // roll log always shows the real, boosted number, same rule
+      // convergenceBonus/overchargeBonus already follow. Not applied to an
+      // executed kill (preHitHp is already the ship's full remaining HP;
+      // there's nothing left for +1 to add).
+      let damage = hit ? (executed ? preHitHp : weapon.damage + overchargeBonus + damageBoost) : 0;
       let reactiveSaved = false;
       let ablativeAbsorbed = 0;
 
@@ -791,6 +948,11 @@ function freshRoundModifiers(): RoundModifiers {
     playerBaseShieldZeroed: false, // always recomputed per-round in advanceRound, never carried
     bracingShipIndices: [],
     markedEnemyIndex: null,
+    markedEnemyBonus: 0,
+    markedEnemyOffPenalty: 0,
+    heldFireShipIndices: [],
+    bulwarkShipIndices: [],
+    damageBoostShipIndex: null,
     reloadDronesArmed: false,
   };
 }
@@ -821,6 +983,13 @@ export interface CombatOrderOptions {
   commandPoints?: number;
   exploitEnabled?: boolean;
   openingComputerBonus?: number;
+  // Iteration 66 (fleet doctrine progression): this run's earned order set
+  // (RunState.knownOrders), passed straight through from reducer.ts's
+  // ENGAGE. Undefined for every existing call site (tests, scripts/sim,
+  // EnemyPanel's preview) — CombatState.knownOrders degrades to
+  // DEFAULT_KNOWN_ORDERS at initCombat AND at every later read site (see
+  // that field's own comment).
+  knownOrders?: FleetOrderId[];
 }
 
 export function initCombat(
@@ -878,6 +1047,7 @@ export function initCombat(
     exploitEnabled: !!orderOptions?.exploitEnabled,
     orderThisRound: null,
     openingComputerBonus: orderOptions?.openingComputerBonus ?? 0,
+    knownOrders: orderOptions?.knownOrders ?? DEFAULT_KNOWN_ORDERS,
   };
 }
 
@@ -1155,6 +1325,7 @@ export function advanceRound(state: CombatState): CombatState {
     exploitEnabled: state.exploitEnabled,
     orderThisRound: null, // iteration 48: at most one order arms per round — cleared same as roundModifiers
     openingComputerBonus: state.openingComputerBonus ?? 0,
+    knownOrders: state.knownOrders,
   };
 }
 
@@ -1287,11 +1458,13 @@ export function outgoingFirePreview(state: CombatState): OutgoingFirePreview {
   const entries: OutgoingFire[] = [];
   for (const ship of state.playerShips) {
     if (!isAlive(ship)) continue;
-    // Emergency thrusters / iteration 48's Brace order: this ship sits out
-    // the round entirely — same guards fireShip itself checks before a
-    // player ship ever fires.
+    // Emergency thrusters / iteration 48's Brace order / iteration 66's
+    // Patch crews: this ship sits out the round entirely — same guards
+    // fireShip itself checks before a player ship ever fires. (Bulwark
+    // deliberately has NO entry here — it keeps firing, unlike Brace.)
     if (state.roundModifiers.evadingShipIndices.includes(ship.index)) continue;
     if (state.roundModifiers.bracingShipIndices.includes(ship.index)) continue;
+    if (state.roundModifiers.heldFireShipIndices.includes(ship.index)) continue;
     const weapons = phase === 'missile' ? ship.stats.missiles : ship.stats.cannons;
     if (weapons.length === 0) continue;
     const defenders = legalDefenders(state.enemyShips, state.roundModifiers);
@@ -1322,32 +1495,58 @@ export function setPriorityTarget(state: CombatState, index: number | null): Com
   return { ...state, priorityTargetIndex: valid ? index : null };
 }
 
-// --- Fleet orders (iteration 48): a per-round tactical command layer ------
-// Two stance orders (fleet-wide, no target) and two targeted orders (pick
-// one ship). At most one order armed per round, 1 command point each, no
-// replenishment mid-fight — see CombatState.commandPoints. Orders consume
-// no rng: they're recorded player input, same determinism class as actives
-// and priority targeting. AUTO_RESOLVE/runToEnd never call issueOrder — the
-// established "auto presses no buttons" rule that already covers actives —
-// so every balance-sim number is unaffected by this feature by construction.
+// --- Fleet orders (iteration 48, expanded iteration 66): a per-round -----
+// tactical command layer. Stance orders (fleet-wide, no target) and
+// targeted orders (pick one ship). At most one order armed per round, 1
+// command point each, no replenishment mid-fight — see
+// CombatState.commandPoints. Orders consume no rng: they're recorded player
+// input, same determinism class as actives and priority targeting.
+// AUTO_RESOLVE/runToEnd never call issueOrder — the established "auto
+// presses no buttons" rule that already covers actives — so every
+// balance-sim number is unaffected by this feature by construction.
+// Iteration 66: which orders are actually offered still comes from
+// RunState.knownOrders (checked by canIssueOrder below) — this section only
+// knows how to resolve an order once armed, not which ones a given fleet
+// has earned.
 
-const ORDER_NEEDS_TARGET: Record<FleetOrderId, 'player' | 'enemy' | null> = {
+export const ORDER_NEEDS_TARGET: Record<FleetOrderId, 'player' | 'enemy' | null> = {
   'attack-run': null,
   'evasive-pattern': null,
   brace: 'player',
   'exploit-weakness': 'enemy',
+  'patch-crews': 'player',
+  countermeasures: null,
+  'attack-run-2': null,
+  'evasive-pattern-2': null,
+  'focus-fire': 'enemy',
+  'jamming-sweep': null,
+  'pd-screen': null,
+  'focused-barrage': 'player',
+  'all-ahead-full': null,
+  bulwark: 'player',
 };
 
 export function canIssueOrder(state: CombatState, order: FleetOrderId, targetIndex?: number): boolean {
   if (state.winner) return false;
   if (state.commandPoints <= 0) return false;
   if (state.orderThisRound !== null) return false;
+  // Iteration 66: an order not yet earned this run can never be issued —
+  // same early-return shape as the exploitEnabled gate right below, which
+  // stays a SEPARATE check (exploitEnabled is a commander fact, not a
+  // draft fact — the Spymaster must hold both: exploit-weakness is seeded
+  // into their knownOrders at CHOOSE_COMMANDER AND gated here).
+  if (!(state.knownOrders ?? DEFAULT_KNOWN_ORDERS).includes(order)) return false;
   if (order === 'exploit-weakness' && !state.exploitEnabled) return false;
   const targetSide = ORDER_NEEDS_TARGET[order];
   if (targetSide === null) return true;
   if (targetIndex === undefined) return false;
   const pool = targetSide === 'player' ? state.playerShips : state.enemyShips;
-  return pool.some((s) => s.index === targetIndex && isAlive(s));
+  const target = pool.find((s) => s.index === targetIndex && isAlive(s));
+  if (!target) return false;
+  // Iteration 66 (Patch crews): a no-op heal is refused outright rather
+  // than silently wasting the command point on an already-undamaged ship.
+  if (order === 'patch-crews' && target.damage <= 0) return false;
+  return true;
 }
 
 export function issueOrder(state: CombatState, order: FleetOrderId, targetIndex?: number): CombatState {
@@ -1409,7 +1608,136 @@ export function issueOrder(state: CombatState, order: FleetOrderId, targetIndex?
         commandPoints,
         orderThisRound,
         log: logged(`Order: Exploit weakness — intel marks ${label} (+2 computer against it this round).`),
-        roundModifiers: { ...state.roundModifiers, markedEnemyIndex: targetIndex! },
+        roundModifiers: {
+          ...state.roundModifiers,
+          markedEnemyIndex: targetIndex!,
+          markedEnemyBonus: 2,
+          markedEnemyOffPenalty: 0,
+        },
+      };
+    }
+    case 'patch-crews': {
+      const ship = state.playerShips.find((s) => s.index === targetIndex);
+      const label = ship ? `ship ${ship.index + 1}` : 'the ship';
+      const playerShips = state.playerShips.map((s) =>
+        s.index === targetIndex ? { ...s, damage: Math.max(0, s.damage - 1) } : s,
+      );
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        playerShips,
+        log: logged(`Order: Patch crews — ${label} repairs 1 hull damage and holds fire this round.`),
+        roundModifiers: {
+          ...state.roundModifiers,
+          heldFireShipIndices: [...state.roundModifiers.heldFireShipIndices, targetIndex!],
+        },
+      };
+    }
+    case 'countermeasures':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        flakRemaining: { ...state.flakRemaining, player: state.flakRemaining.player + 1 },
+        log: logged(
+          'Order: Countermeasures — sensors devoted to intercept (+1 flak against this fight’s remaining missiles, −1 computer this round).',
+        ),
+        roundModifiers: { ...state.roundModifiers, computerBonus: state.roundModifiers.computerBonus - 1 },
+      };
+    case 'attack-run-2':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged('Order: Attack run II — the fleet commits hard (+2 computer, −1 piloting this round).'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus + 2,
+          playerShieldBonus: state.roundModifiers.playerShieldBonus - 1,
+        },
+      };
+    case 'evasive-pattern-2':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged('Order: Evasive pattern II — the fleet flies defensively, hard (+2 piloting, −1 computer this round).'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus - 2,
+          playerShieldBonus: state.roundModifiers.playerShieldBonus + 1,
+        },
+      };
+    case 'focus-fire': {
+      const ship = state.enemyShips.find((s) => s.index === targetIndex);
+      const label = ship ? `enemy ${ship.index + 1}` : 'the target';
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged(
+          `Order: Focus fire — the fleet tunnels in on ${label} (+1 computer against it, −1 against every other enemy this round).`,
+        ),
+        roundModifiers: {
+          ...state.roundModifiers,
+          markedEnemyIndex: targetIndex!,
+          markedEnemyBonus: 1,
+          markedEnemyOffPenalty: 1,
+        },
+      };
+    }
+    case 'jamming-sweep':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged('Order: Jamming sweep — wide-band jamming (enemy fleet −1 computer, your fleet −1 initiative this round).'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          enemyComputerPenalty: state.roundModifiers.enemyComputerPenalty + 1,
+          initiativeBonus: state.roundModifiers.initiativeBonus - 1,
+        },
+      };
+    case 'pd-screen':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        flakRemaining: { ...state.flakRemaining, player: state.flakRemaining.player + 3 },
+        log: logged('Order: Point-defense screen — the escorts weave a screen (+3 flak against this fight’s remaining missiles).'),
+      };
+    case 'focused-barrage': {
+      const ship = state.playerShips.find((s) => s.index === targetIndex);
+      const label = ship ? `ship ${ship.index + 1}` : 'the ship';
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged(`Order: Focused barrage — ${label}'s weapons hit harder (+1 damage per die this round).`),
+        roundModifiers: { ...state.roundModifiers, damageBoostShipIndex: targetIndex! },
+      };
+    }
+    case 'all-ahead-full':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged('Order: All ahead full — the whole fleet surges (+1 initiative this round).'),
+        roundModifiers: { ...state.roundModifiers, initiativeBonus: state.roundModifiers.initiativeBonus + 1 },
+      };
+    case 'bulwark': {
+      const ship = state.playerShips.find((s) => s.index === targetIndex);
+      const label = ship ? `ship ${ship.index + 1}` : 'the ship';
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound,
+        log: logged(`Order: Bulwark — ${label} holds the line (+2 piloting this round, any phase) and keeps firing.`),
+        roundModifiers: {
+          ...state.roundModifiers,
+          bulwarkShipIndices: [...state.roundModifiers.bulwarkShipIndices, targetIndex!],
+        },
       };
     }
   }
@@ -1478,7 +1806,104 @@ export function unissueOrder(state: CombatState): CombatState {
         commandPoints,
         orderThisRound: null,
         log: logged('Order cancelled: Exploit weakness.'),
-        roundModifiers: { ...state.roundModifiers, markedEnemyIndex: null },
+        roundModifiers: { ...state.roundModifiers, markedEnemyIndex: null, markedEnemyBonus: 0, markedEnemyOffPenalty: 0 },
+      };
+    case 'patch-crews': {
+      const targetIndex = state.roundModifiers.heldFireShipIndices[0];
+      const playerShips = state.playerShips.map((s) => (s.index === targetIndex ? { ...s, damage: s.damage + 1 } : s));
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        playerShips,
+        log: logged('Order cancelled: Patch crews.'),
+        roundModifiers: { ...state.roundModifiers, heldFireShipIndices: [] },
+      };
+    }
+    case 'countermeasures':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        flakRemaining: { ...state.flakRemaining, player: Math.max(0, state.flakRemaining.player - 1) },
+        log: logged('Order cancelled: Countermeasures.'),
+        roundModifiers: { ...state.roundModifiers, computerBonus: state.roundModifiers.computerBonus + 1 },
+      };
+    case 'attack-run-2':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Attack run II.'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus - 2,
+          playerShieldBonus: state.roundModifiers.playerShieldBonus + 1,
+        },
+      };
+    case 'evasive-pattern-2':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Evasive pattern II.'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          computerBonus: state.roundModifiers.computerBonus + 2,
+          playerShieldBonus: state.roundModifiers.playerShieldBonus - 1,
+        },
+      };
+    case 'focus-fire':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Focus fire.'),
+        roundModifiers: { ...state.roundModifiers, markedEnemyIndex: null, markedEnemyBonus: 0, markedEnemyOffPenalty: 0 },
+      };
+    case 'jamming-sweep':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Jamming sweep.'),
+        roundModifiers: {
+          ...state.roundModifiers,
+          enemyComputerPenalty: state.roundModifiers.enemyComputerPenalty - 1,
+          initiativeBonus: state.roundModifiers.initiativeBonus + 1,
+        },
+      };
+    case 'pd-screen':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        flakRemaining: { ...state.flakRemaining, player: Math.max(0, state.flakRemaining.player - 3) },
+        log: logged('Order cancelled: Point-defense screen.'),
+      };
+    case 'focused-barrage':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Focused barrage.'),
+        roundModifiers: { ...state.roundModifiers, damageBoostShipIndex: null },
+      };
+    case 'all-ahead-full':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: All ahead full.'),
+        roundModifiers: { ...state.roundModifiers, initiativeBonus: state.roundModifiers.initiativeBonus - 1 },
+      };
+    case 'bulwark':
+      return {
+        ...state,
+        commandPoints,
+        orderThisRound: null,
+        log: logged('Order cancelled: Bulwark.'),
+        roundModifiers: { ...state.roundModifiers, bulwarkShipIndices: [] },
       };
   }
 }
