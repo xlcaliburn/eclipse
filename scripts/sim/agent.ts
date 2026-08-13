@@ -14,7 +14,7 @@ import { getFrame, PURCHASABLE_FRAME_IDS } from '../../src/game/frames';
 import { getEvent, meetsRequirement } from '../../src/game/events';
 import { actColumns, bossColumn, getNode, globalColumn, reachableNodes } from '../../src/game/map';
 import type { MapNode } from '../../src/game/map';
-import { COMMODITY_LOT_PART_ID } from '../../src/game/parts';
+import { COMMODITY_LOT_PART_ID, getPart } from '../../src/game/parts';
 import { hasProtocol } from '../../src/game/protocols';
 import {
   canUpgradeMark,
@@ -33,7 +33,7 @@ import {
 } from '../../src/game/reducer';
 import type { RunAction } from '../../src/game/reducer';
 import { mulberry32 } from '../../src/game/rng';
-import { canEquip, deriveStats, upgradeRedundantOn } from '../../src/game/ship';
+import { canEquip, deriveStats, flagshipMissingRequiredParts, upgradeRedundantOn } from '../../src/game/ship';
 import type { PartId, PlayerShipState, RunState } from '../../src/game/types';
 import type { PolicyConfig } from './policy';
 import { COMMANDER_ROUTE_BIAS, DEFAULT_PROTOCOL_INDEX } from './policy';
@@ -186,6 +186,19 @@ function pickNode(state: RunState, config: PolicyConfig, commanderId: CommanderI
   const options = reachableNodes(columns, state.position, shortcuts).filter(
     (n) => !state.fled.some((f) => f.col === n.col && f.row === n.row),
   );
+  // 2026-08-12: an override, not just a score bias, and ahead of the 15%
+  // routing noise below — a non-compliant Flagship (ENGAGE's mandatory-
+  // loadout guard, ship.ts's flagshipMissingRequiredParts) can't fight at
+  // all, so "usually prefer a shop" isn't good enough here the way it is
+  // for every other route decision. Only ever true right after a
+  // flagship recovery (ensureFlagshipCompliance's own comment) — falls
+  // through to normal scoring untouched the rest of the time. If no shop/
+  // shipyard is reachable THIS hop, falls through too; the next visit
+  // still gets first priority via ensureFlagshipCompliance.
+  if (flagshipMissingRequiredParts(state.fleet) !== null) {
+    const shopOption = options.find((n) => n.type === 'shop' || n.type === 'shipyard');
+    if (shopOption) return shopOption;
+  }
   const ratio = damageRatio(state);
   const best = options.reduce((a, b) => (scoreNode(b, ratio, config, commanderId) > scoreNode(a, ratio, config, commanderId) ? b : a), options[0]);
   // Same 15% routing noise the old sim used — a real player doesn't always
@@ -202,6 +215,41 @@ function pickNode(state: RunState, config: PolicyConfig, commanderId: CommanderI
 function canFit(ship: PlayerShipState, partId: PartId, protocols: RunState['protocols'], commanderId: CommanderId | undefined): boolean {
   if (ship.mercenary && partId === COMMODITY_LOT_PART_ID) return false;
   return canEquip(ship.frameId, ship.equipped, partId, ship.upgrades, protocols, commanderId, ship.mark);
+}
+
+// 2026-08-12: the Flagship's STARTING_LOADOUT already carries a computer
+// part and a hull part, so ENGAGE's new mandatory-Flagship-loadout guard
+// (ship.ts's flagshipMissingRequiredParts) is satisfied from the start
+// and stays that way under normal play — the agent never dispatches
+// UNEQUIP/SELL_PART, so it can't strip either slot itself. The one gap:
+// RESOLVE_FLAGSHIP_RECOVERY rebuilds a lost Flagship bare (no loadout at
+// all), and if the very next node the agent picks is combat rather than a
+// shop, ENGAGE gets rejected — confirmed by scripts/sim/agent.test.ts's
+// liveness check (seed 15, admiral, rejected on ENGAGE after a recovery).
+// Run first, every shop visit, before the generic priority list — a no-op
+// once compliant (flagshipMissingRequiredParts returns null), and a no-op
+// at a shipyard too (shopOffers is empty there, nothing to find).
+function ensureFlagshipCompliance(
+  state: RunState,
+  commanderId: CommanderId | undefined,
+  tracker: { count: number; rejected: string | null },
+): RunState {
+  let s = state;
+  const missing = flagshipMissingRequiredParts(s.fleet);
+  if (missing === null) return s;
+  const wantTypes = missing === 'both' ? (['computer', 'hull'] as const) : ([missing] as const);
+  for (const wantType of wantTypes) {
+    const offerIndex = s.shopOffers?.findIndex((id) => getPart(id).type === wantType) ?? -1;
+    if (offerIndex === -1) continue; // none in stock this visit — try again next shop
+    const partId = s.shopOffers![offerIndex];
+    const cost = partCost(partId, commanderId, s.protocols);
+    if (cost > s.credits) continue;
+    const flagshipIndex = s.fleet.findIndex((sh) => sh.frameId === 'cruiser');
+    if (flagshipIndex === -1 || !canFit(s.fleet[flagshipIndex], partId, s.protocols, commanderId)) continue;
+    s = dispatch(s, { type: 'BUY_PART', offerIndex }, tracker);
+    s = dispatch(s, { type: 'EQUIP', shipIndex: flagshipIndex, partId }, tracker);
+  }
+  return s;
 }
 
 function buyAndEquipFromOffers(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
@@ -338,6 +386,10 @@ function buyMercenary(state: RunState, config: PolicyConfig, commanderId: Comman
 // upgrade (59.5, when there's no room to grow) — and repairs.
 function runShop(state: RunState, config: PolicyConfig, commanderId: CommanderId | undefined, tracker: { count: number; rejected: string | null }): RunState {
   let s = sellCommodityLots(state, tracker);
+  // Ahead of everything else — see ensureFlagshipCompliance's own comment.
+  // A no-op on every ordinary visit (already compliant); the one case it
+  // matters is right after a flagship recovery.
+  s = ensureFlagshipCompliance(s, commanderId, tracker);
   if (s.shopKind === 'shipyard') {
     s = buyHull(s, config, commanderId, tracker);
     s = upgradeMark(s, config, commanderId, tracker);

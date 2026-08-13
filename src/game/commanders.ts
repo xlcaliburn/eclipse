@@ -26,7 +26,7 @@ export const COMMANDERS: Record<CommanderId, Commander> = {
     name: 'The Merchant',
     description: 'Money is the doctrine — better prices everywhere, and a fleet that can simply buy its way through.',
     bullets: [
-      'Commodity lots cost 3cr instead of 4cr',
+      'Cargo costs 3cr instead of 4cr',
       'Mercenary hires cost 3cr instead of 5cr',
       '+1 credit on every fight won',
     ],

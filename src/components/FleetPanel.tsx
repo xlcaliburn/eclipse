@@ -193,6 +193,20 @@ export function FleetPanel({
               const budget = powerBudget(ship.frameId, ship.equipped);
               const reactorGen = equippedPowerGen(ship.equipped);
               const emptyAugmentSlots = upgradeCapFor(ship, commanderId) - ship.upgrades.length;
+              // 2026-08-12: the power fraction used to render twice when
+              // this ship's Items section was foldable — once in the fold
+              // summary (visible whether open or closed) and again here
+              // via PowerPipRow the moment you opened it. The summary is
+              // the one that has to stay (it's the only power readout
+              // visible while collapsed), so this block is now skipped
+              // whenever a fold wraps it — kept only for the shop's
+              // always-open layout (collapsibleParts unset), where there
+              // is no summary line to duplicate.
+              const powerRow = (
+                <div className="blueprint__power">
+                  <PowerPipRow used={power} budget={budget} base={budget - reactorGen} />
+                </div>
+              );
               const body = (
                 <>
                   {/* 2026-08-08: always shown now, not just when something's
@@ -206,19 +220,7 @@ export function FleetPanel({
                     onUnequip={(partId) => onUnequip(shipIndex, partId)}
                     unequipBlockReason={(partId) => unequipBlockReason(ship.frameId, ship.equipped, partId)}
                   />
-                  {/* Iteration 57.3, redesigned 60.8: the bolt icon inside
-                      PowerPipRow is unambiguous on its own now, so the
-                      separate "Power" word label is gone — same reasoning
-                      as dropping the pip meter itself (it kept reading as
-                      a second HP bar). Bonus slots (bay/Lone flagship/
-                      Warlord) never grant power — only equipped reactors
-                      do (58.3) — so this budget can exceed the frame's
-                      own flat number; PowerPipRow's `base` prop (2026-08-
-                      12) states that flat number directly instead of a
-                      "(+N from reactors)" delta. */}
-                  <div className="blueprint__power">
-                    <PowerPipRow used={power} budget={budget} base={budget - reactorGen} />
-                  </div>
+                  {!collapsibleParts && powerRow}
                 </>
               );
               if (!collapsibleParts) return body;

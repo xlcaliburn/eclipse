@@ -639,6 +639,28 @@ export function fleetHasOnlyMissiles(fleetStats: ShipStats[]): boolean {
   return anyMissiles && !anyCannons;
 }
 
+// 2026-08-12: the Flagship must carry at least one computer-type part and
+// one hull-type part before the fleet can engage — the same "mandatory
+// baseline loadout" idea fleetHasWeapon already enforces fleet-wide,
+// scoped to the one ship that's always in the run. It's already
+// satisfied from the start (STARTING_LOADOUT is ['ion','ion','comp1',
+// 'injector'] — comp1 is a computer part, injector is a hull part) and
+// stays satisfied unless the player actively unequips both without
+// replacing them, or the Flagship is rebuilt bare after a flagship
+// recovery (RESOLVE_FLAGSHIP_RECOVERY — a fresh hull, no loadout).
+// Returns null when compliant OR when there's no Flagship in the fleet at
+// all (nothing to enforce); otherwise which requirement(s) are missing,
+// for the UI to name specifically rather than a generic "can't engage."
+export function flagshipMissingRequiredParts(fleet: PlayerShipState[]): 'computer' | 'hull' | 'both' | null {
+  const flagship = fleet.find((s) => s.frameId === 'cruiser');
+  if (!flagship) return null;
+  const hasComputer = flagship.equipped.some((id) => getPart(id).type === 'computer');
+  const hasHull = flagship.equipped.some((id) => getPart(id).type === 'hull');
+  if (hasComputer && hasHull) return null;
+  if (!hasComputer && !hasHull) return 'both';
+  return hasComputer ? 'hull' : 'computer';
+}
+
 // 2026-08-08: mercenary escorts are hired outside the fleet cap (see
 // BUY_MERCENARY) and shouldn't count against it once aboard either — a
 // mercenary is a temporary hire, not a commissioned hull. Shared by

@@ -854,7 +854,9 @@ describe('starting hand + missile-phase auto-skip (player feedback)', () => {
     let state: RunState = {
       ...stateWithMap('combat'),
       phase: 'prep',
-      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }], // cannon-only
+      // 2026-08-12: comp1 + injector added — ENGAGE now refuses a Flagship
+      // missing either (flagshipMissingRequiredParts).
+      fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }], // cannon-only
       currentEnemy: GAUNTLET[0], // scout-pack — cannon-only
       currentCombatSeed: 1,
     };
@@ -869,12 +871,62 @@ describe('starting hand + missile-phase auto-skip (player feedback)', () => {
     let state: RunState = {
       ...stateWithMap('combat'),
       phase: 'prep',
-      fleet: [{ frameId: 'cruiser', equipped: ['missile'], damage: 0, upgrades: [] }],
+      // 2026-08-12: comp1 + injector added — see the test above.
+      fleet: [{ frameId: 'cruiser', equipped: ['missile', 'comp1', 'injector'], damage: 0, upgrades: [] }],
       currentEnemy: GAUNTLET[0],
       currentCombatSeed: 1,
     };
     state = runReducer(state, { type: 'ENGAGE' });
     expect(state.combat?.round).toBe(0); // still waiting on the missile phase
+  });
+
+  // 2026-08-12: the Flagship's mandatory computer + hull loadout.
+  it('ENGAGE refuses when the Flagship is missing a computer part, a hull part, or both', () => {
+    const base: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'prep',
+      currentEnemy: GAUNTLET[0],
+      currentCombatSeed: 1,
+      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }], // weapon only — missing both
+    };
+    const missingBoth = runReducer(base, { type: 'ENGAGE' });
+    expect(missingBoth.phase).toBe('prep'); // refused — unchanged
+    expect(missingBoth.combat).toBeUndefined();
+
+    const missingHull = runReducer(
+      { ...base, fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1'], damage: 0, upgrades: [] }] },
+      { type: 'ENGAGE' },
+    );
+    expect(missingHull.phase).toBe('prep');
+
+    const missingComputer = runReducer(
+      { ...base, fleet: [{ frameId: 'cruiser', equipped: ['ion', 'injector'], damage: 0, upgrades: [] }] },
+      { type: 'ENGAGE' },
+    );
+    expect(missingComputer.phase).toBe('prep');
+
+    const compliant = runReducer(
+      { ...base, fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }] },
+      { type: 'ENGAGE' },
+    );
+    expect(compliant.phase).toBe('combat'); // both present — engages normally
+  });
+
+  // A non-Flagship ship missing a computer/hull part is irrelevant — the
+  // rule only ever looks at the Flagship (see flagshipMissingRequiredParts).
+  it('ENGAGE is unaffected by a NON-Flagship ship missing computer/hull parts', () => {
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'prep',
+      currentEnemy: GAUNTLET[0],
+      currentCombatSeed: 1,
+      fleet: [
+        { frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: ['ion'], damage: 0, upgrades: [] }, // no computer/hull — fine, not the Flagship
+      ],
+    };
+    const result = runReducer(state, { type: 'ENGAGE' });
+    expect(result.phase).toBe('combat');
   });
 });
 
@@ -1107,7 +1159,7 @@ describe('flagship recovery (iteration 24)', () => {
     expect(result.phase).not.toBe('flagship-recovery');
   });
 
-  it('RESOLVE_FLAGSHIP_RECOVERY(recover: true) rebuilds the Flagship — fresh loadout, same name and record — and deducts credits', () => {
+  it('RESOLVE_FLAGSHIP_RECOVERY(recover: true) rebuilds the Flagship — baseline computer+hull loadout, no weapons, same name and record — and deducts credits', () => {
     const gated: RunState = {
       ...initialRunState(),
       phase: 'flagship-recovery',
@@ -1122,7 +1174,11 @@ describe('flagship recovery (iteration 24)', () => {
     expect(result.fleet).toHaveLength(2);
     expect(result.fleet[0]).toMatchObject({
       frameId: 'cruiser',
-      equipped: [],
+      // 2026-08-12: no longer a fully empty loadout — comp1 (computer) +
+      // injector (hull) come back with the rebuild so ENGAGE's mandatory-
+      // Flagship-loadout guard is satisfied immediately, not just once a
+      // shop is reached. See the reducer's own comment.
+      equipped: ['comp1', 'injector'],
       damage: 0,
       upgrades: [],
       name: 'ISV Dauntless',
@@ -2262,8 +2318,10 @@ describe('commander effects (iteration 6)', () => {
       commanderId: 'engineer',
       currentEnemy: GAUNTLET[0],
       currentCombatSeed: 1,
+      // 2026-08-12: comp1 + injector added — see engagedState's own
+      // comment above.
       fleet: [
-        { frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [], overRepairBank: 2 },
+        { frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [], overRepairBank: 2 },
       ],
     };
     state = runReducer(state, { type: 'ENGAGE' });
@@ -2945,7 +3003,9 @@ describe('iteration 9.4: targeting doctrine', () => {
     const state: RunState = {
       ...initialRunState(),
       phase: 'prep',
-      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }],
+      // 2026-08-12: comp1 + injector added — see engagedState's own
+      // comment above.
+      fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }],
       currentEnemy: GAUNTLET[0],
       currentCombatSeed: 1,
     };
@@ -2962,7 +3022,9 @@ describe('ISSUE_ORDER (iteration 48, fleet orders)', () => {
     const prepped: RunState = {
       ...initialRunState(),
       phase: 'prep',
-      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }],
+      // 2026-08-12: comp1 (computer) + injector (hull) added — ENGAGE now
+      // refuses a Flagship missing either (flagshipMissingRequiredParts).
+      fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }],
       currentEnemy: GAUNTLET[0],
       currentCombatSeed: 1,
       ...overrides,
@@ -3018,7 +3080,9 @@ describe('Forewarned (iteration 51.1): ENGAGE wires openingComputerBonus', () =>
     const prepped: RunState = {
       ...initialRunState(),
       phase: 'prep',
-      fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }],
+      // 2026-08-12: comp1 (computer) + injector (hull) added — ENGAGE now
+      // refuses a Flagship missing either (flagshipMissingRequiredParts).
+      fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }],
       currentEnemy: GAUNTLET[0],
       currentCombatSeed: 1,
       ...overrides,

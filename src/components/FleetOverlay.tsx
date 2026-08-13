@@ -1,4 +1,5 @@
 import type { CommanderId } from '../game/commanders';
+import { playerOutspeedGap, qualifiesForOutspeed } from '../game/combatEngine';
 import type { CounterProtocolId } from '../game/counterProtocols';
 import { getPart } from '../game/parts';
 import type { ProtocolId } from '../game/protocols';
@@ -6,16 +7,16 @@ import { upgradeCapFor } from '../game/reducer';
 import {
   deriveStats,
   effectiveSlotLayout,
+  equipBlockReason,
   equippedPower,
-  equippedPowerGen,
   formatStatLine,
   playerShipLabel,
   powerBudget,
+  unequipBlockReason,
 } from '../game/ship';
 import type { PartId, PlayerShipState } from '../game/types';
 import { AdaptivePanel } from './AdaptivePanel';
 import { PartCard } from './PartCard';
-import { PowerPipRow } from './PowerPipRow';
 import { CounterProtocolRow, ProtocolRow } from './SettingsScreen';
 import { ShipBlueprint } from './ShipBlueprint';
 import { UpgradeBadgeRow } from './UpgradeBadgeRow';
@@ -31,6 +32,25 @@ interface FleetOverlayProps {
   // decides which. Was two separate exported components.
   isCompact: boolean;
   onClose?: () => void;
+  // 2026-08-12: this overlay is now THE one place equipping happens — the
+  // Prep screen used to have its own separate always-open FleetPanel for
+  // it, and this modal was read-only; that split was the inconsistency
+  // the user asked to remove ("we will always open the modal to do
+  // equipping... let's remove that option from the pre-fight screen").
+  // Both optional and undefined by default so a caller can still show a
+  // genuinely read-only snapshot (App.tsx does this during live combat —
+  // changing the loadout mid-fight wouldn't affect the fight already in
+  // progress, so the option is withheld there rather than offered as a
+  // trap).
+  onEquip?: (shipIndex: number, partId: PartId) => void;
+  onUnequip?: (shipIndex: number, partId: PartId) => void;
+  // 2026-08-12: ported from FleetPanel's Prep-screen card — the ⚡×2 "would
+  // outspeed this enemy" mark. Prep's own fleet panel is gone (equipping
+  // consolidated into this modal), so without this the pre-fight "would
+  // swapping a drive part push me over the outspeed threshold" question
+  // had nowhere to be answered. Undefined outside a phase with a specific
+  // upcoming enemy (App.tsx passes it whenever state.currentEnemy exists).
+  outspeedFastestEnemyInitiative?: number;
 }
 
 // Shared body — the ship cards + inventory grid — factored out so the
@@ -43,7 +63,11 @@ function fleetBody(
   commanderId?: CommanderId,
   protocols?: ProtocolId[],
   counterProtocol?: CounterProtocolId,
+  onEquip?: (shipIndex: number, partId: PartId) => void,
+  onUnequip?: (shipIndex: number, partId: PartId) => void,
+  outspeedFastestEnemyInitiative?: number,
 ) {
+  const outspeedGap = playerOutspeedGap(protocols);
   return (
     <>
       {/* Iteration 29.4: surfaced here too, not just Settings — a player
@@ -62,23 +86,27 @@ function fleetBody(
         // 58.3: powerBudget (innate + any carried reactor's grant) —
         // getFrame(...).power alone would silently hide a reactor's
         // contribution here, same reasoning as FleetPanel's card.
-        // reactorGen recovers the frame's own flat number
-        // (`budget - reactorGen`) for PowerPipRow's `base` prop.
         const budget = powerBudget(ship.frameId, ship.equipped);
-        const reactorGen = equippedPowerGen(ship.equipped);
+        const outspeeding =
+          outspeedFastestEnemyInitiative !== undefined &&
+          qualifiesForOutspeed(stats.initiative, outspeedFastestEnemyInitiative, outspeedGap);
         return (
           <div key={shipIndex} className="ship-card">
             <div className="ship-card__header">
-              <span className="ship-card__name">{playerShipLabel(fleet, shipIndex)}</span>
+              <span className="ship-card__name">
+                {outspeeding && (
+                  <span
+                    className="combat-ship__outspeed-mark"
+                    aria-label="outspeeds the current enemy"
+                    title={`Outspeeds this enemy — init ${stats.initiative} vs their fastest ${outspeedFastestEnemyInitiative}. Strikes twice each round.`}
+                  >
+                    ⚡×2{' '}
+                  </span>
+                )}
+                {playerShipLabel(fleet, shipIndex)}
+              </span>
               <span className="ship-card__stats">{formatStatLine(stats, ship.damage)}</span>
             </div>
-            {/* 2026-08-12: the same collapsed Items fold FleetPanel's prep
-                screen uses — this surface used to render the blueprint,
-                power meter, and augment badges always-open, which is
-                exactly the "item slots and power in the middle of a fight"
-                clutter the fold exists to hide. Read-only here, so no
-                onUnequip: the overlay is for looking at the fleet, and
-                refitting happens on the prep/shop screens. */}
             <details className="parts-fold">
               <summary className="parts-fold__summary">
                 Items
@@ -92,34 +120,71 @@ function fleetBody(
                 upgrades={ship.upgrades}
                 emptySlots={upgradeCapFor(ship, commanderId) - ship.upgrades.length}
               />
-              <ShipBlueprint layout={layout} equipped={ship.equipped} />
-              {/* 60.8: PowerPipRow's bolt icon is unambiguous on its own —
-                  no separate "Power" word label needed (same reasoning as
-                  FleetPanel's card). The frame's own base power (folded
-                  into PowerPipRow as `base`, 2026-08-12) replaces what
-                  used to be a separate "(+N from reactors)" span — same
-                  fact, stated as the hull's structural number instead of
-                  a delta. */}
-              <div className="blueprint__power">
-                <PowerPipRow used={power} budget={budget} base={budget - reactorGen} />
-              </div>
+              <ShipBlueprint
+                layout={layout}
+                equipped={ship.equipped}
+                onUnequip={onUnequip ? (partId) => onUnequip(shipIndex, partId) : undefined}
+                unequipBlockReason={
+                  onUnequip ? (partId) => unequipBlockReason(ship.frameId, ship.equipped, partId) : undefined
+                }
+              />
+              {/* 2026-08-12: install-from-inventory, scoped to THIS ship —
+                  the modal is now the one place equipping happens (see
+                  FleetOverlayProps' own comment), and each ship's own fold
+                  is the natural place to decide what goes on it, rather
+                  than one global inventory list bound to a separately-
+                  tracked "selected ship" (FleetPanel's older pattern).
+                  showPower so a part's power draw is visible right where
+                  the decision to install it gets made — the exact "what
+                  do I need to remove or change" question this exists to
+                  answer. */}
+              {onEquip && inventory.length > 0 && (
+                <>
+                  <p className="parts-fold__install-label hint">Install:</p>
+                  <div className="inventory-grid">
+                    {inventory.map((partId, i) => {
+                      const blockReason = equipBlockReason(
+                        ship.frameId,
+                        ship.equipped,
+                        partId,
+                        ship.upgrades,
+                        protocols,
+                        commanderId,
+                        ship.mark,
+                      );
+                      return (
+                        <PartCard
+                          key={`${partId}-${i}`}
+                          part={getPart(partId)}
+                          onClick={blockReason ? undefined : () => onEquip(shipIndex, partId)}
+                          disabled={!!blockReason}
+                          showPower
+                          title={blockReason ?? undefined}
+                        />
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </details>
           </div>
         );
       })}
 
-      {/* 2026-08-12: same collapsed fold as FleetPanel's prep screen —
-          and, per the declutter pass, an empty inventory renders NOTHING
-          rather than a "No spare parts." hint: an empty section needs no
-          explanation. */}
-      {inventory.length > 0 && (
+      {/* Read-only browse list — only when nothing above already covers
+          "what do I have" (onEquip unset: the read-only combat-time
+          snapshot). Equip-capable callers get the per-ship Install
+          sections above instead; showing the same inventory a second
+          time, unscoped, would just be the power-fraction duplication
+          bug fixed elsewhere this session, again. */}
+      {!onEquip && inventory.length > 0 && (
         <details className="parts-fold parts-fold--inventory">
           <summary className="parts-fold__summary">
             Inventory · {inventory.length} spare part{inventory.length === 1 ? '' : 's'}
           </summary>
           <div className="inventory-grid">
             {inventory.map((partId, i) => (
-              <PartCard key={`${partId}-${i}`} part={getPart(partId)} />
+              <PartCard key={`${partId}-${i}`} part={getPart(partId)} showPower />
             ))}
           </div>
         </details>
@@ -128,12 +193,15 @@ function fleetBody(
   );
 }
 
-// A read-only snapshot of the fleet + inventory, viewable as a popup from
-// the map, a shop, or an event — so the player can check "what do I have"
-// without leaving whatever they're doing. Desktop gets a modal (no tab
-// bar to hold it); mobile (iteration 16.1) gets a full screen, with its
-// own Back button (iteration 35 — dropping the Mission tab removed the tab
-// bar's own way back to it).
+// The one equip surface in the game (2026-08-12) — viewable as a popup
+// from the map, a shop, an event, or the Prep screen, so the player can
+// manage their loadout without a separate always-open panel duplicating
+// this same UI. Desktop gets a modal (no tab bar to hold it); mobile
+// (iteration 16.1) gets a full screen, with its own Back button (iteration
+// 35 — dropping the Mission tab removed the tab bar's own way back to it).
+// Falls back to read-only when onEquip/onUnequip aren't provided — App.tsx
+// uses this during live combat, where a loadout change couldn't affect the
+// fight already in progress.
 export function FleetOverlay({
   fleet,
   inventory,
@@ -142,10 +210,22 @@ export function FleetOverlay({
   counterProtocol,
   isCompact,
   onClose,
+  onEquip,
+  onUnequip,
+  outspeedFastestEnemyInitiative,
 }: FleetOverlayProps) {
   return (
     <AdaptivePanel title="Your fleet" isCompact={isCompact} screenClassName="fleet-screen" onClose={onClose}>
-      {fleetBody(fleet, inventory, commanderId, protocols, counterProtocol)}
+      {fleetBody(
+        fleet,
+        inventory,
+        commanderId,
+        protocols,
+        counterProtocol,
+        onEquip,
+        onUnequip,
+        outspeedFastestEnemyInitiative,
+      )}
     </AdaptivePanel>
   );
 }

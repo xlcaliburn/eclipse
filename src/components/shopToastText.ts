@@ -28,7 +28,7 @@ export function shopToastText(action: RunAction, state: RunState): string | null
       return `${playerShipLabel(state.fleet, action.shipIndex)} upgraded to ${frameDisplayName(ship.frameId, targetMark)}.`;
     }
     case 'BUY_COMMODITY_LOT':
-      return 'Commodity lot bought.';
+      return 'Cargo bought.';
     case 'BUY_MERCENARY':
       return 'Mercenary escort hired.';
     case 'BUY_REPAIR':

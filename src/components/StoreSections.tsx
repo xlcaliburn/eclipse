@@ -108,29 +108,27 @@ export function StoreSections({
       <h3>War assets</h3>
       <div className="shop-screen__offers">
         <div className="card-tile card-tile--deep-scan">
-          <span className="card-tile__name">Commodity lot</span>
+          {/* 2026-08-12: renamed from "Commodity lot" — "Cargo" is the
+              plain word for what this is, and the description now states
+              its one job in one line instead of the old two-sentence
+              explainer. */}
+          <span className="card-tile__name">Cargo</span>
+          <span className="card-tile__desc">Cargo to be sold for {COMMODITY_LOT_SELL_PRICE} cr.</span>
           {lotsCarried > 0 && (
             <span className="card-tile__desc">
-              {lotsCarried} of {lotCap} lot{lotCap === 1 ? '' : 's'} carried.{' '}
-              {commodityLotSellable
-                ? `This station will pay ${COMMODITY_LOT_SELL_PRICE} credits each for whichever are old enough to sell.`
-                : 'Not sellable until a later station.'}
+              {lotsCarried} of {lotCap} carried
+              {commodityLotSellable ? ' — sellable here.' : ' — not sellable until a later station.'}
             </span>
           )}
           {commodityLotSellable && (
             <button type="button" className="shop-button" onClick={onSellCommodityLot}>
-              Sell eligible lot{lotsCarried > 1 ? 's' : ''} (+{COMMODITY_LOT_SELL_PRICE} cr each)
+              Sell eligible ({lotsCarried > 1 ? `+${COMMODITY_LOT_SELL_PRICE} cr each` : `+${COMMODITY_LOT_SELL_PRICE} cr`})
             </button>
           )}
           {canBuyMoreLots && (
-            <>
-              <span className="card-tile__desc">
-                Equip it like a part. Sell for a profit at a later station — lost if the ship carrying it is.
-              </span>
-              <button type="button" className="shop-button" onClick={onBuyCommodityLot} disabled={credits < lotBuyCost}>
-                Buy ({lotBuyCost} cr)
-              </button>
-            </>
+            <button type="button" className="shop-button" onClick={onBuyCommodityLot} disabled={credits < lotBuyCost}>
+              Buy ({lotBuyCost} cr)
+            </button>
           )}
           <span className="frame-card__cost">
             {canBuyMoreLots ? `${lotBuyCost} cr` : `${lotsCarried}/${lotCap} owned`}

@@ -46,6 +46,7 @@ import {
   deriveFleetStats,
   deriveStats,
   everyShipAtUpgradeCap,
+  flagshipMissingRequiredParts,
   fleetHasWeapon,
   playerShipLabel,
   upgradeRedundantOn,
@@ -980,6 +981,9 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'prep' || !state.currentEnemy || state.currentCombatSeed === undefined) return state;
       const fleetStats = deriveFleetStats(state.fleet, state.commanderId, state.protocols);
       if (!fleetHasWeapon(fleetStats)) return state;
+      // 2026-08-12: the Flagship must carry a computer part and a hull
+      // part — see flagshipMissingRequiredParts's own comment.
+      if (flagshipMissingRequiredParts(state.fleet) !== null) return state;
 
       const fleetInput = deriveFleetForCombat(state.fleet, state.commanderId, state.protocols);
       // The combat seed was already drawn (and stored) when this fight was
@@ -1425,12 +1429,21 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         return { ...state, phase: resumePhase, pendingFlagshipRecovery: undefined, flagshipRecoveryResumePhase: undefined };
       }
       if (state.credits < cost) return state; // can't afford — UI should already disable this
-      // Salvage crews rebuild the hull, not what was riding on it: fresh
-      // (empty) loadout, no upgrade — but the same name and combat record,
-      // since it's the same ship, recovered, not a replacement.
+      // Salvage crews rebuild the hull, not what was riding on it: no
+      // upgrade, none of the weapons or extras that were fitted before —
+      // but the same name and combat record, since it's the same ship,
+      // recovered, not a replacement.
+      // 2026-08-12: NOT a fully empty loadout any more. STARTING_LOADOUT's
+      // baseline computer (comp1) and hull (injector) parts come back with
+      // the rebuild — a salvage crew re-hangs the basics a hull can't
+      // function without, same as any new-build Flagship gets; weapons and
+      // anything else earned are still gone. Required now that ENGAGE
+      // itself refuses a Flagship missing either (flagshipMissingRequired-
+      // Parts) — a bare rebuild would otherwise strand the run right after
+      // paying to recover it, unwinnable until reaching a shop.
       const recovered: PlayerShipState = {
         frameId: 'cruiser',
-        equipped: [],
+        equipped: ['comp1', 'injector'],
         damage: 0,
         upgrades: [],
         name: shipName,

@@ -16,6 +16,7 @@ import {
   equipBlockReason,
   equippedPower,
   equippedPowerGen,
+  flagshipMissingRequiredParts,
   powerBudget,
   unequipBlockReason,
   upgradeRedundantOn,
@@ -607,5 +608,38 @@ describe('iteration 61.2 — Emergency Vectoring (the "vectoring" augment)', () 
     expect(withUpgrade(interceptor, 'vectoring').upgrades).toEqual([]);
     const frigate = ship({ frameId: 'frigate' });
     expect(withUpgrade(frigate, 'vectoring').upgrades).toEqual(['vectoring']);
+  });
+});
+
+// 2026-08-12: the Flagship's mandatory loadout — see flagshipMissingRequiredParts's
+// own comment. `ship()` defaults to frameId: 'cruiser', so most cases below
+// don't need to state it explicitly.
+describe('flagshipMissingRequiredParts (mandatory Flagship computer + hull)', () => {
+  it('is null (compliant) with both a computer part and a hull part equipped, in any order', () => {
+    expect(flagshipMissingRequiredParts([ship({ equipped: ['comp1', 'injector'] })])).toBeNull();
+    expect(flagshipMissingRequiredParts([ship({ equipped: ['injector', 'comp1'] })])).toBeNull();
+  });
+
+  it("names which is missing when only one of the two is equipped", () => {
+    expect(flagshipMissingRequiredParts([ship({ equipped: ['comp1'] })])).toBe('hull');
+    expect(flagshipMissingRequiredParts([ship({ equipped: ['injector'] })])).toBe('computer');
+  });
+
+  it("reports 'both' when neither is equipped, even with other parts fitted", () => {
+    expect(flagshipMissingRequiredParts([ship({ equipped: [] })])).toBe('both');
+    expect(flagshipMissingRequiredParts([ship({ equipped: ['ion', 'shield1'] })])).toBe('both');
+  });
+
+  it('is null (nothing to enforce) when the fleet has no Flagship at all', () => {
+    expect(flagshipMissingRequiredParts([ship({ frameId: 'interceptor', equipped: [] })])).toBeNull();
+    expect(flagshipMissingRequiredParts([])).toBeNull();
+  });
+
+  it('only ever looks at the Flagship — other ships missing either part are irrelevant', () => {
+    const fleet = [
+      ship({ equipped: ['comp1', 'injector'] }),
+      ship({ frameId: 'interceptor', equipped: [] }),
+    ];
+    expect(flagshipMissingRequiredParts(fleet)).toBeNull();
   });
 });

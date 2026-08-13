@@ -1680,6 +1680,21 @@ h3 .info-dot,
   padding: 12px 0;
 }
 
+/* 2026-08-12: the glance-only fleet list that replaced the always-open
+   FleetPanel — just enough to confirm who you're bringing before opening
+   the Fleet modal for anything more (equipping now lives there
+   exclusively). */
+.prep-fleet-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.prep-fleet-summary .ship-card {
+  padding: 8px 10px;
+}
+
 @media (max-width: 720px) {
   .prep-screen {
     grid-template-columns: 1fr;
@@ -1816,6 +1831,14 @@ h3 .info-dot,
 
 .parts-fold--inventory {
   margin-top: 12px;
+}
+
+/* 2026-08-12: the per-ship "Install:" label inside FleetOverlay's fold —
+   small and dim, same register as the fold's own summary text, not a
+   heading. */
+.parts-fold__install-label {
+  margin: 10px 0 4px;
+  font-size: 11px;
 }
 
 .parts-fold__summary {

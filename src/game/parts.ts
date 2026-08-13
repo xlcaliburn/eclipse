@@ -746,7 +746,10 @@ export function isSalvageablePart(partId: PartId): boolean {
 
 const COMMODITY_LOT_PART: Part = {
   id: COMMODITY_LOT_PART_ID,
-  name: 'Commodity lot',
+  // 2026-08-12: renamed from "Commodity lot" — "Cargo" is the plain word
+  // for what this is; the id/internal name (commodity-lot, `cargo` the
+  // PartType) are unchanged, this is display text only.
+  name: 'Cargo',
   type: 'cargo',
   rarity: 'common',
   description: 'Bought low, sold high at a later station. Occupies a slot; lost if the carrying ship is.',
@@ -796,7 +799,12 @@ export const CAPTURED_SCHEMATIC_PART_ID: PartId = 'captured-plasma';
 
 const CAPTURED_SCHEMATIC_PART: Part = {
   id: CAPTURED_SCHEMATIC_PART_ID,
-  name: 'Captured plasma cannon',
+  // 2026-08-12: dropped the "Captured" prefix — no other looted/dropped
+  // part in the game gets a special naming convention (a wreck-field
+  // part, a boss reward, an event find — all just use the part's regular
+  // name), so this one shouldn't either. The flavor ("salvaged from an
+  // elite kill") stays in the description.
+  name: 'Plasma cannon',
   type: 'weapon',
   rarity: 'rare',
   description: '1 cannon die, 3 damage. A modified plasma cannon salvaged from an elite kill — never sold.',

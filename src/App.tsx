@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
+import { fastestInitiative } from './game/enemies';
 import { globalColumn } from './game/map';
 import { initialRunState, runReducer } from './game/reducer';
 import type { RunAction } from './game/reducer';
@@ -329,7 +330,9 @@ function App() {
             <MapScreen {...mapProps} onViewFleet={() => setSurface('fleet')} onAbandon={handleAbandon} />
           )}
 
-          {state.phase === 'prep' && <PrepScreen state={state} dispatch={dispatch} />}
+          {state.phase === 'prep' && (
+            <PrepScreen state={state} dispatch={dispatch} onViewFleet={() => setSurface('fleet')} />
+          )}
 
           {state.phase === 'combat' && state.combat && state.currentEnemy && (
             <CombatScreen
@@ -461,6 +464,23 @@ function App() {
           counterProtocol={state.counterProtocol}
           isCompact={isCompact}
           onClose={() => setSurface('mission')}
+          // 2026-08-12: the one equip surface in the game now — withheld
+          // only during live combat (state.combat exists independently of
+          // state.fleet once a fight starts; a mid-fight loadout change
+          // couldn't affect the fight already in progress, so the option
+          // is withheld rather than offered as a no-op trap).
+          onEquip={
+            state.phase === 'combat' ? undefined : (shipIndex, partId) => dispatch({ type: 'EQUIP', shipIndex, partId })
+          }
+          // 2026-08-12: the same ⚡×2 "outspeeds this enemy" mark the old
+          // Prep-screen fleet panel showed — undefined (no mark) once
+          // there's no upcoming enemy to compare against.
+          outspeedFastestEnemyInitiative={state.currentEnemy ? fastestInitiative(state.currentEnemy.groups) : undefined}
+          onUnequip={
+            state.phase === 'combat'
+              ? undefined
+              : (shipIndex, partId) => dispatch({ type: 'UNEQUIP', shipIndex, partId })
+          }
         />
       )}
 

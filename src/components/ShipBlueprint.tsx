@@ -22,7 +22,7 @@ const SLOT_KIND_HINT: Record<SlotKind, string> = {
   weapon: 'Weapons only',
   defense: 'Piloting or hull parts only',
   systems: 'Computer or drive parts only',
-  universal: 'Any part, including a commodity lot',
+  universal: 'Any part, including cargo',
 };
 
 // Greedy left-to-right assignment of equipped parts to sockets, for
