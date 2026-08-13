@@ -30,7 +30,6 @@ import { heatTier, MAX_HEAT } from '../game/heat';
 import { PARTS } from '../game/parts';
 import { PROTOCOLS } from '../game/protocols';
 import type { ProtocolDef } from '../game/protocols';
-import { effectiveSlotLayout, weaponCeiling } from '../game/ship';
 import { UPGRADES } from '../game/upgrades';
 import type { BuildTag, EnemyDef, Part, Rarity, WeaponStats } from '../game/types';
 // Reused straight from the game's own presentation layer — same code-
@@ -427,7 +426,6 @@ export function Wiki() {
                   <th>Power (innate)</th>
                   <th>HP</th>
                   <th>INIT</th>
-                  <th>Weapon cap</th>
                   <th>Innate</th>
                   <th>Notes</th>
                 </tr>
@@ -440,7 +438,6 @@ export function Wiki() {
                       <td className="wiki-hull-name">
                         <FrameSilhouette frameId={f.id} size={28} />
                         {f.name}
-                        {id === 'cruiser' && <span className="wiki-tag">start only</span>}
                       </td>
                       <td className="wiki-nowrap">
                         {id === 'cruiser' ? (
@@ -452,9 +449,12 @@ export function Wiki() {
                       <td className="wiki-num">{f.cost}cr</td>
                       {/* Iteration 52.1: typed slots, not a bare count — the
                           layout itself IS the identity now. `wiki-nowrap`
-                          keeps the chip row on one line (see wiki.css's
-                          duplicated .slot-row for why it needs a forced
-                          `flex-wrap: nowrap` here specifically). */}
+                          keeps the chip column narrow — wiki.css's duplicated
+                          .slot-row wraps the chips onto up to 2 rows (grid,
+                          not flex) instead of forcing every hull's full slot
+                          count onto one line, which is what let the table
+                          need horizontal scroll at all (the 9-slot Titan row
+                          was the widest offender). */}
                       <td className="wiki-nowrap">
                         <SlotRow layout={f.slotLayout} size={18} />
                       </td>
@@ -470,9 +470,12 @@ export function Wiki() {
                       <td className="wiki-num">{f.power}</td>
                       <td className="wiki-num">{f.baseHp}</td>
                       <td className="wiki-num">{f.baseInitiative}</td>
-                      <td className="wiki-num">{weaponCeiling(effectiveSlotLayout(f.id, []))}</td>
                       <td>{f.innate ? `${f.innate.name} — ${f.innate.description}` : '—'}</td>
-                      <td>{f.blurb}</td>
+                      {/* The "start only" tag used to live as a chip next to
+                          the hull name; moved into Notes (below the fold
+                          already for every other row) instead of a chip
+                          fighting the name column for width. */}
+                      <td>{id === 'cruiser' ? `Start only — never sold. ${f.blurb}` : f.blurb}</td>
                     </tr>
                   );
                 })}
@@ -512,6 +515,15 @@ export function Wiki() {
                 </div>
                 <h4>{c.name}</h4>
                 <p>{c.description}</p>
+                {/* 2026-08-13: the wiki is the reference page, so it shows
+                    each commander's full mechanical bullet list — same data
+                    as the commander-select screen's cards, just here for
+                    lookup outside a run. */}
+                <ul className="wiki-commander__bullets">
+                  {c.bullets.map((bullet, i) => (
+                    <li key={i}>{bullet}</li>
+                  ))}
+                </ul>
               </article>
             ))}
           </div>

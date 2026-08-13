@@ -225,10 +225,14 @@ body {
    back to an unstyled inline flow (default-black icons, no chip box, a
    `position: absolute` letter badge with no positioning context to anchor
    to), which is what actually made that column look cramped/jumbled.
-   Duplicated here, same precedent as .silhouette above; `flex-wrap:
-   nowrap` (not styles.css's `wrap`) since this is the wiki's one
-   reference-table use, where each hull's shape reading as one row matters
-   more than fitting a narrow column. */
+   Duplicated here, same precedent as .silhouette above. 2026-08-13: was
+   `flex-wrap: nowrap` (one line per hull, however many slots) — that's what
+   forced the whole table into horizontal scroll, since the 9-slot Titan row
+   set the column width for every other row too. Now a 2-row grid instead:
+   `grid-auto-flow: column` fills top-then-bottom per column, so a hull's
+   chip count just picks its own column count (ceil(n/2)) rather than
+   dictating one shared row width — the widest hull (9 slots) now needs 5
+   columns instead of 9, which is what actually let the table fit. */
 .part-icon {
   fill: currentColor;
   stroke: currentColor;
@@ -237,8 +241,9 @@ body {
 }
 
 .slot-row {
-  display: flex;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-flow: column;
   gap: 4px;
 }
 
@@ -464,6 +469,21 @@ body {
 .wiki-commander p {
   margin: 0;
   font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+/* 2026-08-13: the point-form bonus list, same precedent as
+   styles.css's .commander-card__bullets — left-aligned (ragged-left reads
+   better for a list) even though the rest of the card is centered, and
+   `align-self: stretch` so it doesn't shrink to its own longest line inside
+   the centered flex column. */
+.wiki-commander__bullets {
+  align-self: stretch;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  text-align: left;
+  font-size: 0.76rem;
+  line-height: 1.5;
   color: var(--text-dim);
 }
 

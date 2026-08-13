@@ -14,6 +14,7 @@ import { EventScreen } from './components/EventScreen';
 import { FlagshipRecoveryScreen } from './components/FlagshipRecoveryScreen';
 import { FleetOverlay } from './components/FleetOverlay';
 import { InterludeScreen } from './components/InterludeScreen';
+import { InterludeReinforcementScreen } from './components/InterludeReinforcementScreen';
 import { LandingScreen } from './components/LandingScreen';
 import { MapScreen } from './components/MapScreen';
 import { PrepScreen } from './components/PrepScreen';
@@ -393,6 +394,13 @@ function App() {
               fleet={state.fleet}
               commanderId={state.commanderId}
               onChoose={(shipIndex) => dispatch({ type: 'INTERLUDE_CHOOSE', shipIndex })}
+            />
+          )}
+
+          {state.phase === 'interlude-reinforcement' && state.pendingReinforcementOptions && (
+            <InterludeReinforcementScreen
+              options={state.pendingReinforcementOptions}
+              onChoose={(frameId) => dispatch({ type: 'INTERLUDE_CHOOSE_HULL', frameId })}
             />
           )}
 

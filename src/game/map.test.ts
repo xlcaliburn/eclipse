@@ -264,19 +264,21 @@ describe('act-1 column-3 shop is always reachable (iteration 22.2)', () => {
   });
 });
 
-// Iteration 32.2: FTL's "roundabout path" — 2 seeded shortcuts per map,
-// each skipping exactly one act-2 column.
-describe('act2Shortcuts (iteration 32.2, warp lanes)', () => {
+// Iteration 32.2: FTL's "roundabout path" — seeded shortcuts per map,
+// each normally skipping exactly one act-2 column. Grown 2 -> 3 by
+// iteration 64.2 (one guaranteed in the "hard band", one of the three
+// skipping 2 columns instead of 1).
+describe('act2Shortcuts (iteration 32.2, warp lanes; 64.2 grew 2 -> 3)', () => {
   it('is deterministic for the same seed', () => {
     const mapA = generateMap(17, mulberry32(17));
     const mapB = generateMap(17, mulberry32(17));
     expect(mapA.act2Shortcuts).toEqual(mapB.act2Shortcuts);
   });
 
-  it('every map gets exactly 2 shortcuts, across many seeds', () => {
+  it('every map gets exactly 3 shortcuts, across many seeds', () => {
     for (let seed = 1; seed <= 60; seed++) {
       const map = generateMap(seed, mulberry32(seed));
-      expect(map.act2Shortcuts).toHaveLength(2);
+      expect(map.act2Shortcuts).toHaveLength(3);
     }
   });
 
@@ -285,11 +287,14 @@ describe('act2Shortcuts (iteration 32.2, warp lanes)', () => {
       const map = generateMap(seed, mulberry32(seed));
       const shortcuts = map.act2Shortcuts!;
       for (const s of shortcuts) {
-        // from.col drawn from lane columns 2-8.
+        // from.col drawn from lane columns 2-9 (2-8 for the two original
+        // slots, 8-9 for the 64.2 hard-band slot).
         expect(s.from.col).toBeGreaterThanOrEqual(2);
-        expect(s.from.col).toBeLessThanOrEqual(8);
-        // Skips exactly one column.
-        expect(s.to.col).toBe(s.from.col + 2);
+        expect(s.from.col).toBeLessThanOrEqual(9);
+        // Skips exactly one or two columns (64.2: exactly one shortcut
+        // per map skips two).
+        const skip = s.to.col - s.from.col;
+        expect([2, 3]).toContain(skip);
         // Bends at most one lane.
         expect(Math.abs(s.from.row - s.to.row)).toBeLessThanOrEqual(1);
         // Never departs from or lands on a repair node.
@@ -298,9 +303,36 @@ describe('act2Shortcuts (iteration 32.2, warp lanes)', () => {
         expect(fromNode.type).not.toBe('repair');
         expect(toNode.type).not.toBe('repair');
       }
-      // The two shortcuts' from.col values are at least 2 apart — no
-      // triple-skip corridor.
-      expect(Math.abs(shortcuts[0].from.col - shortcuts[1].from.col)).toBeGreaterThanOrEqual(2);
+      // Every shortcut's from.col is at least 2 apart from every other's —
+      // no triple-skip corridor.
+      for (let i = 0; i < shortcuts.length; i++) {
+        for (let j = i + 1; j < shortcuts.length; j++) {
+          expect(Math.abs(shortcuts[i].from.col - shortcuts[j].from.col)).toBeGreaterThanOrEqual(2);
+        }
+      }
+      // 64.2: exactly one shortcut is guaranteed to spawn in the hard band
+      // (from-col 8-9).
+      const hardBand = shortcuts.filter((s) => s.from.col === 8 || s.from.col === 9);
+      expect(hardBand).toHaveLength(1);
+      // 64.2: exactly one of the three skips 2 columns instead of 1 (the
+      // rng draw picks a slot, but a hard-band double that would overflow
+      // past the boss column silently falls back to a 1-column skip — see
+      // generateAct2Shortcuts's own comment — so this is a <= 1 check, not
+      // an exact-1 guarantee).
+      const doubleSkips = shortcuts.filter((s) => s.to.col - s.from.col === 3);
+      expect(doubleSkips.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('the hard-band shortcut lands at local column 10 or 11 (or the double-skip target when it is the doubled slot)', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const map = generateMap(seed, mulberry32(seed));
+      const hardBand = map.act2Shortcuts!.find((s) => s.from.col === 8 || s.from.col === 9)!;
+      // from-col 8 -> to 10 (skip 1) or 11 (skip 2); from-col 9 -> to 11
+      // (skip 1 only — a skip 2 from 9 would land on 12, the boss slot,
+      // which the generator refuses).
+      expect(hardBand.to.col).toBeGreaterThanOrEqual(10);
+      expect(hardBand.to.col).toBeLessThanOrEqual(11);
     }
   });
 

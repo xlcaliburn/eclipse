@@ -419,10 +419,16 @@ describe('iteration 58.1 — innate power is slots + TIER_INDEX[rarity], except 
       if (frame.id === 'bastion') {
         // Reason: zero systems/universal slots (see frames.ts's own
         // comment) means Bastion can never host a reactor (58.2), so it
-        // keeps its full pre-58 5 rather than the formula's 4 — the one
+        // keeps its full pre-58 5 rather than the formula's value — the one
         // hull that would otherwise have no way to compensate for the cut.
+        // 2026-08-13: Bastion went 3 -> 4 slots (rare-tier parity pass),
+        // which makes `expected` (4 + TIER_INDEX.rare(1) = 5) numerically
+        // equal to the hand-set 5 below — a coincidence of this slot count,
+        // NOT evidence the exception is resolved (still 0 universal/
+        // systems, still can't host a reactor), so no `.not.toBe(expected)`
+        // assertion here anymore — it would just be asserting the
+        // coincidence didn't happen.
         expect(frame.power).toBe(5);
-        expect(frame.power).not.toBe(expected);
       } else if (frame.id === 'cruiser') {
         // Reason: the Flagship's `rarity` field is a placeholder ("never
         // sold... unused but required"), so the formula can't even resolve
@@ -782,10 +788,16 @@ describe('iteration 63.3 — build tags', () => {
 // power, so this block only checks what's new: universal-slot counts and
 // the resulting weapon ceilings.
 describe('iteration 63.4 — restrictive hull layouts', () => {
+  // 2026-08-13: 'freighter' dropped from this list — a later pass (rare-
+  // tier slot-count parity + weaponless reprice, frames.ts's own comment)
+  // changed its TOTAL slot count (5 -> 4) and power (6 -> 5), which breaks
+  // this block's own "only kinds moved, not counts" premise for that one
+  // frame. Its 63.4-era kind-shuffle is still real history, just no longer
+  // checkable via a total-count/power-parity assertion — the frames.ts
+  // comment and frame-specific tests below are the regression coverage now.
   const CHANGED: FrameId[] = [
     'cruiser',
     'light-cruiser',
-    'freighter',
     'derelict',
     'corvette',
     'aegis',
@@ -798,7 +810,6 @@ describe('iteration 63.4 — restrictive hull layouts', () => {
     const oldSlotCounts: Record<string, number> = {
       cruiser: 6,
       'light-cruiser': 4,
-      freighter: 5,
       derelict: 2,
       corvette: 3,
       aegis: 7,
@@ -828,7 +839,6 @@ describe('iteration 63.4 — restrictive hull layouts', () => {
     const oldUniversalCounts: Record<string, number> = {
       cruiser: 4,
       'light-cruiser': 2,
-      freighter: 3,
       derelict: 2,
       corvette: 2,
       aegis: 2,

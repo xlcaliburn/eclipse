@@ -514,8 +514,20 @@ function fireShip(
       // Evasive pattern round + a Brace on your Bastion stack additively —
       // deliberate, same "every layer is additive" rule capacitor/modulator
       // already follow).
+      // 2026-08-13 (player report: "no downside for using during the
+      // missile round"): the missile phase is a one-time volley — often
+      // zero dice for a ship with no missile weapon equipped — while every
+      // cannon round is repeating damage. Bracing before round 0 was
+      // forfeiting little or nothing for the same +2 defensive payoff a
+      // cannon-round brace pays for with real, recurring damage. Phase-
+      // scoped now, same pattern capacitorActive above already uses: +1
+      // during the cheap missile round, +2 during a cannon round.
       const braceBonus =
-        target.side === 'player' && roundModifiers.bracingShipIndices.includes(target.index) ? 2 : 0;
+        target.side === 'player' && roundModifiers.bracingShipIndices.includes(target.index)
+          ? phase === 'missile'
+            ? 1
+            : 2
+          : 0;
       // Alpha doctrine (iteration 28): the player's base shield stat is
       // zeroed for the opening exchange — everything else (capacitor,
       // piloting modulator) is additive and still applies on top of that 0.
@@ -711,7 +723,19 @@ function fireShip(
             log.push({ kind: 'part-effect', text: 'Executioner cannon finishes the job.' });
           }
           if (ablativeAbsorbed > 0) {
-            log.push({ kind: 'part-effect', text: `Ablative coating absorbs ${ablativeAbsorbed} damage.` });
+            // 2026-08-13: was "Ablative coating absorbs..." unconditionally —
+            // stats.ablative sums every source (the Ablative coating part,
+            // Ablative mesh, Titan's innate Ablative plating, the
+            // ablative-plating counter-protocol, AND the Engineer's banked
+            // over-repair) into one pre-combat number with no per-source
+            // tracking, so naming "Ablative coating" specifically was a
+            // false claim whenever the HP actually came from one of the
+            // other sources (a live player hit exactly this: absorbed
+            // damage with none of those parts/protocols equipped). Names
+            // the mechanic instead of any one item — true regardless of
+            // source, and distinct from every real part/innate/protocol
+            // display name above.
+            log.push({ kind: 'part-effect', text: `Ablative HP absorbs ${ablativeAbsorbed} damage.` });
           }
           target.damage += damage;
           if (!isAlive(target)) {
@@ -1360,11 +1384,17 @@ export function issueOrder(state: CombatState, order: FleetOrderId, targetIndex?
     case 'brace': {
       const ship = state.playerShips.find((s) => s.index === targetIndex);
       const label = ship ? `ship ${ship.index + 1}` : 'the ship';
+      // 2026-08-13: the piloting bonus is now phase-scoped (see the
+      // braceBonus comment above) — state.round === 0 is the missile phase
+      // (the round about to resolve when this order is armed), so the log
+      // can state the real number instead of a flat "+2" that's wrong half
+      // the time.
+      const bonus = state.round === 0 ? 1 : 2;
       return {
         ...state,
         commandPoints,
         orderThisRound,
-        log: logged(`Order: Brace — ${label} holds fire and braces (+2 piloting this round).`),
+        log: logged(`Order: Brace — ${label} holds fire and braces (+${bonus} piloting this round).`),
         roundModifiers: {
           ...state.roundModifiers,
           bracingShipIndices: [...state.roundModifiers.bracingShipIndices, targetIndex!],

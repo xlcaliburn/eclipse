@@ -106,6 +106,18 @@ function fleetBody(
                 {playerShipLabel(fleet, shipIndex)}
               </span>
               <span className="ship-card__stats">{formatStatLine(stats, ship.damage)}</span>
+              {/* 2026-08-13: same over-repair-bank visibility as FleetPanel's
+                  ship-card (see its comment) — this modal is the one the
+                  Prep screen actually opens (onViewFleet), so it's the
+                  surface that matters most for catching this before ENGAGE. */}
+              {(ship.overRepairBank ?? 0) > 0 && (
+                <span
+                  className="ship-card__bank"
+                  title={`Over-repair banked ${ship.overRepairBank} temporary HP — absorbs damage first in the next fight only.`}
+                >
+                  +{ship.overRepairBank} banked
+                </span>
+              )}
             </div>
             <details className="parts-fold">
               <summary className="parts-fold__summary">

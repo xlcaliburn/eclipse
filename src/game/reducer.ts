@@ -37,17 +37,17 @@ import type { CargoTag, GameMap, MapPosition } from './map';
 import { CAPTURED_SCHEMATIC_PART_ID, COMMODITY_LOT_PART_ID, isSalvageablePart, PARTS, STARTING_LOADOUT } from './parts';
 import { drawProtocolOffers, hasProtocol } from './protocols';
 import type { ProtocolId } from './protocols';
-import { pickOne, randomSeed, resumeRng, runRng } from './rng';
+import { pickOne, randomSeed, resumeRng, runRng, shuffle } from './rng';
 import type { RngFn } from './rng';
 import {
   applyRepairBanking,
   canEquip,
   canUnequip,
+  commissionedFleetSize,
   deriveFleetForCombat,
   deriveFleetStats,
   deriveStats,
   everyShipAtUpgradeCap,
-  flagshipMissingRequiredParts,
   fleetHasWeapon,
   playerShipLabel,
   upgradeRedundantOn,
@@ -133,6 +133,11 @@ export type RunAction =
   | { type: 'PICK_UPGRADE'; upgradeId: UpgradeId; shipIndex: number }
   | { type: 'LEAVE_REWARD' }
   | { type: 'INTERLUDE_CHOOSE'; shipIndex: number }
+  // Iteration 64.4: resolves the interlude's reinforcement offer — only
+  // legal in the 'interlude-reinforcement' phase (a fleet under 3
+  // commissioned hulls at act-2 entry), `frameId` must be one of the two
+  // seeded options on RunState.pendingReinforcementOptions.
+  | { type: 'INTERLUDE_CHOOSE_HULL'; frameId: Exclude<FrameId, 'cruiser'> }
   // Iteration 28 (Protocols): resolves the act-1 boss's one-time augment
   // draft — `index` picks one of the 3 offers on RunState.protocolOffers.
   | { type: 'PROTOCOL_CHOOSE'; index: 0 | 1 | 2 }
@@ -657,6 +662,24 @@ function randomWreckPart(rng: RngFn): PartId {
   return pickOne(WRECK_FIELD_PART_POOL, rng);
 }
 
+// Iteration 64.4: the interlude reinforcement offer's own pool — every
+// common-tier purchasable frame (the Flagship, 'cruiser', is never
+// purchasable and isn't in this list either way). A free hull replacing a
+// lost one should read as "an ordinary replacement," not a windfall — the
+// same tier a store visit would have sold the player anyway.
+const COMMON_REINFORCEMENT_FRAME_IDS: Exclude<FrameId, 'cruiser'>[] = [
+  'interceptor',
+  'derelict',
+  'corvette',
+  'frigate',
+  'tender',
+  'ew-cutter',
+];
+
+function drawReinforcementOptions(rng: RngFn): Exclude<FrameId, 'cruiser'>[] {
+  return shuffle(COMMON_REINFORCEMENT_FRAME_IDS, rng).slice(0, 2);
+}
+
 // Applies the cargo table's credit adjustment to an already-computed base
 // reward. Patrol/command/untagged pass through unchanged — command's bonus
 // (eliteOrCommandBonus) is wired separately in CONTINUE, not a base-reward
@@ -686,9 +709,16 @@ function repairFleet(
   return { fleet: repaired, totalRepaired };
 }
 
-function repairSummaryText(totalRepaired: number, shipCount: number): string {
-  if (totalRepaired === 0) return 'Your fleet is already at full strength.';
-  return `Repaired ${totalRepaired} damage across ${shipCount} ship${shipCount > 1 ? 's' : ''}.`;
+// 2026-08-13: `bankFlat` echoed here too — the bank itself was already
+// invisible pre-combat (see FleetPanel/FleetOverlay's new badge), but the
+// moment it's actually granted deserves its own confirmation, right in the
+// summary the player already reads after choosing Full repair. Only stated
+// when true: a non-Engineer, non-rapid-drydocks player gets nothing banked,
+// so nothing should claim otherwise.
+function repairSummaryText(totalRepaired: number, shipCount: number, bankFlat: boolean): string {
+  const bankNote = bankFlat ? ' Banked +1 HP for your next fight.' : '';
+  if (totalRepaired === 0) return `Your fleet is already at full strength.${bankNote}`;
+  return `Repaired ${totalRepaired} damage across ${shipCount} ship${shipCount > 1 ? 's' : ''}.${bankNote}`;
 }
 
 
@@ -1009,9 +1039,27 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       if (state.phase !== 'prep' || !state.currentEnemy || state.currentCombatSeed === undefined) return state;
       const fleetStats = deriveFleetStats(state.fleet, state.commanderId, state.protocols);
       if (!fleetHasWeapon(fleetStats)) return state;
-      // 2026-08-12: the Flagship must carry a computer part and a hull
-      // part — see flagshipMissingRequiredParts's own comment.
-      if (flagshipMissingRequiredParts(state.fleet) !== null) return state;
+      // 2026-08-13 (player bug report: "if i'm here and it's telling me i
+      // need specific items i don't have am i just hardstuck? i can't find
+      // a way to go back"): the Flagship's computer+hull requirement used
+      // to BLOCK here. It can't — prep is a one-way door. PICK_NODE is
+      // phase-guarded to 'map', iteration 51 removed withdraw, and mobile's
+      // Map tab is read-only outside the map phase (App.tsx's
+      // `interactive`), so Engage is the only exit. Any prep-blocking
+      // condition the player can't fix in place therefore ENDS the run —
+      // and this one is trivially reachable: move the Flagship's only hull
+      // part (STARTING_LOADOUT's injector) onto another ship and inventory
+      // has no hull part left to put back. 63.4's restrictive Flagship
+      // layout (`W W D S U U`) can even refuse the re-equip outright when
+      // the defense and universal slots are already spoken for.
+      //
+      // Unlike fleetHasWeapon above — a weaponless fleet genuinely cannot
+      // resolve a fight — a Flagship without a computer or hull part is
+      // merely WEAK, which is a choice the player is allowed to make and
+      // lose by. So the rule stays as PrepScreen's advisory warning and
+      // stops gating anything. (RESOLVE_FLAGSHIP_RECOVERY still re-hangs
+      // comp1+injector on a rebuild; that's good UX on its own merits, not
+      // a workaround for this gate — see its own comment.)
 
       const fleetInput = deriveFleetForCombat(state.fleet, state.commanderId, state.protocols);
       // The combat seed was already drawn (and stored) when this fight was
@@ -1376,14 +1424,27 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // kill above (see randomUpgradeIds's comment in upgrades.ts).
       const upgradeId = randomUpgradeIds(1, rng)[0];
       const fleet = mapShip(state.fleet, action.shipIndex, (s) => withUpgrade(s, upgradeId, state.commanderId));
+      // Iteration 64.4: a fleet crossing into act 2 with fewer than 3
+      // commissioned hulls (mercenaries never survive past CONTINUE, so
+      // none can be present here — see commissionedFleetSize's own
+      // comment) gets one more one-time beat before the protocol draft: a
+      // free common-tier hull, seeded 1-of-2, replacing losses the way a
+      // war actually would between campaigns. Drawn from the same
+      // continued rng stream as the upgrade pick above, so this is still
+      // fully deterministic per seed. No credit interaction either way.
+      const reinforcementEligible = commissionedFleetSize(fleet) < 3;
+      const pendingReinforcementOptions = reinforcementEligible ? drawReinforcementOptions(rng) : undefined;
       // Into act 2: a fresh sector — position/visited/fled/fog reset, the
       // boss dossier resets (a second reveal purchase awaits). Iteration
       // 28: the protocol draft (offers already drawn, back at CONTINUE)
       // comes next, not the map directly — it's a second boss-reward step,
-      // not a replacement for this one.
+      // not a replacement for this one. Iteration 64.4: a reinforcement
+      // offer is a THIRD step, inserted here — 'interlude-reinforcement'
+      // instead of 'protocol-draft' when eligible; INTERLUDE_CHOOSE_HULL
+      // (below) advances to 'protocol-draft' once it resolves.
       return {
         ...state,
-        phase: 'protocol-draft',
+        phase: reinforcementEligible ? 'interlude-reinforcement' : 'protocol-draft',
         act: 2,
         fleet,
         position: null,
@@ -1394,6 +1455,31 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         bossRevealed: false,
         heat: 0, // 15.2: crossing the sector border shakes pursuit, same as the fog reset
         rngCounter: nextCounter(),
+        pendingReinforcementOptions,
+      };
+    }
+
+    case 'INTERLUDE_CHOOSE_HULL': {
+      if (state.phase !== 'interlude-reinforcement') return state;
+      if (!state.pendingReinforcementOptions?.includes(action.frameId)) return state;
+      const commissioned = state.shipsCommissioned ?? state.fleet.length;
+      return {
+        ...state,
+        phase: 'protocol-draft',
+        pendingReinforcementOptions: undefined,
+        shipsCommissioned: commissioned + 1,
+        fleet: [
+          ...state.fleet,
+          {
+            frameId: action.frameId,
+            equipped: [...STARTING_FIT[action.frameId]],
+            damage: 0,
+            upgrades: [],
+            name: shipName(state.map.seed, commissioned, action.frameId),
+            kills: 0,
+            fightsSurvived: 0,
+          },
+        ],
       };
     }
 
@@ -1473,10 +1559,11 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       // baseline computer (comp1) and hull (injector) parts come back with
       // the rebuild — a salvage crew re-hangs the basics a hull can't
       // function without, same as any new-build Flagship gets; weapons and
-      // anything else earned are still gone. Required now that ENGAGE
-      // itself refuses a Flagship missing either (flagshipMissingRequired-
-      // Parts) — a bare rebuild would otherwise strand the run right after
-      // paying to recover it, unwinnable until reaching a shop.
+      // anything else earned are still gone. (This was originally required
+      // because ENGAGE refused a Flagship missing either; that gate is gone
+      // as of 2026-08-13 — see ENGAGE's comment — but handing back a hull
+      // you just PAID to recover with nothing hung on it is miserable
+      // regardless, so the behaviour stays on its own merits.)
       const recovered: PlayerShipState = {
         frameId: 'cruiser',
         equipped: ['comp1', 'injector'],
@@ -1541,7 +1628,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // sources that both cap at the same OVER_REPAIR_CAP).
         const bankFlat = state.commanderId === 'engineer' || hasProtocol(state.protocols, 'rapid-drydocks');
         const { fleet, totalRepaired } = repairFleet(state.fleet, bankFlat);
-        return { ...state, fleet, repairSummary: repairSummaryText(totalRepaired, state.fleet.length) };
+        return { ...state, fleet, repairSummary: repairSummaryText(totalRepaired, state.fleet.length, bankFlat) };
       }
 
       // Overhaul: no healing — attach one of the 3 pre-drawn upgrades to a

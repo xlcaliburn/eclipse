@@ -378,6 +378,11 @@ export type Phase =
   | 'repair'
   | 'event'
   | 'interlude'
+  // Iteration 64.4: a one-time follow-on to 'interlude', only ever entered
+  // when the fleet crossed into act 2 with fewer than 3 commissioned hulls
+  // — see RunState.pendingReinforcementOptions and reducer.ts's
+  // INTERLUDE_CHOOSE/INTERLUDE_CHOOSE_HULL.
+  | 'interlude-reinforcement'
   | 'protocol-draft'
   | 'flagship-recovery'
   | 'victory'
@@ -582,4 +587,11 @@ export interface RunState {
   // choice directly, or by a WON fight against derelict-flotilla's ambush
   // (AmbushBonus.chainEffect: 'berth-unlocked').
   bonusFleetBerths?: number;
+  // Iteration 64.4: set by INTERLUDE_CHOOSE the moment it detects the fleet
+  // crossing into act 2 under 3 commissioned hulls — exactly 2 common-tier
+  // frame ids, seeded, the phase becomes 'interlude-reinforcement' until
+  // INTERLUDE_CHOOSE_HULL picks one (arrives with its STARTING_FIT) and
+  // clears this field. One-time per run by construction: the act-1 boss is
+  // only ever beaten once, so INTERLUDE_CHOOSE only ever runs once.
+  pendingReinforcementOptions?: Exclude<FrameId, 'cruiser'>[];
 }

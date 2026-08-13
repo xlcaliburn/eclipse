@@ -72,6 +72,9 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
   PICK_UPGRADE: true,
   LEAVE_REWARD: true,
   INTERLUDE_CHOOSE: true,
+  // Iteration 64.4: the interlude reinforcement offer's resolution — see
+  // the step() 'interlude-reinforcement' case below.
+  INTERLUDE_CHOOSE_HULL: true,
   PROTOCOL_CHOOSE: true,
   RESOLVE_FLAGSHIP_RECOVERY: true,
   BUY_PART: true,
@@ -95,6 +98,19 @@ const HANDLED_ACTIONS: Record<RunAction['type'], true> = {
 };
 void HANDLED_ACTIONS;
 
+// Iteration 64.0: a pure, read-only read of fleet state — never fed back
+// into any decision the agent or the reducer makes (see the run loop's own
+// capture points below, both strictly after the state they describe was
+// already produced by the real reducer). "Fleet value" is frame cost +
+// every equipped part's shop cost, the same yardstick scripts/enemyValue.ts
+// already uses for its "lean"/"rich" reference fleets, so this snapshot can
+// be read directly against those fixtures.
+export interface FleetSnapshot {
+  fleetSize: number;
+  fleetValue: number;
+  credits: number;
+}
+
 export interface AgentRunOutcome {
   seed: number;
   policySeed: number;
@@ -115,6 +131,16 @@ export interface AgentRunOutcome {
   // catch. A real run must never produce this.
   rejectedDispatch: boolean;
   rejectedAction?: string;
+  // Iteration 64.0: null unless this run actually reached act 2 — captured
+  // once, the instant act flips to 2 and the run is about to make its
+  // first act-2 PICK_NODE (after the interlude's upgrade pick and the
+  // protocol draft both resolve, before any act-2 spending or fighting).
+  act2EntrySnapshot: FleetSnapshot | null;
+  // Same shape, captured again the first time the run's position reaches
+  // local column 6 (just past the halfway shipyard) — informational only,
+  // per 64.0's spec; nothing reads this to change any gameplay decision.
+  // Null if the run never reached act 2 or died/won before local col 6.
+  act2Col6Snapshot: FleetSnapshot | null;
 }
 
 const ACTION_CEILING = 5000; // generous — a real run is on the order of 100-300 actions
@@ -142,6 +168,18 @@ function damageRatio(state: RunState): number {
 function flagshipIndex(fleet: PlayerShipState[]): number {
   const i = fleet.findIndex((s) => s.frameId === 'cruiser');
   return i === -1 ? 0 : i;
+}
+
+// Iteration 64.0: pure function of the fleet/credits already sitting on
+// RunState — see FleetSnapshot's own comment for why this is safe to call
+// mid-run without touching determinism.
+function snapshotFleet(state: RunState): FleetSnapshot {
+  const fleetValue = state.fleet.reduce((sum, ship) => {
+    const frameValue = getFrame(ship.frameId).cost;
+    const partsValue = ship.equipped.reduce((n, id) => n + getPart(id).cost, 0);
+    return sum + frameValue + partsValue;
+  }, 0);
+  return { fleetSize: state.fleet.length, fleetValue, credits: state.credits };
 }
 
 // --- Route choice -----------------------------------------------------
@@ -502,6 +540,13 @@ function step(state: RunState, config: PolicyConfig, commanderId: CommanderId | 
       return dispatch(state, { type: 'EVENT_CONTINUE' }, tracker);
     case 'interlude':
       return dispatch(state, { type: 'INTERLUDE_CHOOSE', shipIndex: flagshipIndex(state.fleet) }, tracker);
+    // Iteration 64.4: always takes the first of the two seeded options —
+    // "which specific common hull" isn't a doctrine decision the floor
+    // agent's policy tables model (unlike framePriority for a real
+    // purchase), so a fixed pick keeps this deterministic without adding a
+    // new axis of variation to every archetype's config.
+    case 'interlude-reinforcement':
+      return dispatch(state, { type: 'INTERLUDE_CHOOSE_HULL', frameId: state.pendingReinforcementOptions![0] }, tracker);
     case 'protocol-draft':
       return dispatch(state, { type: 'PROTOCOL_CHOOSE', index: DEFAULT_PROTOCOL_INDEX }, tracker);
     case 'flagship-recovery': {
@@ -547,11 +592,32 @@ export function simulateRunWithAgent(
   const skipped = !!desiredCommanderId && !offeredDesired;
   state = dispatch(state, { type: 'CHOOSE_COMMANDER', commanderId }, tracker);
 
+  // Iteration 64.0: captured once each, the instant their trigger condition
+  // first goes true — see FleetSnapshot's doc comment for exactly which
+  // moment each one reads. Neither is ever consulted by the loop below (or
+  // by anything in reducer.ts); they're pure telemetry on the outcome.
+  let act2EntrySnapshot: FleetSnapshot | null = null;
+  let act2Col6Snapshot: FleetSnapshot | null = null;
+
   while (state.phase !== 'victory' && state.phase !== 'defeat' && tracker.count < ACTION_CEILING && !tracker.rejected) {
     if (state.phase === 'map') {
       state = dispatch(state, pickNodeAction(state, config, commanderId, rng), tracker);
     } else {
       state = step(state, config, commanderId, rng, tracker);
+    }
+    // Entry: the moment act 2's protocol draft has resolved and the run is
+    // sitting in the 'map' phase with no position yet — its very first
+    // act-2 PICK_NODE hasn't been dispatched yet, so this reads the fleet
+    // exactly as the interlude/protocol-draft left it, before a single
+    // act-2 credit is spent or fight fought.
+    if (act2EntrySnapshot === null && state.act === 2 && state.phase === 'map' && state.position === null) {
+      act2EntrySnapshot = snapshotFleet(state);
+    }
+    // Local column 6: captured the instant a PICK_NODE lands the run there
+    // (before that node's own effects resolve) — informational re-read per
+    // 64.0's spec, not a second decision point.
+    if (act2Col6Snapshot === null && state.act === 2 && state.position?.col === 6) {
+      act2Col6Snapshot = snapshotFleet(state);
     }
   }
 
@@ -572,6 +638,8 @@ export function simulateRunWithAgent(
     actionsDispatched: tracker.count,
     rejectedDispatch: tracker.rejected !== null,
     rejectedAction: tracker.rejected ?? undefined,
+    act2EntrySnapshot,
+    act2Col6Snapshot,
   };
 }
 

@@ -163,18 +163,31 @@ export const FRAMES: Record<FrameId, Frame> = {
   bastion: {
     id: 'bastion',
     name: 'Bastion',
-    slotLayout: ['weapon', 'defense', 'defense'],
+    // 2026-08-13: 3 -> 4 slots (added a 3rd defense slot) — brought to
+    // parity with the roster's other rares (Disruptor, Gunboat both sit at
+    // 4). Deliberately NOT a universal/systems slot — see the zero-
+    // universal comment above, which still holds: Bastion still can't host
+    // a reactor, so the flat-power exception's underlying reason is
+    // unchanged (only its arithmetic below happens to now agree with the
+    // formula — that's a coincidence of this slot count, not the exception
+    // resolving itself).
+    slotLayout: ['weapon', 'defense', 'defense', 'defense'],
     baseInitiative: 0,
     baseHp: 6,
     cost: 12,
     rarity: 'rare',
     // Iteration 58.1: Bastion is the ONE frame that deviates from the
-    // `slots + TIER_INDEX[rarity]` formula (which would give 3+1=4) — it
-    // keeps its full pre-58 5, on the same "sealed hull, oversized stock
-    // plant" reasoning that already justifies its zero-universal-slot
-    // exception above: with no systems/universal slots at all, Bastion can
-    // never host a reactor (58.2), so it would otherwise be the one hull
-    // permanently worse off from the innate cut with no way to compensate.
+    // `slots + TIER_INDEX[rarity]` formula — it keeps its full pre-58 5, on
+    // the same "sealed hull, oversized stock plant" reasoning that already
+    // justifies its zero-universal-slot exception above: with no systems/
+    // universal slots at all, Bastion can never host a reactor (58.2), so
+    // it would otherwise be the one hull permanently worse off from the
+    // innate cut with no way to compensate.
+    // 2026-08-13: at 4 slots the formula now gives 4+TIER_INDEX.rare(1)=5 —
+    // the SAME 5 as the hand-set exception value, so this stays a plain
+    // `5` rather than switching to a formula comment; the coincidence
+    // doesn't mean the exception is gone (still 0 universal/systems, still
+    // can't host a reactor), just that the two numbers happen to match now.
     power: 5,
     innate: {
       name: 'Reactive plating',
@@ -241,20 +254,39 @@ export const FRAMES: Record<FrameId, Frame> = {
   // ceiling is genuinely lower: a cargo hull leaning into utility slots,
   // not raw combat), but no longer a strictly-better slot count for less.
   // Iteration 41: 15 -> 18cr, an Ion cannon bundled in (see Bastion's note).
+  // 2026-08-13: 5 -> 4 slots, dedicated weapon slot dropped entirely — user
+  // direction: bring Freighter to the same 4-slot rare parity as Bastion/
+  // Disruptor/Gunboat, and "if anything the freighter should actually be
+  // weaponless and not be stronger than the other ones." It keeps both
+  // universal slots (still the roster's biggest universal share among
+  // rares, its one real remaining edge — a player CAN still socket a
+  // weapon into a universal slot, the hull just no longer arrives with, or
+  // guarantees, one). STARTING_FIT.freighter (reducer/shop.ts) drops its
+  // bundled ion cannon to match — arrives genuinely unarmed now.
+  // Repriced 18 -> 13cr: 18cr was justified against 5 slots plus a bundled
+  // weapon; at 4 slots with no guaranteed weapon and no innate, that
+  // pricing no longer holds up against its rare-tier peers — Disruptor
+  // (13cr, 4 slots, 1 universal, has an innate) and Gunboat (14cr, 4 slots,
+  // 1 universal, 3 dedicated weapons) both out-fight it turn one. Landed on
+  // 13cr, level with Disruptor: Freighter's 2-universal flexibility edge is
+  // real but roughly offsets Disruptor's innate, and neither should price
+  // above Gunboat's guaranteed 3-weapon combat identity. Checked against
+  // `npm run balance` — see that pass's notes for the fixture read.
   freighter: {
     id: 'freighter',
     name: 'Freighter',
     // 63.4: was `W U U U S` (3 of 5 = 60% universal) — trimmed to 2, still
     // keeping a real cargo-runner flexibility edge over the rest of the
     // roster (it's the only hull besides the Sloop with 2+ universal).
-    // Starting fit (ion) still fits: ion->W.
-    slotLayout: ['weapon', 'defense', 'systems', 'universal', 'universal'],
+    // 2026-08-13: dedicated weapon slot removed (see repricing note above)
+    // — 2 universal, 1 defense, 1 systems remain.
+    slotLayout: ['defense', 'systems', 'universal', 'universal'],
     baseInitiative: 0,
     baseHp: 3,
-    cost: 18,
+    cost: 13,
     rarity: 'rare',
-    power: 6, // 58.1: slots(5) + TIER_INDEX.rare(1)
-    blurb: 'Built for freight, not fighting. Arrives fitted with an ion cannon.',
+    power: 5, // 2026-08-13: recomputed for the slot-count drop — slots(4) + TIER_INDEX.rare(1)
+    blurb: 'Built for freight, not fighting — no dedicated weapon slot, arrives unarmed.',
   },
   // Iteration 41: 3 -> 4cr, arrives with a weapon — even the cheapest hull
   // in the yard can throw one punch. 61.3: flipped from light-missile to

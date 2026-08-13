@@ -652,18 +652,19 @@ export function fleetHasOnlyMissiles(fleetStats: ShipStats[]): boolean {
   return anyMissiles && !anyCannons;
 }
 
-// 2026-08-12: the Flagship must carry at least one computer-type part and
-// one hull-type part before the fleet can engage — the same "mandatory
-// baseline loadout" idea fleetHasWeapon already enforces fleet-wide,
-// scoped to the one ship that's always in the run. It's already
-// satisfied from the start (STARTING_LOADOUT is ['ion','ion','comp1',
-// 'injector'] — comp1 is a computer part, injector is a hull part) and
-// stays satisfied unless the player actively unequips both without
-// replacing them, or the Flagship is rebuilt bare after a flagship
-// recovery (RESOLVE_FLAGSHIP_RECOVERY — a fresh hull, no loadout).
-// Returns null when compliant OR when there's no Flagship in the fleet at
-// all (nothing to enforce); otherwise which requirement(s) are missing,
-// for the UI to name specifically rather than a generic "can't engage."
+// Which baseline parts the Flagship is flying without: a computer-type
+// part and a hull-type part. Both are satisfied from the start
+// (STARTING_LOADOUT is ['ion','ion','comp1','injector']) and stay that way
+// unless the player moves them elsewhere or the Flagship is rebuilt after
+// a recovery. Returns null when both are present OR when there's no
+// Flagship in the fleet at all; otherwise which one(s) are absent, so the
+// UI can name them specifically.
+//
+// 2026-08-13: ADVISORY ONLY — this drove a hard ENGAGE block until a
+// player reported the dead end it creates (prep's only exit is Engage, and
+// a player with no hull part anywhere cannot satisfy it in place, so the
+// run simply ends). PrepScreen renders it as a consequence warning now.
+// Do not restore this as a gate; see reducer's ENGAGE comment.
 export function flagshipMissingRequiredParts(fleet: PlayerShipState[]): 'computer' | 'hull' | 'both' | null {
   const flagship = fleet.find((s) => s.frameId === 'cruiser');
   if (!flagship) return null;

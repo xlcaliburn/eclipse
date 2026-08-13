@@ -211,7 +211,17 @@ export function ShopScreen({
                     `equipped` — every slot renders empty, previewing the
                     bare layout, not the starting fit (that's FitChips
                     below). */}
-                <SlotRow layout={frame.slotLayout} />
+                <div className="frame-card__hull-row">
+                  <SlotRow layout={frame.slotLayout} />
+                  {/* 2026-08-13: baseHp wasn't shown anywhere pre-purchase —
+                      slot count and cost were visible before buying, but a
+                      hull's actual toughness wasn't, so there was no way to
+                      compare e.g. Bastion's durability against a Gunboat's
+                      before spending the credits. */}
+                  <span className="frame-card__hp" title="Base hull HP">
+                    {frame.baseHp} HP
+                  </span>
+                </div>
                 {/* Iteration 57.3: the budget alongside the slot layout —
                     "used" is what this hull will actually arrive carrying
                     (STARTING_FIT — 61.1 removed the bonus items that used

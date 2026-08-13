@@ -74,3 +74,16 @@ export function fmtPct(interval: WilsonInterval): string {
   const halfWidth = ((interval.high - interval.low) / 2) * 100;
   return `${pct}%±${halfWidth.toFixed(1)}`;
 }
+
+// Iteration 64.0: nearest-rank percentile over a sorted-in-place copy —
+// used to report the act-2-entry fleet-value/credits distributions as
+// median/p25/p75 rather than a single mean that would hide how wide the
+// spread actually is. `p` is 0-1 (0.5 = median). Returns 0 for an empty
+// sample (a caller-side "no entrants this run" guard, not expected in
+// practice at n=500).
+export function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
+  return sorted[idx];
+}

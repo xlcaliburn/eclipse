@@ -174,6 +174,20 @@ export function FleetPanel({
             </div>
             {/* Iteration 13: same StatBar as the enemy panel and combat cards. */}
             <StatBar stats={stats} damage={ship.damage} />
+            {/* 2026-08-13: the Engineer/rapid-drydocks over-repair bank
+                (ship.ts's applyRepairBanking) was previously invisible until
+                the fight it silently padded — a player reported confusion
+                over "Ablative coating" absorbing damage with no such part
+                equipped, which was actually this. Surfaces the bank right
+                where the player is last looking before ENGAGE clears it. */}
+            {(ship.overRepairBank ?? 0) > 0 && (
+              <span
+                className="ship-card__bank"
+                title={`Over-repair banked ${ship.overRepairBank} temporary HP — absorbs damage first in the next fight only.`}
+              >
+                +{ship.overRepairBank} banked
+              </span>
+            )}
             {/* 2026-08-12: the slot shape, power meter, and augment badges
                 all moved into the Items fold below (see ShipBlueprint). They
                 used to render here unconditionally, which put a full-width

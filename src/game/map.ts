@@ -70,11 +70,12 @@ export interface GameMap {
   act2Columns: MapNode[][];
   act1BossId: BossId; // the existing mid-boss trio
   act2BossId: FinalBossId; // the new final-boss trio
-  // Iteration 32 (FTL's "roundabout path"): 2 seeded edges, each skipping
-  // exactly one column outright (`from.col` to `from.col + 2`) — the
-  // shorter route through act 2. Optional-additive: absent on any
-  // pre-32 save, which every consumer (`reachableNodes`, PICK_NODE, the
-  // renderer) reads as "no shortcuts on this map," identical to how the
+  // Iteration 32 (FTL's "roundabout path"), grown 2 -> 3 by iteration 64.2:
+  // seeded edges, each normally skipping exactly one column outright
+  // (`from.col` to `from.col + 2`, one of the three skipping two columns
+  // instead) — the shorter route through act 2. Optional-additive: absent
+  // on any pre-32 save, which every consumer (`reachableNodes`, PICK_NODE,
+  // the renderer) reads as "no shortcuts on this map," identical to how the
   // route always worked before this iteration.
   act2Shortcuts?: MapShortcut[];
 }
@@ -240,17 +241,36 @@ function generateActColumns(
 // plans/iteration-22.md 22.5).
 const ACT1_PINNED_ROWS: Partial<Record<number, NodeType>> = { 3: 'shop' };
 
-// Iteration 32 (warp lanes, 32.2): 2 seeded shortcuts, each an edge from a
-// node at column `c` to a node at column `c + 2`, skipping `c + 1`
-// entirely. Placement rules straight from the plan:
+// Iteration 32 (warp lanes, 32.2), grown 2 -> 3 by iteration 64.2: seeded
+// shortcuts, each normally an edge from a node at column `c` to a node at
+// column `c + 2`, skipping `c + 1` entirely. Placement rules straight from
+// the plan:
 //   - `from.col` drawn from lane columns 2-8 (never the first couple of
-//     columns, never close enough to the boss to trivialize the approach).
-//   - The two shortcuts' `from.col` values at least 2 apart, so they can
-//     never chain into a triple-skip corridor.
+//     columns, never close enough to the boss to trivialize the approach)
+//     for slots 1-2 below; slot 0 (64.2) is instead guaranteed to draw its
+//     `from.col` from the "hard band", 8-9 — the stretch 64's own survival
+//     table shows as the worst back-half bleed (44-50% per-column losses)
+//     is exactly where a skip is worth the most, and the old generator
+//     could roll both of its shortcuts early and never touch that stretch
+//     at all.
+//   - Every shortcut's `from.col` at least 2 apart from every other's, so
+//     they can never chain into a triple-skip corridor.
 //   - `|from.row - to.row| <= 1` — a warp lane bends at most one lane,
 //     same as a normal edge, so the chart stays readable.
 //   - Never lands on or departs from a repair node — skipping is supposed
 //     to cost resources, not hand a free heal on arrival.
+//   - 64.2: one of the three (seeded, decided before any slot is placed)
+//     skips 2 columns instead of 1 (`c + 3`, not `c + 2`) — "a genuinely
+//     dramatic lane for the run that finds it". Capped back down to a
+//     normal 1-column skip whenever the double would overflow past the
+//     last lane column (`columns.length - 2`, i.e. the boss slot) — the
+//     one relaxation from the spec's literal "landing at 10-11 or the
+//     double-skip target" text: rather than let a doubled hard-band
+//     shortcut warp straight onto the boss node when its from-col rolls 9
+//     (9+3 = 12, the boss slot), it silently falls back to a 1-column skip
+//     in that specific case. The hard-band slot still always exists
+//     (from-col 8 or 9, landing at 10 or 11) either way; only whether IT
+//     specifically is the doubled one is what's capped.
 // Rejection sampling over the rng stream already in hand: each retry just
 // draws more from the same continued stream, so the result is still fully
 // deterministic per seed (same seed -> same number of draws -> same
@@ -261,26 +281,45 @@ const ACT1_PINNED_ROWS: Partial<Record<number, NodeType>> = { 3: 'shop' };
 function generateAct2Shortcuts(columns: MapNode[][], rng: () => number): MapShortcut[] {
   const shortcuts: MapShortcut[] = [];
   const usedFromCols: number[] = [];
-  const MIN_FROM_COL = 2;
-  const MAX_FROM_COL = 8;
-  let attempts = 0;
-  while (shortcuts.length < 2 && attempts < 500) {
-    attempts++;
-    const fromCol = MIN_FROM_COL + Math.floor(rng() * (MAX_FROM_COL - MIN_FROM_COL + 1));
-    if (usedFromCols.some((c) => Math.abs(c - fromCol) < 2)) continue;
-    const toCol = fromCol + 2;
-    const fromColumn = columns[fromCol];
-    const toColumn = columns[toCol];
-    if (!fromColumn || !toColumn) continue;
-    const fromCandidates = fromColumn.filter((n) => n.type !== 'repair');
-    if (fromCandidates.length === 0) continue;
-    const from = fromCandidates[Math.floor(rng() * fromCandidates.length)];
-    const toCandidates = toColumn.filter((n) => n.type !== 'repair' && Math.abs(n.row - from.row) <= 1);
-    if (toCandidates.length === 0) continue;
-    const to = toCandidates[Math.floor(rng() * toCandidates.length)];
-    shortcuts.push({ from: { col: from.col, row: from.row }, to: { col: to.col, row: to.row } });
-    usedFromCols.push(fromCol);
+  // columns includes the trailing boss node (see generateActColumns) — the
+  // last real lane column index is one before that.
+  const lastLaneCol = columns.length - 2;
+  // Which of the 3 shortcut slots (0 = hard band, 1-2 = the original 2-8
+  // range) skips 2 columns instead of 1 — decided once, up front, so every
+  // slot's own placement loop can just consult it.
+  const doubleSkipSlot = Math.floor(rng() * 3);
+
+  function placeSlot(slotIndex: number, minFromCol: number, maxFromCol: number): void {
+    let attempts = 0;
+    while (attempts < 500) {
+      attempts++;
+      const fromCol = minFromCol + Math.floor(rng() * (maxFromCol - minFromCol + 1));
+      if (usedFromCols.some((c) => Math.abs(c - fromCol) < 2)) continue;
+      const wantsDouble = doubleSkipSlot === slotIndex;
+      const skip = wantsDouble && fromCol + 3 <= lastLaneCol ? 3 : 2;
+      const toCol = fromCol + skip;
+      const fromColumn = columns[fromCol];
+      const toColumn = columns[toCol];
+      if (!fromColumn || !toColumn) continue;
+      const fromCandidates = fromColumn.filter((n) => n.type !== 'repair');
+      if (fromCandidates.length === 0) continue;
+      const from = fromCandidates[Math.floor(rng() * fromCandidates.length)];
+      const toCandidates = toColumn.filter((n) => n.type !== 'repair' && Math.abs(n.row - from.row) <= 1);
+      if (toCandidates.length === 0) continue;
+      const to = toCandidates[Math.floor(rng() * toCandidates.length)];
+      shortcuts.push({ from: { col: from.col, row: from.row }, to: { col: to.col, row: to.row } });
+      usedFromCols.push(fromCol);
+      return;
+    }
+    // Unreached in practice at this chart's size (12 lane columns, generous
+    // candidate pools) — defensive only, matching the old function's own
+    // 500-attempt rejection-sampling budget.
   }
+
+  placeSlot(0, 8, 9); // slot 0: the guaranteed hard-band shortcut
+  placeSlot(1, 2, 8); // slot 1: original range, unchanged
+  placeSlot(2, 2, 8); // slot 2: original range, unchanged
+
   return shortcuts;
 }
 

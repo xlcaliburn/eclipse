@@ -732,7 +732,7 @@ describe('passive arsenal (iteration 7)', () => {
     expect(state.enemyShips[0].damage).toBeGreaterThanOrEqual(3);
   });
 
-  it('ablative coating: absorbs damage before real HP and does not persist between fights', () => {
+  it('ablative HP: absorbs damage before real HP and does not persist between fights', () => {
     const fleet = [{ stats: blankStats({ hp: 10, ablative: 2 }), initialDamage: 0 }];
     const foe = enemy({}, { initiative: 5, computer: 10, hp: 20, cannons: [{ diceCount: 1, damage: 2 }] });
     let state = initCombat(fleet, foe, 1);
@@ -746,13 +746,16 @@ describe('passive arsenal (iteration 7)', () => {
     expect(hit).toBe(true);
     expect(state.playerShips[0].damage).toBe(0); // the 2-dmg hit was fully absorbed by the 2-point pool
     expect(state.playerShips[0].ablativeRemaining).toBe(0);
-    expect(state.log.some((e) => e.kind === 'part-effect' && e.text.includes('Ablative coating absorbs'))).toBe(true);
+    // 2026-08-13: wording generalized off "Ablative coating" — see
+    // combatEngine.ts's reasoning at the log.push site. Asserting on
+    // "absorbs" (the mechanic) rather than any one source's name.
+    expect(state.log.some((e) => e.kind === 'part-effect' && e.text.includes('absorbs'))).toBe(true);
 
     const fresh = initCombat(fleet, foe, 1);
     expect(fresh.playerShips[0].ablativeRemaining).toBe(2); // refreshed, not carried over
   });
 
-  it('ablative coating stacks — two parts sum to 4 temporary HP', () => {
+  it('ablative HP stacks — two parts sum to 4 temporary HP', () => {
     const fleet = [{ stats: blankStats({ hp: 10, ablative: 4 }), initialDamage: 0 }];
     const state = initCombat(fleet, enemy(), 1);
     expect(state.playerShips[0].ablativeRemaining).toBe(4);
@@ -2056,6 +2059,18 @@ describe('Fleet orders (iteration 48)', () => {
     const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
     expect(enemyRolls.length).toBeGreaterThan(0);
     expect(enemyRolls.every((e) => e.kind === 'roll' && e.targetIndex === 0)).toBe(true);
+  });
+
+  it('brace: only +1 piloting during the missile phase (down from +2) — the missile round is a one-time volley, not a repeating cost like a cannon round', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { initiative: 8, hp: 5, computer: 0, missiles: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    state = issueOrder(state, 'brace', 0);
+    expect(state.log.some((e) => e.kind === 'part-effect' && e.text.includes('+1 piloting'))).toBe(true);
+    state = advanceRound(state); // round 0 resolves — missile phase
+    const enemyRolls = state.log.filter((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(enemyRolls.length).toBeGreaterThan(0);
+    expect(enemyRolls.every((e) => e.kind === 'roll' && e.shield === 1)).toBe(true); // +1, not +2
   });
 
   it('brace armed before round 0 forfeits that ship\'s missiles too', () => {

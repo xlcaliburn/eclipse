@@ -878,8 +878,8 @@ describe('starting hand + missile-phase auto-skip (player feedback)', () => {
     let state: RunState = {
       ...stateWithMap('combat'),
       phase: 'prep',
-      // 2026-08-12: comp1 + injector added — ENGAGE now refuses a Flagship
-      // missing either (flagshipMissingRequiredParts).
+      // comp1 + injector: a realistic Flagship, not a requirement (ENGAGE
+      // stopped refusing either 2026-08-13).
       fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }], // cannon-only
       currentEnemy: GAUNTLET[0], // scout-pack — cannon-only
       currentCombatSeed: 1,
@@ -904,8 +904,12 @@ describe('starting hand + missile-phase auto-skip (player feedback)', () => {
     expect(state.combat?.round).toBe(0); // still waiting on the missile phase
   });
 
-  // 2026-08-12: the Flagship's mandatory computer + hull loadout.
-  it('ENGAGE refuses when the Flagship is missing a computer part, a hull part, or both', () => {
+  // 2026-08-13 (was: "ENGAGE refuses ..."). The Flagship's computer + hull
+  // loadout is ADVISORY — prep's only exit is Engage, so blocking on a
+  // condition the player may have no part to satisfy ends the run outright.
+  // This is the anti-softlock pin: the button must survive every shape of
+  // stripped Flagship. See reducer's ENGAGE comment for the full reasoning.
+  it('ENGAGE proceeds with a Flagship missing a computer part, a hull part, or both (no dead end)', () => {
     const base: RunState = {
       ...stateWithMap('combat'),
       phase: 'prep',
@@ -914,26 +918,68 @@ describe('starting hand + missile-phase auto-skip (player feedback)', () => {
       fleet: [{ frameId: 'cruiser', equipped: ['ion'], damage: 0, upgrades: [] }], // weapon only — missing both
     };
     const missingBoth = runReducer(base, { type: 'ENGAGE' });
-    expect(missingBoth.phase).toBe('prep'); // refused — unchanged
-    expect(missingBoth.combat).toBeUndefined();
+    expect(missingBoth.phase).toBe('combat');
+    expect(missingBoth.combat).toBeDefined();
 
     const missingHull = runReducer(
       { ...base, fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1'], damage: 0, upgrades: [] }] },
       { type: 'ENGAGE' },
     );
-    expect(missingHull.phase).toBe('prep');
+    expect(missingHull.phase).toBe('combat');
 
     const missingComputer = runReducer(
       { ...base, fleet: [{ frameId: 'cruiser', equipped: ['ion', 'injector'], damage: 0, upgrades: [] }] },
       { type: 'ENGAGE' },
     );
-    expect(missingComputer.phase).toBe('prep');
+    expect(missingComputer.phase).toBe('combat');
 
     const compliant = runReducer(
       { ...base, fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }] },
       { type: 'ENGAGE' },
     );
-    expect(compliant.phase).toBe('combat'); // both present — engages normally
+    expect(compliant.phase).toBe('combat');
+  });
+
+  // The one gate that DOES still block, and why it's safe to: a fleet with
+  // nothing to shoot with cannot resolve a fight at all, and every weapon
+  // the player has ever owned is re-equippable (a weapon always fits a
+  // weapon or universal slot), so this one is always satisfiable in place.
+  it('ENGAGE still refuses a fleet with no weapon anywhere', () => {
+    const state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'prep',
+      currentEnemy: GAUNTLET[0],
+      currentCombatSeed: 1,
+      fleet: [{ frameId: 'cruiser', equipped: ['comp1', 'injector'], damage: 0, upgrades: [] }],
+    };
+    const refused = runReducer(state, { type: 'ENGAGE' });
+    expect(refused.phase).toBe('prep');
+    expect(refused.combat).toBeUndefined();
+  });
+
+  // The exact reported softlock, end to end: the Flagship's only hull part
+  // moves onto a second ship (a normal-looking play — the big new hull
+  // wants the HP), leaving no hull part in inventory to put back. Before
+  // 2026-08-13 this bricked the run at the next combat node.
+  it('a Flagship whose only hull part was moved to another ship can still engage', () => {
+    let state: RunState = {
+      ...stateWithMap('combat'),
+      phase: 'prep',
+      currentEnemy: GAUNTLET[0],
+      currentCombatSeed: 1,
+      fleet: [
+        { frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] },
+        { frameId: 'dreadnought', equipped: ['ion'], damage: 0, upgrades: [] },
+      ],
+      inventory: [],
+    };
+    state = runReducer(state, { type: 'UNEQUIP', shipIndex: 0, partId: 'injector' });
+    state = runReducer(state, { type: 'EQUIP', shipIndex: 1, partId: 'injector' });
+    expect(state.inventory).not.toContain('injector'); // nothing left to put back
+    expect(state.fleet[0].equipped).not.toContain('injector');
+
+    state = runReducer(state, { type: 'ENGAGE' });
+    expect(state.phase).toBe('combat');
   });
 
   // A non-Flagship ship missing a computer/hull part is irrelevant — the
@@ -2838,14 +2884,49 @@ describe('iteration 8/24: the interlude (guaranteed field promotion)', () => {
     return { ...initialRunState(), phase: 'interlude', ...overrides };
   }
 
-  it('attaches exactly one upgrade to the chosen ship, moves into act 2, and opens the protocol draft', () => {
-    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+  it('attaches exactly one upgrade to the chosen ship, moves into act 2, and opens the protocol draft (fleet at/above 3 hulls skips the 64.4 reinforcement offer)', () => {
+    const fleet: PlayerShipState[] = [
+      { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] },
+      { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] },
+    ];
     const result = runReducer(stateAtInterlude({ fleet }), { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
     expect(result.fleet[0].upgrades).toHaveLength(1);
     // Iteration 28: INTERLUDE_CHOOSE no longer lands straight on the map —
     // the boss's second reward (the protocol draft) comes first.
     expect(result.phase).toBe('protocol-draft');
     expect(result.act).toBe(2);
+    expect(result.pendingReinforcementOptions).toBeUndefined();
+  });
+
+  // Iteration 64.4: a fleet under 3 commissioned hulls gets a free
+  // common-tier reinforcement offer before the protocol draft.
+  it('offers a seeded 1-of-2 reinforcement when the fleet crosses into act 2 under 3 commissioned hulls, resolved before the protocol draft', () => {
+    const fleet: PlayerShipState[] = [{ frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] }];
+    const chosen = runReducer(stateAtInterlude({ fleet }), { type: 'INTERLUDE_CHOOSE', shipIndex: 0 });
+    expect(chosen.phase).toBe('interlude-reinforcement');
+    expect(chosen.act).toBe(2); // the act-2 transition already happened
+    expect(chosen.pendingReinforcementOptions).toHaveLength(2);
+    const [optionA, optionB] = chosen.pendingReinforcementOptions!;
+    expect(optionA).not.toBe(optionB);
+
+    // An invalid frameId (not one of the two offered) is refused.
+    const rejected = runReducer(chosen, { type: 'INTERLUDE_CHOOSE_HULL', frameId: 'titan' });
+    expect(rejected).toBe(chosen);
+
+    const resolved = runReducer(chosen, { type: 'INTERLUDE_CHOOSE_HULL', frameId: optionA });
+    expect(resolved.phase).toBe('protocol-draft');
+    expect(resolved.pendingReinforcementOptions).toBeUndefined();
+    expect(resolved.fleet).toHaveLength(2);
+    expect(resolved.fleet[1].frameId).toBe(optionA);
+    expect(resolved.fleet[1].equipped).toEqual(STARTING_FIT[optionA]);
+    expect(resolved.fleet[1].damage).toBe(0);
+  });
+
+  it('refuses INTERLUDE_CHOOSE_HULL outside the interlude-reinforcement phase', () => {
+    const state = { ...initialRunState(), phase: 'map' as const };
+    const result = runReducer(state, { type: 'INTERLUDE_CHOOSE_HULL', frameId: 'interceptor' });
+    expect(result).toBe(state);
   });
 
   it('replaces an existing upgrade rather than stacking (addendum A.4)', () => {
@@ -2872,6 +2953,14 @@ describe('iteration 8/24: the interlude (guaranteed field promotion)', () => {
 
   it('resets position/visited/fled/fog/dossier and lands in act 2 at any act-2 column-0 node', () => {
     const state = stateAtInterlude({
+      // >= 3 commissioned hulls — keeps this fixture's focus on the fog/
+      // position reset, not 64.4's reinforcement offer (covered by its own
+      // test above).
+      fleet: [
+        { frameId: 'cruiser', equipped: [], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] },
+        { frameId: 'interceptor', equipped: [], damage: 0, upgrades: [] },
+      ],
       position: { col: bossColumn(1), row: 0 },
       visited: [{ col: 9, row: 0 }, { col: bossColumn(1), row: 0 }],
       fled: [{ col: 3, row: 1 }],
@@ -3067,8 +3156,8 @@ describe('ISSUE_ORDER (iteration 48, fleet orders)', () => {
     const prepped: RunState = {
       ...initialRunState(),
       phase: 'prep',
-      // 2026-08-12: comp1 (computer) + injector (hull) added — ENGAGE now
-      // refuses a Flagship missing either (flagshipMissingRequiredParts).
+      // comp1 (computer) + injector (hull): a realistic Flagship, not a
+      // requirement — ENGAGE stopped refusing either 2026-08-13.
       fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }],
       currentEnemy: GAUNTLET[0],
       currentCombatSeed: 1,
@@ -3125,8 +3214,8 @@ describe('Forewarned (iteration 51.1): ENGAGE wires openingComputerBonus', () =>
     const prepped: RunState = {
       ...initialRunState(),
       phase: 'prep',
-      // 2026-08-12: comp1 (computer) + injector (hull) added — ENGAGE now
-      // refuses a Flagship missing either (flagshipMissingRequiredParts).
+      // comp1 (computer) + injector (hull): a realistic Flagship, not a
+      // requirement — ENGAGE stopped refusing either 2026-08-13.
       fleet: [{ frameId: 'cruiser', equipped: ['ion', 'comp1', 'injector'], damage: 0, upgrades: [] }],
       currentEnemy: GAUNTLET[0],
       currentCombatSeed: 1,

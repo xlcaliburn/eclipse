@@ -11,12 +11,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { CommanderId } from '../src/game/commanders';
+import { bossColumn, LANE_COLUMNS } from '../src/game/map';
 import { runChecks } from './sim/gates';
 import type { CheckResult } from './sim/gates';
-import { bandGate, regressionGate, wilsonInterval } from './sim/stats';
+import { bandGate, percentile, regressionGate, wilsonInterval } from './sim/stats';
 import type { WilsonInterval } from './sim/stats';
 import { pad, padNum } from './sim/table';
-import type { AgentRunOutcome } from './sim/agent';
+import type { AgentRunOutcome, FleetSnapshot } from './sim/agent';
 import { simulateRunWithAgent } from './sim/agent';
 import { ARCHETYPES } from './sim/policy';
 import type { Archetype } from './sim/budget';
@@ -40,6 +41,80 @@ function runFor(archetype = ARCHETYPES.balanced, commanderId: CommanderId | unde
   return outcomes;
 }
 
+// Iteration 64.0: per-act-2-local-column survival, the standing version of
+// the hand-computed table in plans/iteration-64.md's grounding section —
+// deaths at each local column (0-11, plus the boss) and how many entrants
+// were still alive (i.e. started that column) going in. Pure reporting
+// over AgentRunOutcome.act/.diedAt/.won, already on every outcome — no new
+// instrumentation needed for this table specifically.
+interface Act2SurvivalRow {
+  label: string; // "c0".."c11", "boss"
+  deaths: number;
+  stillAliveAfter: number; // entrants minus every death at or before this column
+}
+
+function computeAct2Survival(outcomes: AgentRunOutcome[]): { rows: Act2SurvivalRow[]; entrants: number } {
+  const reached = outcomes.filter((o) => o.act === 2);
+  const bossLocalCol = bossColumn(2); // 12 — one past the 12 lane columns (0-11)
+  const deathLocalCols = reached.filter((o) => !o.won && o.diedAt).map((o) => o.diedAt!.globalCol - (LANE_COLUMNS + 1));
+  let stillAlive = reached.length;
+  const rows: Act2SurvivalRow[] = [];
+  for (let c = 0; c <= bossLocalCol; c++) {
+    const deaths = deathLocalCols.filter((dc) => dc === c).length;
+    stillAlive -= deaths;
+    rows.push({ label: c === bossLocalCol ? 'boss' : `c${c}`, deaths, stillAliveAfter: stillAlive });
+  }
+  return { rows, entrants: reached.length };
+}
+
+function printAct2Survival(label: string, survival: { rows: Act2SurvivalRow[]; entrants: number }) {
+  console.log(`  act-2 per-local-column survival (${survival.entrants} entrants):`);
+  console.log(`    ${'col'.padEnd(9)}${survival.rows.map((r) => padNum(r.label, 6)).join('')}`);
+  console.log(`    ${'deaths'.padEnd(9)}${survival.rows.map((r) => padNum(String(r.deaths), 6)).join('')}`);
+  console.log(`    ${'alive after'.padEnd(9)}${survival.rows.map((r) => padNum(String(r.stillAliveAfter), 6)).join('')}`);
+  void label;
+}
+
+// Iteration 64.0: act-2-entry (and local-col-6) fleet snapshot, reported as
+// a median/p25/p75 distribution over every run that actually reached the
+// trigger point — a single mean would hide how wide the spread is, which
+// is exactly the question the decision gate in plans/iteration-64.md's
+// 64.0 section is asking.
+interface SnapshotDistribution {
+  n: number;
+  fleetSize: { median: number; p25: number; p75: number };
+  fleetValue: { median: number; p25: number; p75: number };
+  credits: { median: number; p25: number; p75: number };
+}
+
+function summarizeSnapshots(outcomes: AgentRunOutcome[], pick: (o: AgentRunOutcome) => FleetSnapshot | null): SnapshotDistribution {
+  const snaps = outcomes.map(pick).filter((s): s is FleetSnapshot => s !== null);
+  const dist = (values: number[]) => ({
+    median: percentile(values, 0.5),
+    p25: percentile(values, 0.25),
+    p75: percentile(values, 0.75),
+  });
+  return {
+    n: snaps.length,
+    fleetSize: dist(snaps.map((s) => s.fleetSize)),
+    fleetValue: dist(snaps.map((s) => s.fleetValue)),
+    credits: dist(snaps.map((s) => s.credits)),
+  };
+}
+
+function printSnapshotDistribution(label: string, d: SnapshotDistribution) {
+  console.log(`  ${label} (n=${d.n}):`);
+  console.log(
+    `    fleet size:  median ${d.fleetSize.median}  [p25 ${d.fleetSize.p25} - p75 ${d.fleetSize.p75}]`,
+  );
+  console.log(
+    `    fleet value: median ${d.fleetValue.median}cr  [p25 ${d.fleetValue.p25}cr - p75 ${d.fleetValue.p75}cr]`,
+  );
+  console.log(
+    `    credits:     median ${d.credits.median}cr  [p25 ${d.credits.p25}cr - p75 ${d.credits.p75}cr]`,
+  );
+}
+
 interface RunReport {
   label: string;
   fullRunClear: WilsonInterval;
@@ -47,6 +122,9 @@ interface RunReport {
   act2Conditional: WilsonInterval; // won, of those who reached act 2
   deathsByGlobalCol: Map<number, number>;
   n: number;
+  act2Survival: { rows: Act2SurvivalRow[]; entrants: number };
+  act2EntrySnapshot: SnapshotDistribution;
+  act2Col6Snapshot: SnapshotDistribution;
 }
 
 function summarize(label: string, outcomes: AgentRunOutcome[]): RunReport {
@@ -65,6 +143,9 @@ function summarize(label: string, outcomes: AgentRunOutcome[]): RunReport {
     act2Conditional: wilsonInterval(act2Wins, Math.max(1, reachedAct2.length)),
     deathsByGlobalCol,
     n,
+    act2Survival: computeAct2Survival(outcomes),
+    act2EntrySnapshot: summarizeSnapshots(outcomes, (o) => o.act2EntrySnapshot),
+    act2Col6Snapshot: summarizeSnapshots(outcomes, (o) => o.act2Col6Snapshot),
   };
 }
 
@@ -75,6 +156,9 @@ function printReport(r: RunReport) {
   console.log(`  act-2 conditional (of those who reached it): ${(r.act2Conditional.point * 100).toFixed(1)}%`);
   const cols = [...r.deathsByGlobalCol.entries()].sort((a, b) => a[0] - b[0]);
   console.log(`  deaths by global column: ${cols.map(([c, n]) => `c${c}=${n}`).join('  ') || 'none'}`);
+  printAct2Survival(r.label, r.act2Survival);
+  printSnapshotDistribution('act-2 entry snapshot', r.act2EntrySnapshot);
+  printSnapshotDistribution('act-2 local-col-6 snapshot', r.act2Col6Snapshot);
 }
 
 // --- Baseline + commander sweep ------------------------------------------
@@ -133,33 +217,31 @@ if (storedBaseline) {
       'Copy the commander sweep numbers above into that file once they are reviewed as the accepted baseline.',
   );
 }
-// Iteration 46.4: band checks re-anchored to the 30/30 targets (was
-// 50/50 — see plans/iteration-46.md). As of 46.2/46.3's landed levers
-// (Sniper-pair fix, post-win repair, act-1-escalations-retire-at-
-// boundary, hard-pool + final-trio re-tune) act-1 clear reads 11-19%
-// and act-2 conditional/full-run both read a measured 0% — a real,
-// substantial improvement over the pre-46 state (act-1 was 6-13%,
-// act-2 conditional had never once been won) but still short of the
-// 20-40%/20-40%/4-16% target bands. Labeled explicitly as a known,
-// documented gap (not a silent regression) — the compounding math
-// across act 2's ~13 required fights means hitting 30% conditional
-// needs ~90%+ AVERAGE per-fight odds, well above what any individual
-// enemy-stat pass targeted; closing it needs either a broader
-// corridor-shortening pass or a revisited target, not further
-// blind nerfs — see this file's own status notes for the full
-// diagnosis.
+// Iteration 64.1 (re-anchors 46.4, was 30/30/... before that 50/50 — see
+// plans/iteration-46.md for that history): act-1 clear stays in its own
+// 20-40% band, untouched by this pass. Act-2 conditional and full-run are
+// re-anchored here to the CONFIRMED (2026-08-13, D1) 15-25%/2-4% figures —
+// the 46-era 30%/20-40% conditional target is formally retired. 46's own
+// compounding math still holds (act 2 is ~12-13 forced fights in sequence;
+// even a healthy 85% average per-fight win rate only clears ~12% of the
+// time, `0.85^13`), so 30% conditional was never reachable at that fight
+// count without making every individual fight a non-fight (~90%+ average
+// odds). 15-25% is what the math can honestly support once 64.2's shortcuts
+// (and, if built, 64.4's fleet-quality lever) shorten the chain instead of
+// further nerfing any single fight — see plans/iteration-64.md's own status
+// notes for the measured before/after and which lever moved what.
 for (const r of commanderReports) {
   checks.push({
     label: `${r.label}: act-1 clear in the 20-40% target band — KNOWN GAP, see plans/iteration-46.md`,
     verdict: bandGate(r.act1Clear, 20, 40),
   });
   checks.push({
-    label: `${r.label}: act-2 conditional clear in the 20-40% target band — KNOWN GAP, see plans/iteration-46.md`,
-    verdict: bandGate(r.act2Conditional, 20, 40),
+    label: `${r.label}: act-2 conditional clear in the 15-25% target band — see plans/iteration-64.md (D1)`,
+    verdict: bandGate(r.act2Conditional, 15, 25),
   });
   checks.push({
-    label: `${r.label}: full-run clear in the 4-16% target band — KNOWN GAP, see plans/iteration-46.md`,
-    verdict: bandGate(r.fullRunClear, 4, 16),
+    label: `${r.label}: full-run clear in the 2-4% target band — see plans/iteration-64.md (D1)`,
+    verdict: bandGate(r.fullRunClear, 2, 4),
   });
 }
 

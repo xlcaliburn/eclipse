@@ -68,7 +68,11 @@ export const STARTING_FIT: Record<Exclude<FrameId, 'cruiser'>, PartId[]> = {
   // Gauss coils alongside its ion cannon — a real starting stat, not just
   // a bare identity part, matching the Dreadnought's fuller fit above.
   'light-cruiser': ['ion', 'shield1'],
-  freighter: ['ion'],
+  // 2026-08-13: was ['ion'] — frames.ts dropped Freighter's dedicated
+  // weapon slot and its price along with it (see that file's freighter
+  // comment); it now arrives genuinely unarmed rather than pre-fitted, the
+  // player fits it themselves via a universal slot if they want a gun on it.
+  freighter: [],
   derelict: ['ion'],
   corvette: ['ion'],
   // Iteration 52 STAGE (b): the 10 new/revived purchasable hulls' arrival

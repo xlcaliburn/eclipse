@@ -39,7 +39,10 @@ export function PrepScreen({ state, dispatch, onViewFleet }: PrepScreenProps) {
   const outspeedGap = playerOutspeedGap(state.protocols);
 
   const missingFlagshipParts = flagshipMissingRequiredParts(state.fleet);
-  const canEngage = fleetHasWeapon(fleetStats) && missingFlagshipParts === null;
+  // 2026-08-13: the ONLY blocking condition is a fleet that cannot shoot.
+  // Prep is a one-way door (Engage is the sole exit — see reducer's ENGAGE
+  // comment), so anything else that stops the button ends the run outright.
+  const canEngage = fleetHasWeapon(fleetStats);
   const missileOnlyWarning = fleetHasOnlyMissiles(fleetStats);
   // 15.1: state it plainly — the same fog rule that lets the starchart show
   // the glyph already means the player is standing on the node, so there's
@@ -118,15 +121,23 @@ export function PrepScreen({ state, dispatch, onViewFleet }: PrepScreenProps) {
           Engage
         </button>
         {!fleetHasWeapon(fleetStats) && <p className="warning">Equip at least one weapon somewhere in the fleet.</p>}
-        {/* 2026-08-12: the Flagship needs a computer part and a hull part
-            equipped before it can engage — see flagshipMissingRequiredParts's
-            own comment for why. Independent of the weapon check above; both
-            can show at once if the fleet fails both. */}
+        {/* Advisory since 2026-08-13, blocking before that — a Flagship
+            without these is weak, not unplayable, and blocking here strands
+            a player who has no such part to equip (reducer's ENGAGE has the
+            full reasoning). Worded as the consequence, not a requirement,
+            so it doesn't read like something the player must fix first. */}
         {missingFlagshipParts !== null && (
+          /* Still `.warning`, not `.hint`: the missile-only line directly
+             below is the local precedent for a non-blocking warning, and
+             this is worth noticing even though it no longer stops you. */
           <p className="warning">
-            The Flagship needs{' '}
-            {missingFlagshipParts === 'both' ? 'a computer part and a hull part' : `a ${missingFlagshipParts} part`}{' '}
-            equipped.
+            The Flagship has no{' '}
+            {missingFlagshipParts === 'both' ? 'computer or hull part' : `${missingFlagshipParts} part`} equipped
+            {missingFlagshipParts === 'computer'
+              ? " — it will miss often."
+              : missingFlagshipParts === 'hull'
+                ? ' — it will be fragile.'
+                : ' — it will be fragile and miss often.'}
           </p>
         )}
         {canEngage && missileOnlyWarning && (
