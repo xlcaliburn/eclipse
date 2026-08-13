@@ -174,3 +174,16 @@ over 4 cannon rounds; a drive part is a defensible answer to a fast enemy
 and the enemy panel says so; and a player who ignored initiative all
 campaign gets visibly punished for it in act 2 — and can see why in the
 log.
+
+## Status (closed 2026-08-12)
+
+I11-M1 (auto-heal interlude, the option trio, the balance script rearm)
+landed, along with the roster/tuning ground the I8-addendum items
+already covered. I11-M2 (the evasion resolver rule) was never built as
+specced — iteration 17's Outspeed mechanic (a ≥4 initiative gap grants a
+bonus cannon activation) replaced it outright as the answer to "initiative
+feels useless," a different mechanism aimed at the same problem. I11-M3's
+tuning-pass goal is picked back up by iteration 55 (flatten the
+difficulty curve against the wealth curve), which supersedes the specific
+bands proposed here. Closed as a loose end rather than carried forward —
+nothing here is still open work.

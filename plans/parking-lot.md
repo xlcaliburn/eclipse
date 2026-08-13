@@ -1,5 +1,16 @@
 ## Parking lot (discussed, deliberately deferred)
 
+- **Hard round cap with a forced outcome: decided against (2026-08-12,
+  iteration 62).** Considered as one of two fixes for the reported 18+-round
+  stall (the other, fire-control convergence, shipped). A hard cap needs a
+  who-wins-at-the-buzzer adjudication rule that will feel arbitrary no
+  matter how it's written, and with withdraw removed (iteration 51) a forced
+  loss at the cap is brutal with no bail-out available. Convergence solves
+  the same problem (fights functionally resolve by round ~13) without ever
+  needing to declare a winner nobody actually beat. Do not re-propose a hard
+  cap without a materially different adjudication idea that avoids both
+  objections.
+
 - **Ion disruptor cannon + Boarding torpedo** (parked from iteration 42,
   2026-08-07): the two persistent-state weapons out of the original ten
   ("mutate a ship's live stats for the rest of the fight" — a stacking

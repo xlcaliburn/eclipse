@@ -1,7 +1,8 @@
 # Iteration 48 — Fleet orders: a command layer for combat (specced 2026-08-08)
 
 > **Status: 48.1–48.4 implemented and verified (2026-08-08); 48.5's
-> balance re-check is partial — see status notes.** `tsc -b --force`
+> balance re-check closed (2026-08-12), superseded by every
+> `balance:full` pass since — see status notes.** `tsc -b --force`
 > clean and `vitest run` green for every file this iteration touched
 > (701/701 in `src/`, up from 690 — 11 new combatEngine.test.ts cases +
 > 6 new reducer.test.ts cases). `vite build` clean. **Not independently
@@ -448,6 +449,16 @@ combat sub-fields are already validated there).
   "Determinism, auto-resolve, and the balance floor" section). Don't
   read a flat Spymaster line as "the buff did nothing" — it means
   exactly what the plan said it would mean.
+
+**48.5 closed, 2026-08-12 (loose end resolved).** The concurrent
+Foundry/fusion-removal work that clouded this check at the time has long
+since landed; `npm run balance:full` has run cleanly many times since
+(iterations 50, 51, 52, 57, 58, 59, 61 all include a full-suite balance
+pass) with no fleet-orders-attributable anomaly ever surfacing — expected,
+since the argument above (orders are never dispatched by the headless
+floor agent) held regardless of tree state and still holds today. Not
+re-running 48.5 as its own isolated check; it's superseded by that
+accumulated evidence.
 
 ### What was deferred, and why
 

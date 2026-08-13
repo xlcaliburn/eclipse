@@ -14,6 +14,21 @@ const MAX_CANNON_ROUNDS = 30;
 // instead of hardcoding "4" — see `qualifiesForOutspeed`.
 export const OUTSPEED_GAP = 4;
 
+// Iteration 62 (fire-control convergence): playtest report of 18+-round
+// fights where a 0-computer side vs. 2+ piloting hits only on natural 6s
+// forever (no cap on runToEnd, no withdraw since 51.3, orders/actives all
+// spent by round ~4 — pure button-holding). From CONVERGENCE_ONSET_ROUND on,
+// EVERY ship on BOTH sides gains a cumulative +1 computer per round —
+// symmetric (it barely changes who wins a stalled matchup, only how long the
+// coin takes to land), uncapped (the natural-1-always-misses rule keeps the
+// practical hit ceiling at 5/6, so an uncapped ramp can't create a sure
+// thing). Round 0 (the missile phase) can never reach the onset round, so
+// missiles are naturally unaffected — no special-casing needed anywhere.
+export const CONVERGENCE_ONSET_ROUND = 8;
+export function convergenceBonus(round: number): number {
+  return Math.max(0, round - (CONVERGENCE_ONSET_ROUND - 1));
+}
+
 export interface CombatShip {
   side: Side;
   index: number; // index within its own side
@@ -458,8 +473,13 @@ function fireShip(
       // die-to-die once `target` starts retargeting after a kill.
       const exploitBonus =
         ship.side === 'player' && roundModifiers.markedEnemyIndex === target.index ? 2 : 0;
+      // Iteration 62: convergenceBonus(round) applies to BOTH sides, folded
+      // in here (before every downstream use, including the roll log push
+      // below) so the iteration-29 combat-log math shows the boosted number
+      // automatically — no separate display work needed.
       const attackerComputer =
         ship.stats.computer +
+        convergenceBonus(round) +
         (ship.side === 'player' ? roundModifiers.computerBonus + exploitBonus : -roundModifiers.enemyComputerPenalty);
 
       // Piloting capacitors add bonus piloting only during the missile
@@ -880,6 +900,21 @@ export function advanceRound(state: CombatState): CombatState {
 
   log.push({ kind: 'phase-start', phase, round: roundNumber });
 
+  // Iteration 62: one announcement the round convergence first kicks in,
+  // a short tick line on every round after that (the per-roll computer-vs-
+  // piloting math already shows the boosted number — see fireShip — so this
+  // is deliberately just a one-liner, not a restatement of the formula).
+  // roundNumber is never < 0 and convergenceBonus is 0 through round 7, so
+  // this never fires during the missile phase (round 0).
+  if (roundNumber === CONVERGENCE_ONSET_ROUND) {
+    log.push({
+      kind: 'part-effect',
+      text: 'Fire-control convergence — accumulated targeting data grants +1 computer to all ships, growing each round.',
+    });
+  } else if (roundNumber > CONVERGENCE_ONSET_ROUND) {
+    log.push({ kind: 'part-effect', text: `Convergence +${convergenceBonus(roundNumber)}.` });
+  }
+
   const flakState: FlakState = {
     playerRemaining: isMissilePhase ? totalFlak(playerShips) : 0,
     enemyRemaining: isMissilePhase ? totalFlak(enemyShips) : 0,
@@ -994,10 +1029,25 @@ export function advanceRound(state: CombatState): CombatState {
     winner = 'enemy';
   }
 
+  // Iteration 62 (command point regeneration): +1 CP at the start of every
+  // 4th cannon round (4, 8, 12, ...) — computed off the round about to
+  // become current (`nextRound`), not the one just resolved, so "the player
+  // can spend it on round 4's orders" is literally true: by the time this
+  // returned state is what the player next sees (and can issueOrder
+  // against), the regenerated point is already in commandPoints. Uncapped —
+  // convergence bounds fights at ~13 rounds in practice, so a cap rule isn't
+  // worth adding. AUTO_RESOLVE/runToEnd never call issueOrder, so this can't
+  // move the balance-sim floor either way.
+  const nextRound = state.round + 1;
+  const commandPointRegen = nextRound % 4 === 0 ? 1 : 0;
+  if (commandPointRegen > 0) {
+    log.push({ kind: 'part-effect', text: 'Command point regained.' });
+  }
+
   return {
     seed: state.seed,
     rngCounter: state.rngCounter + consumedThisCall(),
-    round: state.round + 1,
+    round: nextRound,
     playerShips,
     enemyShips,
     roundModifiers: freshRoundModifiers(),
@@ -1008,7 +1058,7 @@ export function advanceRound(state: CombatState): CombatState {
     winner: winner ?? undefined,
     playerOutspeedGap: state.playerOutspeedGap,
     alphaDoctrineActive: state.alphaDoctrineActive,
-    commandPoints: state.commandPoints,
+    commandPoints: state.commandPoints + commandPointRegen,
     exploitEnabled: state.exploitEnabled,
     orderThisRound: null, // iteration 48: at most one order arms per round — cleared same as roundModifiers
     openingComputerBonus: state.openingComputerBonus ?? 0,
@@ -1062,6 +1112,15 @@ export interface FirePreview {
   flakCancels: number; // missile phase only: the fleet's flak downs this many dice first
 }
 
+// Iteration 62: this preview's `diceCount`/`maxDamage` are, and were already,
+// hit-chance-agnostic — an upper bound assuming every previewed die hits for
+// its full listed damage (see FirePreview's own doc comment), never derived
+// from computer/piloting at all. convergenceBonus(round) therefore has
+// nothing to fold in here: there's no computer-derived number in this
+// preview's output that could go stale. What DOES need to hold is target
+// selection staying identical to what fireShip will actually roll against
+// post-onset (the telegraph's real honesty promise) — pinned by a parity
+// test at a post-onset round, same shape as the pre-62 telegraph tests below.
 export function incomingFirePreview(state: CombatState): FirePreview {
   const phase: 'missile' | 'cannon' = state.round === 0 ? 'missile' : 'cannon';
   const outspeedingEnemies =

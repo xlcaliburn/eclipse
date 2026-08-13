@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { outspeedingShipIndices } from '../game/combatEngine';
+import { CONVERGENCE_ONSET_ROUND, convergenceBonus, outspeedingShipIndices } from '../game/combatEngine';
 import type { CombatState, FleetOrderId, TargetedOrderId } from '../game/combatEngine';
 import type { FrameId } from '../game/frames';
 import type { EnemyDef } from '../game/types';
@@ -122,6 +122,19 @@ export function CombatScreen({
     combat.enemyShips.some((s) => s.index === combat.priorityTargetIndex && s.stats.hp - s.damage > 0)
       ? combat.priorityTargetIndex
       : null;
+
+  // Iteration 62: a HUD countdown starting 2 rounds before fire-control
+  // convergence kicks in (combat.round is "next round to resolve," so this
+  // reads directly off it, no separate tracking needed), then a plain
+  // active-state line once it has. Warning window first (rounds onset-2 and
+  // onset-1) so it can never simultaneously claim "in N rounds" and "active."
+  const convergenceRoundsAway = CONVERGENCE_ONSET_ROUND - combat.round;
+  const convergenceLine =
+    convergenceRoundsAway === 2 || convergenceRoundsAway === 1
+      ? `Fire-control convergence in ${convergenceRoundsAway} round${convergenceRoundsAway === 1 ? '' : 's'}.`
+      : combat.round >= CONVERGENCE_ONSET_ROUND
+        ? `Convergence +${convergenceBonus(combat.round)} computer (all ships).`
+        : null;
 
   // Iteration 17: which ships qualify for a bonus activation RIGHT NOW —
   // recomputed on every render from live state, so the badge reacts the
@@ -275,6 +288,7 @@ export function CombatScreen({
       {!finished && effectivePriority != null && (
         <p className="hint combat-priority-hint">All guns locked on the marked ship — click it again to release.</p>
       )}
+      {!finished && convergenceLine && <p className="hint combat-convergence-hint">{convergenceLine}</p>}
 
       {/* Round controls sit above the log — the most critical tap target
           shouldn't require scrolling past a growing play-by-play to reach. */}

@@ -4,7 +4,7 @@
 // up here on the next build with no manual upkeep. Prose is kept to rules the
 // data can't express (the hit formula, phase order); anything that could
 // drift is computed, not written.
-import { OUTSPEED_GAP } from '../game/combatEngine';
+import { CONVERGENCE_ONSET_ROUND, convergenceBonus, OUTSPEED_GAP } from '../game/combatEngine';
 import { COMMANDERS } from '../game/commanders';
 import { COUNTER_PROTOCOLS } from '../game/counterProtocols';
 import type { CounterProtocolDef } from '../game/counterProtocols';
@@ -277,6 +277,13 @@ export function Wiki() {
               <strong>Hit rule:</strong> a die hits when <code>roll + computer − target's piloting ≥ 6</code>. A
               natural 6 always hits; a natural 1 always misses. Each point of computer or piloting is worth exactly
               one die face.
+            </li>
+            <li>
+              <strong>Fire-control convergence:</strong> from round {CONVERGENCE_ONSET_ROUND} on, every ship on both
+              sides gains a cumulative +1 computer each round (round {CONVERGENCE_ONSET_ROUND} is +{convergenceBonus(CONVERGENCE_ONSET_ROUND)},
+              round {CONVERGENCE_ONSET_ROUND + 1} is +{convergenceBonus(CONVERGENCE_ONSET_ROUND + 1)}, and so on,
+              uncapped) — a fight that would otherwise stall on bare natural-6 hits converges on a result instead of
+              running forever.
             </li>
             <li>
               <strong>Phase order:</strong> every fight opens with one missile phase (all missiles fire once), then

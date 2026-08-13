@@ -146,10 +146,19 @@ export const MERCENARY_FIT: PartId[] = ['ion'];
 const ADMIRAL_FLEET_CAP = 5;
 const ARMADA_MANDATE_BONUS = 2;
 const LONE_FLAGSHIP_CAP = 1;
-export function fleetCap(commanderId: CommanderId | undefined, protocols?: ProtocolId[]): number {
+// Iteration 56.1: `bonusBerths` is RunState.bonusFleetBerths (events.ts's
+// naval-yard purchase or derelict-flotilla's win-conditional unlock),
+// threaded through by every call site — defaults to 0 so every pre-56
+// caller (most of reducer.test.ts) keeps compiling unchanged. Added AFTER
+// the Lone flagship early return, never before it: that protocol's whole
+// premise is "exactly one ship", so a berth bought earlier in the run must
+// not silently undo it. It composes with (not overrides) the Admiral base
+// and the Armada mandate bonus, same as those two already compose with
+// each other.
+export function fleetCap(commanderId: CommanderId | undefined, protocols?: ProtocolId[], bonusBerths = 0): number {
   if (hasProtocol(protocols, 'lone-flagship')) return LONE_FLAGSHIP_CAP;
   const base = commanderId === 'admiral' ? ADMIRAL_FLEET_CAP : MAX_FLEET_SIZE;
-  return base + (hasProtocol(protocols, 'armada-mandate') ? ARMADA_MANDATE_BONUS : 0);
+  return base + (hasProtocol(protocols, 'armada-mandate') ? ARMADA_MANDATE_BONUS : 0) + bonusBerths;
 }
 
 // Iteration 21: purchasable-frame pricing for the two ship-doctrine
@@ -529,7 +538,7 @@ export function handleShopAction(state: RunState, action: ShopAction): RunState 
       // 2026-08-08: mercenary escorts don't count toward the fleet cap once
       // hired (same as at hire time, see BUY_MERCENARY below) — a temporary
       // rental shouldn't block a real hull purchase.
-      if (commissionedFleetSize(state.fleet) >= fleetCap(state.commanderId, state.protocols)) return state;
+      if (commissionedFleetSize(state.fleet) >= fleetCap(state.commanderId, state.protocols, state.bonusFleetBerths ?? 0)) return state;
       // 2026-08-06: only 1 of each frame type per shop visit — once bought,
       // it's gone from this visit's offers (below), so a second attempt at
       // the same frameId is refused here rather than silently re-selling

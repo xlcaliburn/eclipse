@@ -1,7 +1,7 @@
 # Iteration 47 — The cleanup pass: dead code, shared components, deduplication (specced 2026-08-08)
 
-> **Status: 47.1–47.6 implemented and verified (2026-08-08); 47.7 not
-> started.** `tsc -b --force`, `vitest run` (724/724 — unchanged since
+> **Status: 47.1–47.6 implemented and verified (2026-08-08); 47.7
+> dropped (2026-08-12) — see status notes.** `tsc -b --force`, `vitest run` (724/724 — unchanged since
 > 47.5q/r; 47.5p and 47.6 are both pure boilerplate/mechanical moves with
 > no new test surface), `vite build`, and `npm run balance` all
 > clean/unchanged after every milestone — every FAIL/WARN/KNOWN-GAP line
@@ -564,12 +564,16 @@ un-replicated, and `ledger.ts:33` explicitly defers to the latter.
   correctness or duplication payoff — real risk of a wide, mechanical
   diff for a small benefit. Left for a future pass; not blocking
   anything else in this iteration.
-- **47.7 (scripts consolidation)**: not started. A substantial,
-  self-contained structural pass in its own right (balance.ts/ledger.ts/
-  enemyValue.ts duplication, budget.ts/policy.ts archetype drift),
-  better done with its own dedicated verification cycle than compressed
-  onto the end of this one. The spec above (47.7.1-47.7.5) is unchanged
-  and ready to resume from.
+- **47.7 (scripts consolidation)**: dropped, 2026-08-12 — closed as a
+  loose end rather than carried forward. 47.7.3's three enemyValue.ts
+  staleness bugs (stale `winReward` formula, wrong `LIVE_ESCALATIONS`
+  count, non-`laneColumns`-driven ranges) were separately fixed during
+  later balance work and are confirmed live in the file today (its own
+  code comments still cite "47.7.3"). The rest — 47.7.1/.2/.4/.5's
+  balance.ts/ledger.ts/enemyValue.ts dedup and budget.ts/policy.ts
+  archetype-drift cleanup — is internal tooling debt with no
+  player-facing effect and is not being pursued. The spec above remains
+  accurate if anyone picks it up later; it just isn't planned work.
 
 ### Verification history
 

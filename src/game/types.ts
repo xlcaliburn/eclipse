@@ -374,8 +374,11 @@ export interface AmbushBonus {
   // partId above. Nothing is applied on a loss (bonus forfeited, same
   // existing rule — 51.3 removed the other non-win outcome, withdraw).
   // 'debt-cleared' clears RunState.loanOutstanding; 'colony-defended' sets
-  // RunState.colonyStage to 2.
-  chainEffect?: 'debt-cleared' | 'colony-defended';
+  // RunState.colonyStage to 2. Iteration 56: 'berth-unlocked' sets
+  // RunState.bonusFleetBerths to 1 (the derelict-flotilla event's ambush);
+  // 'counter-protocol-jammed' clears RunState.counterProtocol outright (the
+  // counter-relay-breach event's ambush).
+  chainEffect?: 'debt-cleared' | 'colony-defended' | 'berth-unlocked' | 'counter-protocol-jammed';
 }
 
 export interface CurrentEventState {
@@ -542,4 +545,15 @@ export interface RunState {
   // applyCounterProtocol and its reducer.ts call sites.
   protocolCounterOffers?: CounterProtocolId[];
   counterProtocol?: CounterProtocolId;
+  // Iteration 56.1: a one-time bonus fleet berth, folded into fleetCap
+  // (reducer/shop.ts) on top of the commander base and Armada mandate.
+  // Optional-additive, safe-absent — same precedent as loanOutstanding/
+  // colonyStage above, so no SAVE_VERSION bump. Absent/0 means none; the
+  // events.ts BONUS_BERTH_CAP (currently 1) is the hard per-run ceiling
+  // both berth events (naval-yard's purchase, derelict-flotilla's
+  // win-conditional unlock) check via the 'noBonusBerth' EventRequirement
+  // before granting a second. Set to 1 by naval-yard's "Buy the berth"
+  // choice directly, or by a WON fight against derelict-flotilla's ambush
+  // (AmbushBonus.chainEffect: 'berth-unlocked').
+  bonusFleetBerths?: number;
 }

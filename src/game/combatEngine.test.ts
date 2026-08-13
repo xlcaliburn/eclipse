@@ -4,6 +4,8 @@ import {
   canIssueOrder,
   canUseActive,
   combatOutcome,
+  CONVERGENCE_ONSET_ROUND,
+  convergenceBonus,
   hasMissilePhase,
   incomingFirePreview,
   initCombat,
@@ -2186,5 +2188,192 @@ describe('Fleet orders (iteration 48)', () => {
     // of the order armed (attack-run only changes whether a given raw value
     // resolves as a hit, never the sequence of raws itself).
     expect(orderedRaws).toEqual(controlRaws);
+  });
+});
+
+describe('convergenceBonus (iteration 62)', () => {
+  it('is 0 through round 7, then +1 at onset, cumulative +1/round after', () => {
+    for (let r = 0; r < CONVERGENCE_ONSET_ROUND; r++) {
+      expect(convergenceBonus(r)).toBe(0);
+    }
+    expect(convergenceBonus(CONVERGENCE_ONSET_ROUND)).toBe(1);
+    expect(convergenceBonus(CONVERGENCE_ONSET_ROUND + 1)).toBe(2);
+    expect(convergenceBonus(CONVERGENCE_ONSET_ROUND + 5)).toBe(6);
+  });
+});
+
+describe('fire-control convergence (iteration 62)', () => {
+  // 2026-08-12: state.round is "next round to resolve," and advanceRound is
+  // a pure function of state — so overriding `round` on a fresh (round-0,
+  // full-HP) initCombat state is a legitimate way to jump straight to a
+  // post-onset round without needing the fight to naturally survive that
+  // long first. EnemyPanel.tsx's own cannon-volley preview already does the
+  // same trick (`{ ...previewState, round: 1 }`).
+  it('folds into attackerComputer for BOTH sides, reaching the logged per-roll computer value at onset', () => {
+    const fleet = [{ stats: blankStats({ hp: 50, computer: 2, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 50, computer: 1, cannons: [{ diceCount: 1, damage: 1 }] });
+    const preOnset = initCombat(fleet, foe, 1);
+    const onset = advanceRound({ ...preOnset, round: CONVERGENCE_ONSET_ROUND });
+    const rolls = onset.log.filter((e) => e.kind === 'roll');
+    expect(rolls.length).toBeGreaterThan(0);
+    const playerRoll = rolls.find((e) => e.kind === 'roll' && e.side === 'player');
+    const enemyRoll = rolls.find((e) => e.kind === 'roll' && e.side === 'enemy');
+    expect(playerRoll).toBeDefined();
+    expect(enemyRoll).toBeDefined();
+    if (playerRoll?.kind === 'roll') expect(playerRoll.computer).toBe(3); // 2 base + 1 convergence
+    if (enemyRoll?.kind === 'roll') expect(enemyRoll.computer).toBe(2); // 1 base + 1 convergence
+  });
+
+  it('logs an onset announcement at the exact onset round, then a short tick line on later rounds, and nothing before onset', () => {
+    const fleet = [{ stats: blankStats({ hp: 50, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 50, cannons: [{ diceCount: 1, damage: 1 }] });
+    const base = initCombat(fleet, foe, 1);
+    const isConvergenceLine = (e: (typeof base.log)[number]) =>
+      e.kind === 'part-effect' && (e.text.includes('Fire-control convergence') || e.text.startsWith('Convergence +'));
+
+    const preOnset = advanceRound({ ...base, round: CONVERGENCE_ONSET_ROUND - 1 });
+    expect(preOnset.log.some(isConvergenceLine)).toBe(false);
+
+    const onset = advanceRound({ ...base, round: CONVERGENCE_ONSET_ROUND });
+    const announcements = onset.log.filter(
+      (e) => e.kind === 'part-effect' && e.text.startsWith('Fire-control convergence —'),
+    );
+    expect(announcements).toHaveLength(1);
+    expect(onset.log.some((e) => e.kind === 'part-effect' && e.text.startsWith('Convergence +'))).toBe(false);
+
+    const laterTick = advanceRound({ ...base, round: CONVERGENCE_ONSET_ROUND + 2 });
+    expect(laterTick.log.some((e) => e.kind === 'part-effect' && e.text === 'Convergence +3.')).toBe(true);
+    expect(laterTick.log.some((e) => e.kind === 'part-effect' && e.text.startsWith('Fire-control convergence —'))).toBe(
+      false,
+    );
+  });
+
+  it('round 0 (the missile phase) always has zero convergence bonus — no special-casing needed', () => {
+    expect(convergenceBonus(0)).toBe(0);
+    const fleet = [{ stats: blankStats({ hp: 10, computer: 1, missiles: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 10, computer: 1, missiles: [{ diceCount: 1, damage: 1 }] });
+    const state = advanceRound(initCombat(fleet, foe, 1));
+    const rolls = state.log.filter((e) => e.kind === 'roll');
+    expect(rolls.length).toBeGreaterThan(0);
+    for (const r of rolls) {
+      if (r.kind === 'roll') expect(r.computer).toBe(1); // base only, no convergence
+    }
+  });
+
+  // The regression pin: rounds 0-7 must be byte-identical to pre-62
+  // behavior for a fixed seed. Every roll's logged `computer` equals the
+  // ship's own base computer with zero added — exactly what
+  // convergenceBonus(round) === 0 for every round < 8 guarantees. High HP on
+  // both sides so the fight can't end early and cut this pin short.
+  it('rounds 0-7 get zero convergence bonus for a fixed seed — pins pre-onset behavior against regression', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 999, computer: 2, shield: 1, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { hp: 999, computer: 1, shield: 2, cannons: [{ diceCount: 1, damage: 1 }] });
+    let state = initCombat(fleet, foe, 1);
+    for (let i = 0; i < CONVERGENCE_ONSET_ROUND; i++) {
+      state = advanceRound(state);
+    }
+    expect(state.round).toBe(CONVERGENCE_ONSET_ROUND); // resolved rounds 0-7, next up is 8
+    const rolls = state.log.filter((e) => e.kind === 'roll');
+    expect(rolls.length).toBeGreaterThan(0);
+    for (const r of rolls) {
+      if (r.kind === 'roll') expect(r.computer).toBe(r.side === 'player' ? 2 : 1);
+    }
+    expect(
+      state.log.some(
+        (e) => e.kind === 'part-effect' && (e.text.includes('Fire-control convergence') || e.text.startsWith('Convergence +')),
+      ),
+    ).toBe(false);
+  });
+
+  it('a constructed stall (both sides 0 computer, 3+ piloting, low-damage weapons, real HP) resolves well before the old MAX_CANNON_ROUNDS stalemate, across a seed sweep', () => {
+    const stallFleet = () => [
+      { stats: blankStats({ hp: 5, computer: 0, shield: 3, cannons: [{ diceCount: 3, damage: 1 }] }), initialDamage: 0 },
+      { stats: blankStats({ hp: 5, computer: 0, shield: 3, cannons: [{ diceCount: 3, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({ count: 2 }, { computer: 0, shield: 3, hp: 5, cannons: [{ diceCount: 3, damage: 1 }] });
+    for (let seed = 1; seed <= 60; seed++) {
+      const state = runToEnd(initCombat(stallFleet(), foe, seed));
+      expect(state.winner).toBeDefined();
+      expect(state.log.some((e) => e.kind === 'stalemate')).toBe(false); // resolved by the ramp, not the 30-round adjudication
+      expect(state.round).toBeLessThan(16);
+    }
+  });
+
+  it('incomingFirePreview stays honest post-onset: target selection still matches the real roll, and dice/damage stay hit-chance-agnostic', () => {
+    const fleet = [
+      { stats: blankStats({ hp: 8, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+      { stats: blankStats({ hp: 3, cannons: [{ diceCount: 1, damage: 1 }] }), initialDamage: 0 },
+    ];
+    const foe = enemy({}, { initiative: 3, hp: 40, cannons: [{ diceCount: 2, damage: 1 }], targetsLowestHp: true });
+    const state = { ...initCombat(fleet, foe, 1), round: CONVERGENCE_ONSET_ROUND };
+    const preview = incomingFirePreview(state);
+    expect(preview.entries).toHaveLength(1);
+    expect(preview.entries[0].targetIndex).toBe(1); // the 3-HP ship, greedy lowest-HP
+    expect(preview.entries[0].diceCount).toBe(2);
+    expect(preview.entries[0].maxDamage).toBe(2); // unchanged by convergence — never was computer-derived
+
+    const played = advanceRound(state);
+    const actualRoll = played.log.find((e) => e.kind === 'roll' && e.side === 'enemy' && e.shooterIndex === 0);
+    expect(actualRoll).toBeDefined();
+    if (actualRoll?.kind === 'roll') {
+      expect(actualRoll.targetIndex).toBe(1); // the preview's promise held post-onset too
+      // ...against a roll that really did carry the ramp, not a 0-bonus one —
+      // proves the parity holds even once convergence is live, not just
+      // trivially before it ever applies.
+      expect(actualRoll.computer).toBe(convergenceBonus(CONVERGENCE_ONSET_ROUND));
+    }
+  });
+});
+
+describe('command point regeneration (iteration 62)', () => {
+  // Zero-weapon ships (blankStats' own default) so these fights never
+  // resolve on their own — a bare loop-N-times harness with no survival
+  // risk, isolating the CP bookkeeping from combat outcomes entirely.
+  it('regenerates +1 CP when round 4 becomes current, with none spent', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1);
+    expect(state.commandPoints).toBe(2);
+    for (let i = 0; i < 4; i++) state = advanceRound(state);
+    expect(state.round).toBe(4);
+    expect(state.commandPoints).toBe(3);
+    expect(state.log.filter((e) => e.kind === 'part-effect' && e.text === 'Command point regained.')).toHaveLength(1);
+  });
+
+  it('a spent-down pool still regenerates on schedule, and the point is spendable on round 4', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1); // 2 CP
+    state = advanceRound(state); // round 0 (missile) -> round 1
+    state = issueOrder(state, 'attack-run'); // 2 -> 1, armed for round 1
+    state = advanceRound(state); // resolves round 1 -> round 2 (no regen)
+    state = issueOrder(state, 'evasive-pattern'); // 1 -> 0
+    state = advanceRound(state); // resolves round 2 -> round 3 (no regen)
+    expect(state.commandPoints).toBe(0);
+    state = advanceRound(state); // resolves round 3 -> round 4: regen fires
+    expect(state.round).toBe(4);
+    expect(state.commandPoints).toBe(1);
+    expect(canIssueOrder(state, 'attack-run')).toBe(true); // spendable on round 4's own orders
+  });
+
+  it('Spymaster: the 3-CP head start regenerates the same way (3 -> 4 at round 4)', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1, 'weakest', undefined, { commandPoints: 3 });
+    expect(state.commandPoints).toBe(3);
+    for (let i = 0; i < 4; i++) state = advanceRound(state);
+    expect(state.round).toBe(4);
+    expect(state.commandPoints).toBe(4);
+  });
+
+  it('regeneration is uncapped — keeps ticking at every 4th round (8, 12, ...)', () => {
+    const fleet = [{ stats: blankStats({ hp: 5 }), initialDamage: 0 }];
+    const foe = enemy({}, { hp: 5 });
+    let state = initCombat(fleet, foe, 1);
+    for (let i = 0; i < 12; i++) state = advanceRound(state);
+    expect(state.round).toBe(12);
+    expect(state.commandPoints).toBe(2 + 3); // +1 at round 4, +1 at round 8, +1 at round 12
   });
 });
